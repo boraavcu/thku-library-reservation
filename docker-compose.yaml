@@ -1,0 +1,26 @@
+services:
+  # PostgreSQL Servisi
+  db:
+    image: postgres:16
+    container_name: library_reservation_postgres
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: library_reservation_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # Redis Servisi
+  redis:
+    image: redis:latest
+    container_name: redis_reservation_db
+
+    ports:
+      - "6379:6379"
+    restart: always
+
+volumes:
+  postgres_data:

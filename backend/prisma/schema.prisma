@@ -1,0 +1,484 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                        String                   @id @default(uuid()) @db.Uuid
+  studentNumber             String?                  @unique @map("student_number") @db.VarChar(20)
+  email                     String                   @unique @db.VarChar(255)
+  fullName                  String                   @map("full_name") @db.VarChar(255)
+  phone                     String?                  @db.VarChar(20)
+  department                String?                  @db.VarChar(100)
+  avatarUrl                 String?                  @map("avatar_url")
+  acceptedAgreementVersion  String?                  @map("accepted_agreement_version") @db.VarChar(20)
+  role                      UserRole                 @default(STUDENT)
+  isActive                  Boolean                  @default(true) @map("is_active")
+  penaltyPoints             Int                      @default(0) @map("penalty_points")
+  isBanned                  Boolean                  @default(false) @map("is_banned")
+  banUntil                  DateTime?                @map("ban_until") @db.Timestamp(6)
+  banReason                 String?                  @map("ban_reason")
+  lastLoginAt               DateTime?                @map("last_login_at") @db.Timestamp(6)
+  lastLoginIp               String?                  @map("last_login_ip") @db.Inet
+  createdAt                 DateTime                 @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt                 DateTime                 @updatedAt @map("updated_at") @db.Timestamp(6)
+  accounts                  Account[]
+  adminActions              AdminAction[]            @relation("AdminUser")
+  affectedByAdminActions    AdminAction[]            @relation("AffectedUser")
+  auditLogs                 AuditLog[]
+  notifications             Notification[]
+  penaltyHistory            PenaltyHistory[]
+  reservationParticipations ReservationParticipant[]
+  checkedInReservations     Reservation[]            @relation("CheckedInBy")
+  reservations              Reservation[]
+  sessions                  Session[]
+
+  @@index([studentNumber])
+  @@index([email])
+  @@index([role])
+  @@index([penaltyPoints])
+  @@index([isBanned])
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(uuid()) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.Uuid
+  expires      DateTime @db.Timestamp(6)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime @db.Timestamp(6)
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Room {
+  id           String        @id @default(uuid()) @db.Uuid
+  roomNumber   String        @unique @map("room_number") @db.VarChar(10)
+  name         String        @db.VarChar(100)
+  capacity     Int           @default(7)
+  isActive     Boolean       @default(true) @map("is_active")
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamp(6)
+  reservations Reservation[]
+
+  @@map("rooms")
+}
+
+model Reservation {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  roomId             String                   @map("room_id") @db.Uuid
+  userId             String                   @map("user_id") @db.Uuid
+  reservationDate    DateTime                 @map("reservation_date") @db.Date
+  startTime          DateTime                 @map("start_time") @db.Time(6)
+  endTime            DateTime                 @map("end_time") @db.Time(6)
+  purpose            String?
+  status             ReservationStatus        @default(PENDING)
+  cancelledAt        DateTime?                @map("cancelled_at") @db.Timestamp(6)
+  cancellationReason String?                  @map("cancellation_reason")
+  checkedInAt        DateTime?                @map("checked_in_at") @db.Timestamp(6)
+  checkedInById      String?                  @map("checked_in_by") @db.Uuid
+  noShow             Boolean                  @default(false) @map("no_show")
+  penaltyApplied     Boolean                  @default(false) @map("penalty_applied")
+  createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt          DateTime                 @updatedAt @map("updated_at") @db.Timestamp(6)
+  penaltyHistory     PenaltyHistory[]
+  participants       ReservationParticipant[]
+  checkedInBy        User?                    @relation("CheckedInBy", fields: [checkedInById], references: [id])
+  room               Room                     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, reservationDate, startTime], name: "unique_user_time")
+  @@index([roomId, reservationDate])
+  @@index([userId])
+  @@index([status])
+  @@index([reservationDate, startTime])
+  @@map("reservations")
+}
+
+model ReservationParticipant {
+  id            String            @id @default(uuid()) @db.Uuid
+  reservationId String            @map("reservation_id") @db.Uuid
+  userId        String            @map("user_id") @db.Uuid
+  status        ParticipantStatus @default(PENDING)
+  joinedAt      DateTime?         @map("joined_at") @db.Timestamp(6)
+  reservation   Reservation       @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id])
+
+  @@unique([reservationId, userId])
+  @@map("reservation_participants")
+}
+
+model PenaltyHistory {
+  id            String       @id @default(uuid()) @db.Uuid
+  userId        String       @map("user_id") @db.Uuid
+  reservationId String?      @map("reservation_id") @db.Uuid
+  penaltyType   PenaltyType  @map("penalty_type")
+  penaltyPoints Int          @map("penalty_points")
+  description   String?
+  appliedAt     DateTime     @default(now()) @map("applied_at") @db.Timestamp(6)
+  expiresAt     DateTime?    @map("expires_at") @db.Timestamp(6)
+  isActive      Boolean      @default(true) @map("is_active")
+  reservation   Reservation? @relation(fields: [reservationId], references: [id])
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isActive])
+  @@index([appliedAt])
+  @@map("penalty_history")
+}
+
+model SystemSetting {
+  id           String   @id @default(uuid()) @db.Uuid
+  settingKey   String   @unique @map("setting_key") @db.VarChar(100)
+  settingValue Json     @map("setting_value")
+  description  String?
+  category     String?  @db.VarChar(50)
+  isPublic     Boolean  @default(false) @map("is_public")
+  updatedBy    String?  @map("updated_by") @db.Uuid
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([category])
+  @@index([isPublic])
+  @@map("system_settings")
+}
+
+model ReservationRule {
+  id        String   @id @default(uuid()) @db.Uuid
+  ruleName  String   @unique @map("rule_name") @db.VarChar(100)
+  ruleType  String   @map("rule_type") @db.VarChar(50)
+  ruleValue Json     @map("rule_value")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("reservation_rules")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  action     String   @db.VarChar(100)
+  entityType String   @map("entity_type") @db.VarChar(50)
+  entityId   String?  @map("entity_id") @db.Uuid
+  oldData    Json?    @map("old_data")
+  newData    Json?    @map("new_data")
+  ipAddress  String?  @map("ip_address") @db.Inet
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id                String           @id @default(uuid()) @db.Uuid
+  userId            String           @map("user_id") @db.Uuid
+  title             String           @db.VarChar(255)
+  message           String
+  type              NotificationType
+  relatedEntityType String?          @map("related_entity_type") @db.VarChar(50)
+  relatedEntityId   String?          @map("related_entity_id") @db.Uuid
+  isRead            Boolean          @default(false) @map("is_read")
+  sentAt            DateTime         @default(now()) @map("sent_at") @db.Timestamp(6)
+  readAt            DateTime?        @map("read_at") @db.Timestamp(6)
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([sentAt])
+  @@map("notifications")
+}
+
+model AdminAction {
+  id               String          @id @default(uuid()) @db.Uuid
+  adminId          String          @map("admin_id") @db.Uuid
+  actionType       AdminActionType @map("action_type")
+  targetEntityType String          @map("target_entity_type") @db.VarChar(50)
+  targetEntityId   String?         @map("target_entity_id") @db.Uuid
+  affectedUserId   String?         @map("affected_user_id") @db.Uuid
+  description      String
+  reason           String?
+  oldData          Json?           @map("old_data")
+  newData          Json?           @map("new_data")
+  ipAddress        String?         @map("ip_address") @db.Inet
+  userAgent        String?         @map("user_agent")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamp(6)
+  admin            User            @relation("AdminUser", fields: [adminId], references: [id])
+  affectedUser     User?           @relation("AffectedUser", fields: [affectedUserId], references: [id])
+
+  @@index([adminId])
+  @@index([actionType])
+  @@index([targetEntityType, targetEntityId])
+  @@index([createdAt])
+  @@map("admin_actions")
+}
+
+model Agreement {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String   @db.VarChar(200)
+  content   String
+  version   String   @unique @db.VarChar(20)
+  isActive  Boolean  @default(false) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@map("agreements")
+}
+
+model DashboardStats {
+  id                     String   @id @default(uuid()) @db.Uuid
+  date                   DateTime @unique @db.Date
+  totalReservations      Int      @default(0) @map("total_reservations")
+  completedReservations  Int      @default(0) @map("completed_reservations")
+  cancelledReservations  Int      @default(0) @map("cancelled_reservations")
+  noShowReservations     Int      @default(0) @map("no_show_reservations")
+  activeUsers            Int      @default(0) @map("active_users")
+  newUsers               Int      @default(0) @map("new_users")
+  bannedUsers            Int      @default(0) @map("banned_users")
+  roomUtilizationRate    Float    @default(0) @map("room_utilization_rate")
+  averageSessionDuration Float    @default(0) @map("average_session_duration")
+  peakHours              Json?    @map("peak_hours")
+  totalPenaltiesIssued   Int      @default(0) @map("total_penalties_issued")
+  totalPenaltyPoints     Int      @default(0) @map("total_penalty_points")
+  roomStats              Json?    @map("room_stats")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([date])
+  @@map("dashboard_stats")
+}
+
+model BulkOperation {
+  id             String              @id @default(uuid()) @db.Uuid
+  adminId        String              @map("admin_id") @db.Uuid
+  operationType  String              @map("operation_type") @db.VarChar(50)
+  totalItems     Int                 @map("total_items")
+  processedItems Int                 @default(0) @map("processed_items")
+  successItems   Int                 @default(0) @map("success_items")
+  failedItems    Int                 @default(0) @map("failed_items")
+  status         BulkOperationStatus @default(PENDING)
+  parameters     Json?
+  results        Json?
+  errorLog       Json?               @map("error_log")
+  startedAt      DateTime?           @map("started_at") @db.Timestamp(6)
+  completedAt    DateTime?           @map("completed_at") @db.Timestamp(6)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamp(6)
+
+  @@index([adminId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("bulk_operations")
+}
+
+model Announcement {
+  id          String               @id @default(uuid()) @db.Uuid
+  title       Json
+  content     Json
+  priority    AnnouncementPriority @default(MEDIUM)
+  isActive    Boolean              @default(true) @map("is_active")
+  isPinned    Boolean              @default(false) @map("is_pinned")
+  targetRole  UserRole?            @map("target_role")
+  publishedAt DateTime?            @map("published_at") @db.Timestamp(6)
+  expiresAt   DateTime?            @map("expires_at") @db.Timestamp(6)
+  createdBy   String               @map("created_by") @db.Uuid
+  createdAt   DateTime             @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([isActive, isPinned])
+  @@index([publishedAt])
+  @@index([targetRole])
+  @@map("announcements")
+}
+
+model ReportTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  description String?
+  reportType  String   @map("report_type") @db.VarChar(50)
+  query       Json
+  columns     Json
+  filters     Json?
+  isActive    Boolean  @default(true) @map("is_active")
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([reportType])
+  @@index([isActive])
+  @@map("report_templates")
+}
+
+model ScheduledTask {
+  id             String     @id @default(uuid()) @db.Uuid
+  taskName       String     @map("task_name") @db.VarChar(100)
+  taskType       String     @map("task_type") @db.VarChar(50)
+  cronExpression String?    @map("cron_expression") @db.VarChar(50)
+  scheduledFor   DateTime?  @map("scheduled_for") @db.Timestamp(6)
+  status         TaskStatus @default(SCHEDULED)
+  parameters     Json?
+  result         Json?
+  errorMessage   String?    @map("error_message")
+  executionTime  Int?       @map("execution_time")
+  lastRunAt      DateTime?  @map("last_run_at") @db.Timestamp(6)
+  nextRunAt      DateTime?  @map("next_run_at") @db.Timestamp(6)
+  isActive       Boolean    @default(true) @map("is_active")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([status])
+  @@index([nextRunAt])
+  @@index([taskType])
+  @@map("scheduled_tasks")
+}
+
+model EmailQueue {
+  id           String    @id @default(uuid()) @db.Uuid
+  to           String    @db.VarChar(255)
+  subject      String    @db.VarChar(500)
+  body         String
+  htmlBody     String?   @map("html_body")
+  priority     Int       @default(5)
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3) @map("max_attempts")
+  status       String    @db.VarChar(20)
+  sentAt       DateTime? @map("sent_at") @db.Timestamp(6)
+  failedAt     DateTime? @map("failed_at") @db.Timestamp(6)
+  errorMessage String?   @map("error_message")
+  metadata     Json?
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@index([status])
+  @@index([priority])
+  @@index([createdAt])
+  @@map("email_queue")
+}
+
+enum UserRole {
+  STUDENT
+  ADMIN
+  LIBRARIAN
+  SUPER_ADMIN
+
+  @@map("user_role")
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+
+  @@map("reservation_status")
+}
+
+enum ParticipantStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+
+  @@map("participant_status")
+}
+
+enum PenaltyType {
+  NO_SHOW
+  LATE_CANCELLATION
+  REPEATED_OFFENSE
+
+  @@map("penalty_type")
+}
+
+enum NotificationType {
+  RESERVATION_REMINDER
+  CANCELLATION
+  PENALTY
+  SYSTEM
+  BAN_WARNING
+
+  @@map("notification_type")
+}
+
+enum AdminActionType {
+  USER_BANNED
+  USER_UNBANNED
+  PENALTY_ADDED
+  PENALTY_REMOVED
+  RESERVATION_CANCELLED
+  RESERVATION_FORCE_CHECKIN
+  ROOM_CREATED
+  ROOM_UPDATED
+  ROOM_DEACTIVATED
+  SETTINGS_UPDATED
+  USER_ROLE_CHANGED
+  BULK_OPERATION
+
+  @@map("admin_action_type")
+}
+
+enum BulkOperationStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  PARTIALLY_COMPLETED
+
+  @@map("bulk_operation_status")
+}
+
+enum AnnouncementPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+
+  @@map("announcement_priority")
+}
+
+enum TaskStatus {
+  SCHEDULED
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+
+  @@map("task_status")
+}
