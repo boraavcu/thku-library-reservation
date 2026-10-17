@@ -10,7 +10,7 @@ function extractStudentNumber(email) {
   return match ? match[1] : null;
 }
 
-// Sunum ve Test İçin Hazır Demo Profilleri
+// Test İçin Demo Profilleri (7 Öğrenci + 3 Yetkili Rol)
 const DEMO_USERS = {
   "s250444902@stu.thk.edu.tr": {
     email: "s250444902@stu.thk.edu.tr",
@@ -26,6 +26,41 @@ const DEMO_USERS = {
     department: "Havacılık ve Uzay Mühendisliği",
     role: "STUDENT",
   },
+  "s220401001@stu.thk.edu.tr": {
+    email: "s220401001@stu.thk.edu.tr",
+    fullName: "Mehmet Demir (Öğrenci 3)",
+    studentNumber: "220401001",
+    department: "Yazılım Mühendisliği",
+    role: "STUDENT",
+  },
+  "s220401002@stu.thk.edu.tr": {
+    email: "s220401002@stu.thk.edu.tr",
+    fullName: "Zeynep Kaya (Öğrenci 4)",
+    studentNumber: "220401002",
+    department: "Elektrik-Elektronik Mühendisliği",
+    role: "STUDENT",
+  },
+  "s220401003@stu.thk.edu.tr": {
+    email: "s220401003@stu.thk.edu.tr",
+    fullName: "Caner Aydın (Öğrenci 5)",
+    studentNumber: "220401003",
+    department: "Makine Mühendisliği",
+    role: "STUDENT",
+  },
+  "s220401004@stu.thk.edu.tr": {
+    email: "s220401004@stu.thk.edu.tr",
+    fullName: "Elif Şahin (Öğrenci 6)",
+    studentNumber: "220401004",
+    department: "Endüstri Mühendisliği",
+    role: "STUDENT",
+  },
+  "s220401005@stu.thk.edu.tr": {
+    email: "s220401005@stu.thk.edu.tr",
+    fullName: "Burak Çelik (Öğrenci 7)",
+    studentNumber: "220401005",
+    department: "Pilotaj",
+    role: "STUDENT",
+  },
   "kutuphane@thk.edu.tr": {
     email: "kutuphane@thk.edu.tr",
     fullName: "Kütüphane Görevlisi",
@@ -33,9 +68,16 @@ const DEMO_USERS = {
     department: "Kütüphane ve Dokümantasyon",
     role: "LIBRARIAN",
   },
+  "mudur@thk.edu.tr": {
+    email: "mudur@thk.edu.tr",
+    fullName: "Kütüphane Müdürü (İdare)",
+    studentNumber: null,
+    department: "Kütüphane ve Dokümantasyon Daire Bşk.",
+    role: "ADMIN",
+  },
   "admin@thk.edu.tr": {
     email: "admin@thk.edu.tr",
-    fullName: "THKÜ Sistem Yöneticisi",
+    fullName: "THKÜ Sistem Yöneticisi (BİM)",
     studentNumber: null,
     department: "Bilgi İşlem Müdürlüğü",
     role: "SUPER_ADMIN",

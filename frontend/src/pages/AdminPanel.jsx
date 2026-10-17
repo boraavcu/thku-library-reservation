@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Container, Typography, Card, Button, Chip, Tabs, Tab,
   Switch, TextField, Select, MenuItem, CircularProgress, Alert,
-  Snackbar, Divider, IconButton, Tooltip
+  Snackbar, Divider, IconButton, Tooltip, Pagination
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
@@ -31,6 +31,73 @@ import MoreTimeIcon from '@mui/icons-material/MoreTime';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 
 const STAFF_ROLES = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'];
+const LOGS_PER_PAGE = 10;
+
+// Ham JSON loglarını herkesin anlayacağı sade Türkçe cümlelere çeviren yardımcı fonksiyon
+function formatReadableAuditLog(uLog) {
+  const d = uLog.newData || {};
+  const old = uLog.oldData || {};
+
+  switch (uLog.action) {
+    case 'RESERVATION_CREATED': {
+      const invited = Array.isArray(d.invitedParticipants) && d.invitedParticipants.length > 0
+        ? ` • Davet Edilenler: ${d.invitedParticipants.join(', ')}`
+        : '';
+      return {
+        badgeLabel: 'REZERVASYON OLUŞTURULDU',
+        badgeColor: 'primary',
+        summary: `${d.room || 'Çalışma Odası'} için ${d.date || ''} (${d.time || ''}) saatlerine yeni rezervasyon talebi açtı${invited}.`,
+      };
+    }
+    case 'INVITATION_ACCEPTED':
+      return {
+        badgeLabel: 'DAVET KABUL EDİLDİ',
+        badgeColor: 'success',
+        summary: `${d.room || 'Oda'} çalışma grubu davetini onayladı ve rezervasyona katıldı.`,
+      };
+    case 'INVITATION_REJECTED':
+      return {
+        badgeLabel: 'DAVET REDDEDİLDİ',
+        badgeColor: 'warning',
+        summary: `${d.room || 'Oda'} çalışma grubu davetini reddetti.`,
+      };
+    case 'RESERVATION_EARLY_CHECKOUT':
+      return {
+        badgeLabel: 'ODA ERKEN BOŞALTILDI',
+        badgeColor: 'info',
+        summary: `${d.room || 'Oda'} kullanımını erken sonlandırdı ve odayı diğer öğrencilerin kullanımına açtı.`,
+      };
+    case 'RESERVATION_CANCELLED':
+      return {
+        badgeLabel: 'REZERVASYON İPTALİ',
+        badgeColor: 'error',
+        summary: `${old.room || 'Oda'} rezervasyonunu iptal etti. (${d.reason || 'Kullanıcı iptali'})`,
+      };
+    default:
+      return {
+        badgeLabel: uLog.action,
+        badgeColor: 'default',
+        summary: 'Sistem işlemi gerçekleştirildi.',
+      };
+  }
+}
+
+function formatAdminActionBadge(actionType) {
+  const map = {
+    USER_BANNED: { label: 'KULLANICI BANLANDI', color: 'error' },
+    USER_UNBANNED: { label: 'YASAK KALDIRILDI', color: 'success' },
+    PENALTY_ADDED: { label: 'CEZA PUANI EKLENDİ', color: 'warning' },
+    PENALTY_REMOVED: { label: 'CEZA SIFIRLANDI', color: 'info' },
+    RESERVATION_CANCELLED: { label: 'REZERVASYON KAPATILDI', color: 'error' },
+    RESERVATION_FORCE_CHECKIN: { label: 'MANUEL CHECK-IN', color: 'success' },
+    ROOM_CREATED: { label: 'YENİ ODA EKLENDİ', color: 'primary' },
+    ROOM_UPDATED: { label: 'ODA GÜNCELLENDİ', color: 'primary' },
+    ROOM_DEACTIVATED: { label: 'ODA BAKIMA ALINDI', color: 'warning' },
+    SETTINGS_UPDATED: { label: 'KURAL / SÜRE GÜNCELLENDİ', color: 'info' },
+    USER_ROLE_CHANGED: { label: 'ROL DEĞİŞTİRİLDİ', color: 'primary' },
+  };
+  return map[actionType] || { label: actionType, color: 'primary' };
+}
 
 export default function AdminPanel() {
   const navigate = useNavigate();
@@ -55,6 +122,10 @@ export default function AdminPanel() {
     userAuditLogs: [],
   });
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
+
+  // 10'arlı Log Sayfalama (Pagination) State'leri
+  const [userLogPage, setUserLogPage] = useState(1);
+  const [adminLogPage, setAdminLogPage] = useState(1);
 
   const [newRoom, setNewRoom] = useState({ roomNumber: '', name: '', capacity: 7 });
   const [newAnn, setNewAnn] = useState({ titleTr: '', titleEn: '', contentTr: '', contentEn: '', priority: 'HIGH', isPinned: true });
@@ -108,6 +179,19 @@ export default function AdminPanel() {
     const d = new Date(dateStr);
     return d.toLocaleDateString(isEn ? 'en-US' : 'tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
   };
+
+  // Sayfalanmış (10'arlı) Log Listeleri
+  const totalUserLogs = data.userAuditLogs?.length || 0;
+  const pagedUserLogs = (data.userAuditLogs || []).slice(
+    (userLogPage - 1) * LOGS_PER_PAGE,
+    userLogPage * LOGS_PER_PAGE
+  );
+
+  const totalAdminLogs = data.auditLogs?.length || 0;
+  const pagedAdminLogs = (data.auditLogs || []).slice(
+    (adminLogPage - 1) * LOGS_PER_PAGE,
+    adminLogPage * LOGS_PER_PAGE
+  );
 
   if (status === 'loading' || loading) {
     return (
@@ -194,7 +278,7 @@ export default function AdminPanel() {
           </Tabs>
 
           <Box sx={{ p: { xs: 2, md: 3 } }}>
-            {/* ================= SEKME 0: REZERVASYON MÜDAHALE (MADDE 1, 3.1, 4, 8) ================= */}
+            {/* ================= SEKME 0: REZERVASYON MÜDAHALE ================= */}
             {tab === 0 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {data.reservations.length === 0 ? (
@@ -262,7 +346,6 @@ export default function AdminPanel() {
                                 </Button>
                               )}
 
-                              {/* MADDE 3.1: +1 Saat Süre Uzatma */}
                               <Button
                                 size="small"
                                 variant="outlined"
@@ -273,7 +356,6 @@ export default function AdminPanel() {
                                 +1 Saat Uzat
                               </Button>
 
-                              {/* MADDE 8: Odayı Erken Boşalt / Bitir */}
                               <Button
                                 size="small"
                                 variant="outlined"
@@ -284,7 +366,6 @@ export default function AdminPanel() {
                                 Erken Bitir (Boşalt)
                               </Button>
 
-                              {/* MADDE 1 & 4: Tüm Onaylı Üyelere No-Show + 3. İhlalde 30 Gün Ban */}
                               <Button
                                 size="small"
                                 variant="outlined"
@@ -616,7 +697,7 @@ export default function AdminPanel() {
               </Box>
             )}
 
-            {/* ================= SEKME 4: KURALLAR & MADDE 9 TÜM SİSTEM LOGLARI (SUPER_ADMIN) ================= */}
+            {/* ================= SEKME 4: KURALLAR & SADE TÜRKÇE SİSTEM LOGLARI (10'ARLI SAYFALAMA) ================= */}
             {tab === 4 && isAdminOrSuper && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <Box>
@@ -665,56 +746,106 @@ export default function AdminPanel() {
                   </Box>
                 </Box>
 
-                {/* MADDE 9: Sadece SUPER_ADMIN İçin Tüm Rezervasyon, Üye, İptal ve Yönetici Logları */}
+                {/* Sadece SUPER_ADMIN İçin Okunabilir Türkçe & 10'arlı Sayfalanmış Loglar */}
                 {isSuperAdmin && (
                   <>
                     <Divider />
                     <Box>
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main' }}>
-                        1. Öğrenci & Sistem Hareket Logları (Rezervasyon Açma, Davet, Erken Çıkış, İptal)
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 340, overflowY: 'auto' }}>
-                        {data.userAuditLogs?.length === 0 ? (
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>
+                          1. Öğrenci & Sistem Hareket Logları (Son {LOGS_PER_PAGE} Kayıt / Toplam: {totalUserLogs})
+                        </Typography>
+                        <Chip
+                          label="Saklama Politikası: 90 Gün Aktif DB • 1 Yıl Arşiv"
+                          size="small"
+                          variant="outlined"
+                          color="primary"
+                          sx={{ fontSize: '0.7rem', fontWeight: 600 }}
+                        />
+                      </Box>
+
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                        {pagedUserLogs.length === 0 ? (
                           <Typography variant="body2" color="text.secondary">Henüz sistem hareket kaydı yok.</Typography>
                         ) : (
-                          data.userAuditLogs?.map((uLog) => (
-                            <Card key={uLog.id} sx={{ p: 1.5, bgcolor: 'background.default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                                <Chip label={uLog.action} size="small" color="info" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
-                                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                                  {uLog.user?.fullName || 'Kullanıcı'} ({uLog.user?.email})
+                          pagedUserLogs.map((uLog) => {
+                            const formatted = formatReadableAuditLog(uLog);
+                            return (
+                              <Card key={uLog.id} sx={{ p: 2, bgcolor: 'background.default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                    <Chip
+                                      label={formatted.badgeLabel}
+                                      size="small"
+                                      color={formatted.badgeColor}
+                                      sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700 }}
+                                    />
+                                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                      {uLog.user?.fullName || 'Kullanıcı'} ({uLog.user?.email})
+                                    </Typography>
+                                  </Box>
+                                  <Typography variant="body2" color="text.secondary" sx={{ pl: 0.5 }}>
+                                    {formatted.summary}
+                                  </Typography>
+                                </Box>
+                                <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                                  {new Date(uLog.createdAt).toLocaleString('tr-TR')}
                                 </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Detay: {JSON.stringify(uLog.newData)}
-                                </Typography>
-                              </Box>
-                              <Typography variant="caption" color="text.secondary">
-                                {new Date(uLog.createdAt).toLocaleString('tr-TR')}
-                              </Typography>
-                            </Card>
-                          ))
+                              </Card>
+                            );
+                          })
                         )}
                       </Box>
+
+                      {totalUserLogs > LOGS_PER_PAGE && (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                          <Pagination
+                            count={Math.ceil(totalUserLogs / LOGS_PER_PAGE)}
+                            page={userLogPage}
+                            onChange={(_, p) => setUserLogPage(p)}
+                            color="primary"
+                            size="small"
+                          />
+                        </Box>
+                      )}
                     </Box>
 
                     <Divider />
                     <Box>
-                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: 'warning.main' }}>
-                        2. Yönetici & Görevli Müdahale Logları (AdminAction)
-                      </Typography>
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 340, overflowY: 'auto' }}>
-                        {data.auditLogs?.map((log) => (
-                          <Card key={log.id} sx={{ p: 1.5, bgcolor: 'action.hover', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <Chip label={log.actionType} size="small" color="primary" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
-                              <Typography variant="body2" sx={{ fontWeight: 600 }}>{log.description}</Typography>
-                            </Box>
-                            <Typography variant="caption" color="text.secondary">
-                              Yetkili: {log.admin?.fullName} ({log.admin?.role}) • {new Date(log.createdAt).toLocaleString('tr-TR')}
-                            </Typography>
-                          </Card>
-                        ))}
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+                        <Typography variant="h6" sx={{ fontWeight: 700, color: 'warning.main' }}>
+                          2. Yönetici & Görevli Müdahale Logları (Son {LOGS_PER_PAGE} Kayıt / Toplam: {totalAdminLogs})
+                        </Typography>
                       </Box>
+
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.25 }}>
+                        {pagedAdminLogs.map((log) => {
+                          const badge = formatAdminActionBadge(log.actionType);
+                          return (
+                            <Card key={log.id} sx={{ p: 2, bgcolor: 'action.hover', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                                <Chip label={badge.label} size="small" color={badge.color} sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700 }} />
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>{log.description}</Typography>
+                              </Box>
+                              <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+                                Yetkili: {log.admin?.fullName} ({log.admin?.role}) • {new Date(log.createdAt).toLocaleString('tr-TR')}
+                              </Typography>
+                            </Card>
+                          );
+                        })}
+                      </Box>
+
+                      {totalAdminLogs > LOGS_PER_PAGE && (
+                        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                          <Pagination
+                            count={Math.ceil(totalAdminLogs / LOGS_PER_PAGE)}
+                            page={adminLogPage}
+                            onChange={(_, p) => setAdminLogPage(p)}
+                            color="primary"
+                            size="small"
+                          />
+                        </Box>
+                      )}
                     </Box>
                   </>
                 )}
