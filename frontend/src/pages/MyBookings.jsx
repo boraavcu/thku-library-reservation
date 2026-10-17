@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Container, Typography, Card, Chip, Button, Tabs, Tab,
-  CircularProgress, Alert, Snackbar, Divider
+  CircularProgress, Alert, Snackbar
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
@@ -18,6 +18,7 @@ import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutline';
 import EventNoteIcon from '@mui/icons-material/EventNote';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 
 export default function MyBookings() {
   const navigate = useNavigate();
@@ -52,13 +53,33 @@ export default function MyBookings() {
     fetchAllData();
   }, [status, navigate, fetchAllData]);
 
+  // MADDE 10: Rezervasyon Başlamadan İptal Etme
   const handleCancel = async (id) => {
     try {
       await api.delete(`/reservations?id=${id}`);
-      setSnack({ open: true, message: isEn ? 'Reservation cancelled.' : 'Rezervasyon iptal edildi.', severity: 'info' });
+      setSnack({
+        open: true,
+        message: isEn ? 'Reservation cancelled.' : 'Rezervasyon başarıyla iptal edildi ve oda boşa çıkarıldı.',
+        severity: 'info',
+      });
       fetchAllData();
     } catch (err) {
       setSnack({ open: true, message: err.response?.data?.error || 'İptal edilemedi.', severity: 'error' });
+    }
+  };
+
+  // MADDE 8: Odayı Erken Boşaltma (Check-Out)
+  const handleEarlyCheckout = async (id) => {
+    try {
+      const res = await api.patch('/reservations', { reservationId: id, action: 'EARLY_CHECKOUT' });
+      setSnack({
+        open: true,
+        message: res.data?.message || 'Oda erken boşaltıldı ve diğer öğrencilere açıldı.',
+        severity: 'success',
+      });
+      fetchAllData();
+    } catch (err) {
+      setSnack({ open: true, message: err.response?.data?.error || 'İşlem başarısız.', severity: 'error' });
     }
   };
 
@@ -71,8 +92,12 @@ export default function MyBookings() {
         severity: action === 'ACCEPT' ? 'success' : 'info',
       });
       fetchAllData();
-    } catch {
-      setSnack({ open: true, message: 'İşlem başarısız.', severity: 'error' });
+    } catch (err) {
+      setSnack({
+        open: true,
+        message: err.response?.data?.error || 'İşlem başarısız.',
+        severity: 'error',
+      });
     }
   };
 
@@ -136,7 +161,6 @@ export default function MyBookings() {
           </Tabs>
 
           <Box sx={{ p: 3 }}>
-            {/* SEKME 0 & 2: REZERVASYON LİSTESİ */}
             {(tab === 0 || tab === 2) && (
               (tab === 0 ? activeList : pastList).length === 0 ? (
                 <Box sx={{ py: 4, textAlign: 'center' }}>
@@ -145,6 +169,7 @@ export default function MyBookings() {
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {(tab === 0 ? activeList : pastList).map((res) => {
+                    const isOrganizer = res.userId === session?.user?.id || res.user?.email === session?.user?.email;
                     const isCancelled = res.status === 'CANCELLED' || res.status === 'NO_SHOW';
                     const isConfirmed = res.status === 'CONFIRMED' || res.status === 'CHECKED_IN';
                     const statusColor = isCancelled ? 'error' : isConfirmed ? 'success' : 'warning';
@@ -153,7 +178,7 @@ export default function MyBookings() {
                       <Card key={res.id} sx={{ p: 2.5, borderLeft: `4px solid ${theme.palette[statusColor].main}` }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
                           <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
                               <Typography variant="h6" sx={{ fontSize: '1.05rem', fontWeight: 700 }}>
                                 {res.room?.roomNumber} - {res.room?.name}
                               </Typography>
@@ -161,6 +186,12 @@ export default function MyBookings() {
                                 label={res.status}
                                 size="small"
                                 sx={{ bgcolor: alpha(theme.palette[statusColor].main, 0.12), color: `${statusColor}.main`, fontWeight: 700, height: 22 }}
+                              />
+                              <Chip
+                                label={isOrganizer ? t('youCreated') : t('youJoined')}
+                                size="small"
+                                variant="outlined"
+                                sx={{ height: 22, fontSize: '0.7rem' }}
                               />
                             </Box>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.secondary', mt: 1, flexWrap: 'wrap' }}>
@@ -174,7 +205,6 @@ export default function MyBookings() {
                               </Box>
                             </Box>
 
-                            {/* Katılımcı Durum Rozetleri */}
                             {res.participants?.length > 0 && (
                               <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
                                 {res.participants.map((p, i) => (
@@ -191,16 +221,33 @@ export default function MyBookings() {
                             )}
                           </Box>
 
-                          {['PENDING', 'CONFIRMED'].includes(res.status) && (
-                            <Button
-                              variant="outlined"
-                              color="error"
-                              size="small"
-                              startIcon={<CancelOutlinedIcon />}
-                              onClick={() => handleCancel(res.id)}
-                            >
-                              {t('cancel')}
-                            </Button>
+                          {/* Organizatör Aksiyon Butonları (Madde 8 & Madde 10) */}
+                          {tab === 0 && isOrganizer && (
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                              {['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
+                                <Button
+                                  variant="contained"
+                                  color="primary"
+                                  size="small"
+                                  startIcon={<ExitToAppIcon />}
+                                  onClick={() => handleEarlyCheckout(res.id)}
+                                >
+                                  {isEn ? 'Early Check-Out (Free Room)' : 'Odayı Erken Boşalt'}
+                                </Button>
+                              )}
+
+                              {['PENDING', 'CONFIRMED'].includes(res.status) && (
+                                <Button
+                                  variant="outlined"
+                                  color="error"
+                                  size="small"
+                                  startIcon={<CancelOutlinedIcon />}
+                                  onClick={() => handleCancel(res.id)}
+                                >
+                                  {t('cancel')}
+                                </Button>
+                              )}
+                            </Box>
                           )}
                         </Box>
                       </Card>
@@ -247,7 +294,7 @@ export default function MyBookings() {
 
       <Footer />
 
-      <Snackbar open={snack.open} autoHideDuration={3000} onClose={() => setSnack(s => ({ ...s, open: false }))}>
+      <Snackbar open={snack.open} autoHideDuration={3500} onClose={() => setSnack(s => ({ ...s, open: false }))}>
         <Alert severity={snack.severity} variant="filled">{snack.message}</Alert>
       </Snackbar>
     </Box>

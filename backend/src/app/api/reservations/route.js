@@ -1,3 +1,385 @@
+import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import prisma from "@/lib/db";
+import { checkRulesAcceptance } from "@/middleware/checkRulesAcceptance";
+
+const DEFAULT_MIN = 2;
+const DEFAULT_MAX = 7;
+const DEFAULT_MAX_HOURS = 3;
+const EXCLUDED_STATUSES = ["CANCELLED", "NO_SHOW"];
+
+export async function POST(request) {
+  const rulesCheck = await checkRulesAcceptance(request);
+  if (rulesCheck) return rulesCheck;
+
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const body = await request.json();
+    const { roomId, reservationDate, startTime, endTime, purpose, participantEmails = [] } = body;
+
+    if (!roomId || !reservationDate || !startTime || !endTime) {
+      return NextResponse.json({ error: "Eksik alanlar var." }, { status: 400 });
+    }
+
+    const creator = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true, email: true, fullName: true, isBanned: true, banUntil: true, banReason: true },
+    });
+
+    if (!creator) {
+      return NextResponse.json({ error: "Kullanıcı bulunamadı." }, { status: 404 });
+    }
+
+    if (creator.isBanned) {
+      const banDateStr = creator.banUntil ? new Date(creator.banUntil).toLocaleDateString("tr-TR") : "Süresiz";
+      return NextResponse.json(
+        { error: `Hesabınız (${banDateStr} tarihine kadar) askıya alınmıştır. Sebep: ${creator.banReason || "Kural ihlali"}` },
+        { status: 403 }
+      );
+    }
+
+    const cleanedEmails = [
+      ...new Set(
+        participantEmails
+          .map((e) => e.trim().toLowerCase())
+          .filter((e) => e && e !== creator.email.toLowerCase())
+      ),
+    ];
+
+    // --- Kural Kontrolü ---
+    const rulesRows = await prisma.reservationRule.findMany({
+      where: {
+        isActive: true,
+        ruleName: { in: ["MIN_PARTICIPANTS", "MAX_PARTICIPANTS", "MAX_DURATION_HOURS"] },
+      },
+      select: { ruleName: true, ruleValue: true },
+    });
+    const rulesMap = Object.fromEntries(rulesRows.map((r) => [r.ruleName, r.ruleValue]));
+    const minP = rulesMap.MIN_PARTICIPANTS?.value ?? DEFAULT_MIN;
+    const maxP = rulesMap.MAX_PARTICIPANTS?.value ?? DEFAULT_MAX;
+    const maxDurationHours = rulesMap.MAX_DURATION_HOURS?.value ?? DEFAULT_MAX_HOURS;
+
+    const totalParticipants = cleanedEmails.length + 1;
+    if (totalParticipants < minP || totalParticipants > maxP) {
+      return NextResponse.json(
+        { error: `Toplam katılımcı sayısı ${minP} ile ${maxP} arasında olmalıdır. Şu an: ${totalParticipants}` },
+        { status: 400 }
+      );
+    }
+
+    const dateObj = new Date(reservationDate + "T00:00:00Z");
+    const startObj = new Date(`1970-01-01T${startTime}:00Z`);
+    const endObj = new Date(`1970-01-01T${endTime}:00Z`);
+
+    const durationHours = (endObj - startObj) / (1000 * 60 * 60);
+    if (durationHours <= 0 || durationHours > maxDurationHours) {
+      return NextResponse.json(
+        { error: `Rezervasyon süresi en fazla ${maxDurationHours} saat olabilir.` },
+        { status: 400 }
+      );
+    }
+
+    // --- Katılımcı E-posta ve Ban Doğrulama ---
+    let participantUsers = [];
+    if (cleanedEmails.length > 0) {
+      const foundUsers = await prisma.user.findMany({
+        where: { email: { in: cleanedEmails } },
+        select: { id: true, email: true, fullName: true, isBanned: true },
+      });
+
+      const foundSet = new Set(foundUsers.map((u) => u.email.toLowerCase()));
+      const missingEmails = cleanedEmails.filter((e) => !foundSet.has(e));
+
+      if (missingEmails.length > 0) {
+        return NextResponse.json(
+          { error: "Şu e-postalar sisteme kayıtlı değil", missingEmails },
+          { status: 400 }
+        );
+      }
+
+      const bannedParticipant = foundUsers.find((u) => u.isBanned);
+      if (bannedParticipant) {
+        return NextResponse.json(
+          { error: `Davet ettiğiniz ${bannedParticipant.email} kullanıcısının rezervasyon yasağı (ban) bulunmaktadır.` },
+          { status: 400 }
+        );
+      }
+
+      participantUsers = foundUsers;
+    }
+
+    // --- MADDE 2: Organizatör VE Katılımcılar İçin Günlük 1 Rezervasyon Limiti (Kuyruk Önleme) ---
+    const allGroupUserIds = [creator.id, ...participantUsers.map((u) => u.id)];
+
+    const existingGroupBookingToday = await prisma.reservation.findFirst({
+      where: {
+        reservationDate: dateObj,
+        status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
+        OR: [
+          { userId: { in: allGroupUserIds } },
+          {
+            participants: {
+              some: {
+                userId: { in: allGroupUserIds },
+                status: "ACCEPTED",
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        user: { select: { email: true, fullName: true } },
+        participants: {
+          where: { userId: { in: allGroupUserIds }, status: "ACCEPTED" },
+          include: { user: { select: { email: true, fullName: true } } },
+        },
+      },
+    });
+
+    if (existingGroupBookingToday) {
+      const isCreatorBusy = existingGroupBookingToday.userId === creator.id ||
+        existingGroupBookingToday.participants.some((p) => p.userId === creator.id);
+
+      if (isCreatorBusy) {
+        return NextResponse.json(
+          { error: "Aynı gün içinde (organizatör veya katılımcı olarak) yalnızca 1 adet rezervasyon hakkınız bulunmaktadır." },
+          { status: 400 }
+        );
+      }
+
+      const busyMember =
+        allGroupUserIds.includes(existingGroupBookingToday.userId)
+          ? existingGroupBookingToday.user.email
+          : existingGroupBookingToday.participants[0]?.user?.email;
+
+      return NextResponse.json(
+        { error: `Grubunuzdaki ${busyMember} öğrencisinin seçilen tarihte zaten aktif bir rezervasyonu bulunmaktadır (Günlük 1 Rezervasyon Kuralı).` },
+        { status: 400 }
+      );
+    }
+
+    // --- Oda Saat Çakışma Kontrolü ---
+    const overlapping = await prisma.reservation.findFirst({
+      where: {
+        roomId,
+        reservationDate: dateObj,
+        status: { notIn: EXCLUDED_STATUSES },
+        AND: [{ startTime: { lt: endObj } }, { endTime: { gt: startObj } }],
+      },
+      select: { id: true },
+    });
+
+    if (overlapping) {
+      return NextResponse.json(
+        { error: "Bu oda seçilen tarih ve saat aralığında zaten rezerve edilmiş." },
+        { status: 409 }
+      );
+    }
+
+    // P2002 Unique Constraint Koruması: Aynı saatte daha önce CANCELLED olan kayıt varsa temizle
+    await prisma.reservation.deleteMany({
+      where: {
+        userId: creator.id,
+        reservationDate: dateObj,
+        startTime: startObj,
+        status: { in: EXCLUDED_STATUSES },
+      },
+    });
+
+    const initialStatus = minP <= 1 ? "CONFIRMED" : "PENDING";
+
+    const reservation = await prisma.reservation.create({
+      data: {
+        roomId,
+        userId: creator.id,
+        reservationDate: dateObj,
+        startTime: startObj,
+        endTime: endObj,
+        purpose: purpose || null,
+        status: initialStatus,
+        ...(participantUsers.length > 0 && {
+          participants: {
+            create: participantUsers.map((u) => ({
+              userId: u.id,
+              status: "PENDING",
+            })),
+          },
+        }),
+      },
+      include: {
+        room: { select: { roomNumber: true, name: true } },
+        participants: {
+          include: { user: { select: { email: true, fullName: true } } },
+        },
+      },
+    });
+
+    // --- MADDE 9: Sistem Denetim Logu (AuditLog) ---
+    await prisma.auditLog.create({
+      data: {
+        userId: creator.id,
+        action: "RESERVATION_CREATED",
+        entityType: "Reservation",
+        entityId: reservation.id,
+        newData: {
+          room: `${reservation.room.roomNumber} - ${reservation.room.name}`,
+          date: reservationDate,
+          time: `${startTime} - ${endTime}`,
+          organizer: creator.email,
+          invitedParticipants: cleanedEmails,
+          status: initialStatus,
+        },
+      },
+    });
+
+    return NextResponse.json(reservation, { status: 201 });
+  } catch (error) {
+    console.error("Reservation create error:", error);
+    return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 });
+  }
+}
+
+export async function GET() {
+  const rulesCheck = await checkRulesAcceptance();
+  if (rulesCheck) return rulesCheck;
+
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true },
+    });
+
+    // Hem kullanıcının oluşturduğu hem de katılımcı olduğu rezervasyonları getir
+    const reservations = await prisma.reservation.findMany({
+      where: {
+        OR: [
+          { userId: user.id },
+          { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
+        ],
+      },
+      include: {
+        room: { select: { roomNumber: true, name: true } },
+        user: { select: { id: true, email: true, fullName: true } },
+        participants: {
+          include: { user: { select: { email: true, fullName: true } } },
+        },
+      },
+      orderBy: [{ reservationDate: "desc" }, { startTime: "desc" }],
+    });
+
+    return NextResponse.json(reservations);
+  } catch (error) {
+    console.error("Reservations fetch error:", error);
+    return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH /api/reservations -> MADDE 8: Organizatörün Odayı Erken Boşaltması (Early Check-Out)
+ */
+export async function PATCH(request) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { reservationId, action } = await request.json();
+    if (!reservationId || action !== "EARLY_CHECKOUT") {
+      return NextResponse.json({ error: "Geçersiz istek." }, { status: 400 });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: session.user.email },
+      select: { id: true, email: true, role: true },
+    });
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: { room: true },
+    });
+
+    if (!reservation) {
+      return NextResponse.json({ error: "Rezervasyon bulunamadı." }, { status: 404 });
+    }
+
+    const isStaff = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"].includes(user.role);
+    if (reservation.userId !== user.id && !isStaff) {
+      return NextResponse.json(
+        { error: "Odayı erken boşaltma işlemini yalnızca rezervasyon organizatörü veya görevli yapabilir." },
+        { status: 403 }
+      );
+    }
+
+    // Şu anki Türkiye saatine göre bitiş saatini güncelle ki kalan saatler diğer öğrencilere açılsın
+    const now = new Date();
+    const trParts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/Istanbul",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(now);
+
+    const curH = Number(trParts.find((p) => p.type === "hour").value);
+    const curM = Number(trParts.find((p) => p.type === "minute").value);
+
+    const origStartH = new Date(reservation.startTime).getUTCHours();
+    const origEndH = new Date(reservation.endTime).getUTCHours();
+
+    // Eğer oda kullanımı içindeyse bitiş saatini şu anki saate çek
+    let newEndObj = reservation.endTime;
+    if (curH >= origStartH && curH < origEndH) {
+      newEndObj = new Date(Date.UTC(1970, 0, 1, curH, curM, 0));
+    }
+
+    const updated = await prisma.reservation.update({
+      where: { id: reservationId },
+      data: {
+        status: "COMPLETED",
+        endTime: newEndObj,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "RESERVATION_EARLY_CHECKOUT",
+        entityType: "Reservation",
+        entityId: reservationId,
+        oldData: { status: reservation.status, endTime: reservation.endTime },
+        newData: {
+          status: "COMPLETED",
+          newEndTime: newEndObj,
+          room: reservation.room.roomNumber,
+          releasedBy: user.email,
+        },
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      message: "Oda başarıyla boşaltıldı ve kalan saatler diğer öğrencilerin kullanımına açıldı.",
+      reservation: updated,
+    });
+  } catch (error) {
+    console.error("Early checkout error:", error);
+    return NextResponse.json({ error: "İşlem başarısız." }, { status: 500 });
+  }
+}
+
+/**
+ * DELETE /api/reservations -> MADDE 10: Rezervasyon Başlamadan Organizatör Tarafından İptal Edilmesi
+ */
 export async function DELETE(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -14,11 +396,12 @@ export async function DELETE(request) {
 
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
-      select: { id: true, role: true },
+      select: { id: true, email: true, role: true },
     });
 
     const reservation = await prisma.reservation.findUnique({
       where: { id: reservationId },
+      include: { room: true },
     });
 
     if (!reservation) {
@@ -27,15 +410,42 @@ export async function DELETE(request) {
 
     const isStaff = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"].includes(user.role);
     if (reservation.userId !== user.id && !isStaff) {
-      return NextResponse.json({ error: "Bu rezervasyonu iptal etme yetkiniz yok." }, { status: 403 });
+      return NextResponse.json(
+        { error: "Bu rezervasyonu yalnızca organizatör veya kütüphane görevlisi iptal edebilir." },
+        { status: 403 }
+      );
     }
+
+    // Öğrenci ise: Rezervasyon zaten başlamışsa veya CHECKED_IN olmuşsa "İptal" değil "Erken Bitir" kullanmalı
+    if (!isStaff && reservation.status === "CHECKED_IN") {
+      return NextResponse.json(
+        { error: "Giriş (Check-in) yapılmış rezervasyon iptal edilemez; 'Odayı Erken Boşalt' butonunu kullanabilirsiniz." },
+        { status: 400 }
+      );
+    }
+
+    const reasonText = isStaff
+      ? "Kütüphane görevlisi tarafından iptal edildi"
+      : "Organizatör tarafından başlangıç öncesi iptal edildi";
 
     await prisma.reservation.update({
       where: { id: reservationId },
       data: {
         status: "CANCELLED",
         cancelledAt: new Date(),
-        cancellationReason: isStaff ? "Görevli tarafından iptal edildi" : "Kullanıcı tarafından iptal edildi",
+        cancellationReason: reasonText,
+      },
+    });
+
+    // MADDE 9: AuditLog Kaydı
+    await prisma.auditLog.create({
+      data: {
+        userId: user.id,
+        action: "RESERVATION_CANCELLED",
+        entityType: "Reservation",
+        entityId: reservationId,
+        oldData: { status: reservation.status, room: reservation.room.roomNumber },
+        newData: { status: "CANCELLED", cancelledBy: user.email, reason: reasonText },
       },
     });
 

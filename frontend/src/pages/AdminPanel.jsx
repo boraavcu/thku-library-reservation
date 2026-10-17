@@ -27,6 +27,8 @@ import QrCode2Icon from '@mui/icons-material/QrCode2';
 import LockOpenIcon from '@mui/icons-material/LockOpen';
 import BlockIcon from '@mui/icons-material/Block';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import MoreTimeIcon from '@mui/icons-material/MoreTime';
+import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 
 const STAFF_ROLES = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'];
 
@@ -43,7 +45,15 @@ export default function AdminPanel() {
 
   const [tab, setTab] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({ rooms: [], reservations: [], announcements: [], users: [], rules: [], auditLogs: [] });
+  const [data, setData] = useState({
+    rooms: [],
+    reservations: [],
+    announcements: [],
+    users: [],
+    rules: [],
+    auditLogs: [],
+    userAuditLogs: [],
+  });
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
   const [newRoom, setNewRoom] = useState({ roomNumber: '', name: '', capacity: 7 });
@@ -73,8 +83,12 @@ export default function AdminPanel() {
 
   const runAction = async (action, payload, successMsg) => {
     try {
-      await api.post('/admin/manage', { action, payload });
-      setSnack({ open: true, message: successMsg, severity: 'success' });
+      const res = await api.post('/admin/manage', { action, payload });
+      const extraBanMsg =
+        res.data?.autoBannedEmails?.length > 0
+          ? ` (3. No-Show dolduğu için 30 gün otomatik banlananlar: ${res.data.autoBannedEmails.join(', ')})`
+          : '';
+      setSnack({ open: true, message: `${successMsg}${extraBanMsg}`, severity: 'success' });
       fetchAdminData();
     } catch (err) {
       setSnack({
@@ -108,7 +122,7 @@ export default function AdminPanel() {
       <Navbar />
 
       <Container maxWidth="lg" sx={{ pt: 4, pb: 6, flex: 1 }}>
-        {/* Üst Başlık ve Rol Rozeti */}
+        {/* Üst Başlık */}
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: { sm: 'center' }, gap: 2, mb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, 0.1), color: 'primary.main', display: 'flex' }}>
@@ -123,10 +137,10 @@ export default function AdminPanel() {
               </Box>
               <Typography variant="body2" color="text.secondary">
                 {isSuperAdmin
-                  ? (isEn ? 'Full System Access (IT / Super Admin): Rooms, Rules, Roles & Audit Logs' : 'Tam Sistem Yetkisi (BİM Super Admin): Odalar, Kurallar, Roller ve Denetim Logları')
+                  ? 'BİM Tam Yetki (SUPER_ADMIN): Odalar, Rezervasyon Uzatma/Kapatma, 3 No-Show Oto-Ban ve Tüm Sistem Logları'
                   : isAdminOrSuper
-                  ? (isEn ? 'Library Director Access: Rooms, Reservations, Penalties & Bans' : 'Kütüphane İdaresi Yetkisi: Odalar, Rezervasyonlar, Ceza ve Ban Yönetimi')
-                  : (isEn ? 'Librarian Desk Access: Check-in, Room Status & Announcements' : 'Kütüphane Görevlisi Yetkisi: Check-in, Oda Aç/Kapat ve Duyurular')}
+                  ? 'Kütüphane İdaresi (ADMIN): Odalar, Rezervasyon Müdahalesi, Ceza ve Ban Yönetimi'
+                  : 'Kütüphane Görevlisi (LIBRARIAN): Check-in, Süre Uzatma, Oda Aç/Kapat ve Duyurular'}
               </Typography>
             </Box>
           </Box>
@@ -147,7 +161,7 @@ export default function AdminPanel() {
           {[
             { label: isEn ? 'Active Rooms' : 'Aktif Çalışma Odası', val: `${data.rooms.filter(r => r.isActive).length} / ${data.rooms.length}`, color: 'primary.main' },
             { label: isEn ? 'Active Bookings' : 'Aktif Rezervasyon', val: data.reservations.filter(r => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status)).length, color: 'success.main' },
-            { label: isEn ? 'Banned Students' : 'Banlı Kullanıcı Sayısı', val: data.users.filter(u => u.isBanned).length, color: 'error.main' },
+            { label: isEn ? 'Banned Users' : 'Banlı Öğrenci Sayısı', val: data.users.filter(u => u.isBanned).length, color: 'error.main' },
             { label: isEn ? 'Total Users' : 'Kayıtlı Kullanıcı', val: data.users.length, color: 'text.primary' },
           ].map((stat) => (
             <Card key={stat.label} sx={{ p: 2.5 }}>
@@ -170,22 +184,22 @@ export default function AdminPanel() {
             scrollButtons="auto"
             sx={{ px: 2, borderBottom: '1px solid', borderColor: 'divider' }}
           >
-            <Tab icon={<EventNoteIcon fontSize="small" />} iconPosition="start" label={isEn ? 'Reservations' : 'Rezervasyon Müdahale'} />
+            <Tab icon={<EventNoteIcon fontSize="small" />} iconPosition="start" label={isEn ? 'Reservations' : 'Rezervasyon Müdahale (Uzat/Kapat)'} />
             <Tab icon={<MeetingRoomIcon fontSize="small" />} iconPosition="start" label={isEn ? 'Rooms (Open/Close)' : 'Odaları Aç / Kapat'} />
             <Tab icon={<CampaignIcon fontSize="small" />} iconPosition="start" label={isEn ? 'Announcements' : 'Duyuru Yayınla'} />
             <Tab icon={<PeopleAltIcon fontSize="small" />} iconPosition="start" label={isEn ? 'Penalties, Bans & Roles' : 'Öğrenci Ceza, Ban & Rol'} />
             {isAdminOrSuper && (
-              <Tab icon={<SecurityIcon fontSize="small" />} iconPosition="start" label={isSuperAdmin ? (isEn ? 'Rules & Audit Logs' : 'Kurallar & BİM Denetim Logları') : (isEn ? 'System Rules' : 'Rezervasyon Kuralları')} />
+              <Tab icon={<SecurityIcon fontSize="small" />} iconPosition="start" label={isSuperAdmin ? 'Kurallar & Tüm Sistem Logları (SUPER_ADMIN)' : 'Rezervasyon Kuralları'} />
             )}
           </Tabs>
 
           <Box sx={{ p: { xs: 2, md: 3 } }}>
-            {/* ================= SEKME 0: REZERVASYON MÜDAHALE ================= */}
+            {/* ================= SEKME 0: REZERVASYON MÜDAHALE (MADDE 1, 3.1, 4, 8) ================= */}
             {tab === 0 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {data.reservations.length === 0 ? (
                   <Typography color="text.secondary" align="center" sx={{ py: 4 }}>
-                    {isEn ? 'No reservations found.' : 'Sistemde henüz rezervasyon kaydı bulunmuyor.'}
+                    Sistemde henüz rezervasyon kaydı bulunmuyor.
                   </Typography>
                 ) : (
                   data.reservations.map((res) => {
@@ -196,6 +210,8 @@ export default function AdminPanel() {
                         : res.status === 'PENDING'
                         ? 'warning'
                         : 'error';
+
+                    const acceptedMembers = (res.participants || []).filter(p => p.status === 'ACCEPTED');
 
                     return (
                       <Card key={res.id} sx={{ p: 2.5, borderLeft: `4px solid ${theme.palette[statusColor].main}` }}>
@@ -215,8 +231,21 @@ export default function AdminPanel() {
                               </Typography>
                             </Box>
                             <Typography variant="body2" color="text.secondary">
-                              {isEn ? 'Organizer' : 'Organizatör'}: <strong>{res.user?.fullName}</strong> ({res.user?.email}) — {1 + (res.participants?.length || 0)} {isEn ? 'People' : 'Kişi'}
+                              Organizatör: <strong>{res.user?.fullName}</strong> ({res.user?.email}) — Onaylı Üye: {1 + acceptedMembers.length} Kişi
                             </Typography>
+                            {res.participants?.length > 0 && (
+                              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
+                                {res.participants.map((p, idx) => (
+                                  <Chip
+                                    key={idx}
+                                    label={`${p.user?.email} (${p.status})`}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ fontSize: '0.65rem', height: 20 }}
+                                  />
+                                ))}
+                              </Box>
+                            )}
                           </Box>
 
                           {isActive && (
@@ -229,18 +258,49 @@ export default function AdminPanel() {
                                   startIcon={<CheckCircleIcon />}
                                   onClick={() => runAction('FORCE_CHECKIN', { reservationId: res.id }, 'Manuel Check-In yapıldı.')}
                                 >
-                                  {isEn ? 'Force Check-In' : 'Manuel Check-In'}
+                                  Manuel Check-In
                                 </Button>
                               )}
+
+                              {/* MADDE 3.1: +1 Saat Süre Uzatma */}
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="primary"
+                                startIcon={<MoreTimeIcon />}
+                                onClick={() => runAction('EXTEND_RESERVATION', { reservationId: res.id, extraHours: 1 }, 'Rezervasyon süresi +1 saat uzatıldı.')}
+                              >
+                                +1 Saat Uzat
+                              </Button>
+
+                              {/* MADDE 8: Odayı Erken Boşalt / Bitir */}
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="info"
+                                startIcon={<ExitToAppIcon />}
+                                onClick={() => runAction('EARLY_CLOSE_RESERVATION', { reservationId: res.id }, 'Oda erken boşaltıldı ve diğer öğrencilere açıldı.')}
+                              >
+                                Erken Bitir (Boşalt)
+                              </Button>
+
+                              {/* MADDE 1 & 4: Tüm Onaylı Üyelere No-Show + 3. İhlalde 30 Gün Ban */}
                               <Button
                                 size="small"
                                 variant="outlined"
                                 color="warning"
                                 startIcon={<GavelIcon />}
-                                onClick={() => runAction('MARK_NO_SHOW', { reservationId: res.id, points: 15 }, 'No-Show işlendi ve +15 ceza puanı eklendi.')}
+                                onClick={() =>
+                                  runAction(
+                                    'MARK_NO_SHOW',
+                                    { reservationId: res.id, points: 15 },
+                                    'Tüm onaylı üyelere No-Show (+15 Ceza Puanı) işlendi.'
+                                  )
+                                }
                               >
-                                {isEn ? 'No-Show (+15 Pts)' : 'Gelmedi (+15 Ceza)'}
+                                No-Show (Gruba +15 Ceza)
                               </Button>
+
                               <Button
                                 size="small"
                                 variant="outlined"
@@ -248,7 +308,7 @@ export default function AdminPanel() {
                                 startIcon={<CancelIcon />}
                                 onClick={() => runAction('CANCEL_RESERVATION', { reservationId: res.id }, 'Rezervasyon iptal edildi.')}
                               >
-                                {isEn ? 'Cancel' : 'İptal Et'}
+                                İptal Et
                               </Button>
                             </Box>
                           )}
@@ -266,14 +326,14 @@ export default function AdminPanel() {
                 {isAdminOrSuper && (
                   <Box sx={{ p: 2.5, bgcolor: 'action.hover', borderRadius: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, alignItems: 'center' }}>
                     <TextField
-                      label={isEn ? 'Room Code (e.g. R105)' : 'Oda Kodu (Örn: R105)'}
+                      label="Oda Kodu (Örn: R105)"
                       size="small"
                       value={newRoom.roomNumber}
                       onChange={(e) => setNewRoom({ ...newRoom, roomNumber: e.target.value })}
                       sx={{ bgcolor: 'background.paper' }}
                     />
                     <TextField
-                      label={isEn ? 'Room Name (e.g. Hezarfen)' : 'Oda Adı (Örn: Hezarfen)'}
+                      label="Oda Adı (Örn: Hezarfen)"
                       size="small"
                       fullWidth
                       value={newRoom.name}
@@ -281,7 +341,7 @@ export default function AdminPanel() {
                       sx={{ bgcolor: 'background.paper' }}
                     />
                     <TextField
-                      label={isEn ? 'Capacity' : 'Kapasite'}
+                      label="Kapasite"
                       type="number"
                       size="small"
                       value={newRoom.capacity}
@@ -297,7 +357,7 @@ export default function AdminPanel() {
                       }}
                       sx={{ whiteSpace: 'nowrap', py: 1 }}
                     >
-                      {isEn ? 'Add Room' : 'Oda Ekle'}
+                      Oda Ekle
                     </Button>
                   </Box>
                 )}
@@ -311,14 +371,14 @@ export default function AdminPanel() {
                             {room.roomNumber} - {room.name}
                           </Typography>
                           <Chip
-                            label={room.isActive ? (isEn ? 'OPEN' : 'AKTİF (AÇIK)') : (isEn ? 'CLOSED' : 'BAKIMDA (KAPALI)')}
+                            label={room.isActive ? 'AKTİF (AÇIK)' : 'BAKIMDA (KAPALI)'}
                             size="small"
                             color={room.isActive ? 'success' : 'error'}
                             sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }}
                           />
                         </Box>
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {isEn ? 'Max Capacity' : 'Maksimum Kapasite'}: {room.capacity}
+                          Maksimum Kapasite: {room.capacity} Kişi
                         </Typography>
                       </Box>
 
@@ -345,9 +405,7 @@ export default function AdminPanel() {
             {tab === 2 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <Card sx={{ p: 2.5, bgcolor: 'action.hover', border: 'none' }}>
-                  <Typography sx={{ fontWeight: 700, mb: 2 }}>
-                    {isEn ? 'Publish New Library Announcement (TR / EN)' : 'Yeni Kütüphane Duyurusu Yayınla (TR / EN)'}
-                  </Typography>
+                  <Typography sx={{ fontWeight: 700, mb: 2 }}>Yeni Kütüphane Duyurusu Yayınla (TR / EN)</Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' } }}>
                       <TextField
@@ -407,7 +465,7 @@ export default function AdminPanel() {
                           setNewAnn({ titleTr: '', titleEn: '', contentTr: '', contentEn: '', priority: 'HIGH', isPinned: true });
                         }}
                       >
-                        {isEn ? 'Publish Announcement' : 'Duyuruyu Yayınla'}
+                        Duyuruyu Yayınla
                       </Button>
                     </Box>
                   </Box>
@@ -421,10 +479,10 @@ export default function AdminPanel() {
                       <Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Chip label={ann.priority} size="small" color={ann.priority === 'HIGH' || ann.priority === 'URGENT' ? 'error' : 'primary'} sx={{ height: 20, fontSize: '0.65rem' }} />
-                          <Typography sx={{ fontWeight: 700 }}>{isEn ? (ann.title?.en || ann.title?.tr) : (ann.title?.tr || ann.title)}</Typography>
+                          <Typography sx={{ fontWeight: 700 }}>{ann.title?.tr || ann.title}</Typography>
                         </Box>
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {isEn ? (ann.content?.en || ann.content?.tr) : (ann.content?.tr || ann.content)}
+                          {ann.content?.tr || ann.content}
                         </Typography>
                       </Box>
                       <IconButton
@@ -439,134 +497,131 @@ export default function AdminPanel() {
               </Box>
             )}
 
-            {/* ================= SEKME 3: ÖĞRENCİ CEZA PUANI, BAN AÇMA/KAPAMA & ROL ================= */}
+            {/* ================= SEKME 3: ÖĞRENCİ CEZA, NO-SHOW SAYACI, BAN AÇ/KAPAT ================= */}
             {tab === 3 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                {data.users.map((u) => (
-                  <Card
-                    key={u.id}
-                    sx={{
-                      p: 2.5,
-                      borderLeft: `4px solid ${u.isBanned ? theme.palette.error.main : u.penaltyPoints > 0 ? theme.palette.warning.main : theme.palette.primary.main}`,
-                      display: 'flex',
-                      flexDirection: { xs: 'column', md: 'row' },
-                      justifyContent: 'space-between',
-                      alignItems: { md: 'center' },
-                      gap: 2,
-                    }}
-                  >
-                    <Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
-                        <Typography sx={{ fontWeight: 700, fontSize: '1rem' }}>{u.fullName}</Typography>
-                        <Chip label={u.role} size="small" color="primary" variant="outlined" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }} />
+                {data.users.map((u) => {
+                  const noShowCount = u._count?.penaltyHistory || 0;
+                  return (
+                    <Card
+                      key={u.id}
+                      sx={{
+                        p: 2.5,
+                        borderLeft: `4px solid ${u.isBanned ? theme.palette.error.main : u.penaltyPoints > 0 ? theme.palette.warning.main : theme.palette.primary.main}`,
+                        display: 'flex',
+                        flexDirection: { xs: 'column', md: 'row' },
+                        justifyContent: 'space-between',
+                        alignItems: { md: 'center' },
+                        gap: 2,
+                      }}
+                    >
+                      <Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5 }}>
+                          <Typography sx={{ fontWeight: 700, fontSize: '1rem' }}>{u.fullName}</Typography>
+                          <Chip label={u.role} size="small" color="primary" variant="outlined" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }} />
 
-                        {/* Ceza Puanı Rozeti Her Zaman Görünür */}
-                        <Chip
-                          icon={<GavelIcon sx={{ fontSize: '14px !important' }} />}
-                          label={`${isEn ? 'Penalty Points' : 'Ceza Puanı'}: ${u.penaltyPoints || 0}`}
-                          size="small"
-                          color={u.penaltyPoints > 0 ? 'warning' : 'default'}
-                          sx={{ height: 22, fontSize: '0.72rem', fontWeight: 700 }}
-                        />
-
-                        {/* Ban Durumu Rozeti */}
-                        {u.isBanned ? (
                           <Chip
-                            label={isEn ? 'BANNED (BLOCKED)' : 'BANLI (YASAKLI)'}
+                            icon={<GavelIcon sx={{ fontSize: '14px !important' }} />}
+                            label={`Ceza Puanı: ${u.penaltyPoints || 0}`}
                             size="small"
-                            color="error"
+                            color={u.penaltyPoints > 0 ? 'warning' : 'default'}
+                            sx={{ height: 22, fontSize: '0.72rem', fontWeight: 700 }}
+                          />
+
+                          <Chip
+                            label={`No-Show Sayacı: ${noShowCount} / 3`}
+                            size="small"
+                            color={noShowCount >= 3 ? 'error' : noShowCount > 0 ? 'warning' : 'default'}
+                            variant="outlined"
                             sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }}
                           />
-                        ) : (
-                          <Chip
-                            label={isEn ? 'ACTIVE' : 'AKTİF'}
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                            sx={{ height: 22, fontSize: '0.65rem', fontWeight: 700 }}
-                          />
-                        )}
+
+                          {u.isBanned ? (
+                            <Chip
+                              label={`BANLI (${u.banUntil ? new Date(u.banUntil).toLocaleDateString('tr-TR') : '30 Gün'})`}
+                              size="small"
+                              color="error"
+                              sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }}
+                            />
+                          ) : (
+                            <Chip label="AKTİF" size="small" color="success" variant="outlined" sx={{ height: 22, fontSize: '0.65rem', fontWeight: 700 }} />
+                          )}
+                        </Box>
+
+                        <Typography variant="body2" color="text.secondary">
+                          {u.email} {u.studentNumber ? `• No: ${u.studentNumber}` : ''} {u.department ? `• ${u.department}` : ''}
+                        </Typography>
                       </Box>
 
-                      <Typography variant="body2" color="text.secondary">
-                        {u.email} {u.studentNumber ? `• No: ${u.studentNumber}` : ''} {u.department ? `• ${u.department}` : ''}
-                      </Typography>
-                    </Box>
+                      {isAdminOrSuper ? (
+                        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <Select
+                            size="small"
+                            value={u.role}
+                            disabled={!isSuperAdmin && ['ADMIN', 'SUPER_ADMIN'].includes(u.role)}
+                            onChange={(e) => runAction('UPDATE_USER', { targetUserId: u.id, role: e.target.value }, 'Kullanıcı rolü güncellendi.')}
+                            sx={{ fontSize: '0.75rem', height: 32, minWidth: 130 }}
+                          >
+                            <MenuItem value="STUDENT">STUDENT</MenuItem>
+                            <MenuItem value="LIBRARIAN">LIBRARIAN</MenuItem>
+                            {isSuperAdmin && <MenuItem value="ADMIN">ADMIN</MenuItem>}
+                            {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN</MenuItem>}
+                          </Select>
 
-                    {/* Yetkili Aksiyon Butonları (ADMIN & SUPER_ADMIN) */}
-                    {isAdminOrSuper ? (
-                      <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                        {/* Rol Değiştirme Seçici */}
-                        <Select
-                          size="small"
-                          value={u.role}
-                          disabled={!isSuperAdmin && ['ADMIN', 'SUPER_ADMIN'].includes(u.role)}
-                          onChange={(e) => runAction('UPDATE_USER', { targetUserId: u.id, role: e.target.value }, 'Kullanıcı rolü güncellendi.')}
-                          sx={{ fontSize: '0.75rem', height: 32, minWidth: 130 }}
-                        >
-                          <MenuItem value="STUDENT">STUDENT</MenuItem>
-                          <MenuItem value="LIBRARIAN">LIBRARIAN</MenuItem>
-                          {isSuperAdmin && <MenuItem value="ADMIN">ADMIN</MenuItem>}
-                          {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN</MenuItem>}
-                        </Select>
-
-                        {/* +10 Ceza Puanı Ekle */}
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="warning"
-                          onClick={() => runAction('UPDATE_USER', { targetUserId: u.id, addPenaltyPoints: 10 }, '+10 Ceza puanı eklendi.')}
-                        >
-                          +10 Ceza
-                        </Button>
-
-                        {/* Ceza Puanı Sıfırla */}
-                        {u.penaltyPoints > 0 && (
                           <Button
                             size="small"
                             variant="outlined"
-                            color="info"
-                            startIcon={<RestartAltIcon />}
-                            onClick={() => runAction('UPDATE_USER', { targetUserId: u.id, resetPenalties: true }, 'Ceza puanları sıfırlandı.')}
+                            color="warning"
+                            onClick={() => runAction('UPDATE_USER', { targetUserId: u.id, addPenaltyPoints: 10 }, '+10 Ceza puanı eklendi.')}
                           >
-                            {isEn ? 'Reset Points' : 'Cezayı Sıfırla'}
+                            +10 Ceza
                           </Button>
-                        )}
 
-                        {/* Banla veya Banı Kaldır (Ban Aç) */}
-                        <Button
-                          size="small"
-                          variant="contained"
-                          color={u.isBanned ? 'success' : 'error'}
-                          startIcon={u.isBanned ? <LockOpenIcon /> : <BlockIcon />}
-                          onClick={() =>
-                            runAction(
-                              'UPDATE_USER',
-                              { targetUserId: u.id, isBanned: !u.isBanned },
-                              u.isBanned ? 'Kullanıcının banı (yasağı) kaldırıldı!' : 'Kullanıcı banlandı!'
-                            )
-                          }
-                        >
-                          {u.isBanned ? (isEn ? 'Unban User' : 'Banı Aç (Yasağı Kaldır)') : (isEn ? 'Ban User' : 'Banla')}
-                        </Button>
-                      </Box>
-                    ) : (
-                      <Typography variant="caption" color="text.secondary">
-                        {isEn ? 'View Only (Requires Admin to Edit)' : 'Sadece Görüntüleme (Müdahale için İdare/Admin yetkisi gerekir)'}
-                      </Typography>
-                    )}
-                  </Card>
-                ))}
+                          {(u.penaltyPoints > 0 || noShowCount > 0) && (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="info"
+                              startIcon={<RestartAltIcon />}
+                              onClick={() => runAction('UPDATE_USER', { targetUserId: u.id, resetPenalties: true }, 'Ceza puanları ve No-Show sayacı sıfırlandı.')}
+                            >
+                              Cezayı Sıfırla
+                            </Button>
+                          )}
+
+                          <Button
+                            size="small"
+                            variant="contained"
+                            color={u.isBanned ? 'success' : 'error'}
+                            startIcon={u.isBanned ? <LockOpenIcon /> : <BlockIcon />}
+                            onClick={() =>
+                              runAction(
+                                'UPDATE_USER',
+                                { targetUserId: u.id, isBanned: !u.isBanned },
+                                u.isBanned ? 'Kullanıcının banı (yasağı) kaldırıldı!' : 'Kullanıcı 30 gün süreyle banlandı!'
+                              )
+                            }
+                          >
+                            {u.isBanned ? 'Banı Aç (Yasağı Kaldır)' : 'Banla (30 Gün)'}
+                          </Button>
+                        </Box>
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">
+                          Sadece Görüntüleme (Müdahale için İdare/Admin yetkisi gerekir)
+                        </Typography>
+                      )}
+                    </Card>
+                  );
+                })}
               </Box>
             )}
 
-            {/* ================= SEKME 4: KURALLAR (ADMIN) & DENETİM LOGLARI (SUPER_ADMIN) ================= */}
+            {/* ================= SEKME 4: KURALLAR & MADDE 9 TÜM SİSTEM LOGLARI (SUPER_ADMIN) ================= */}
             {tab === 4 && isAdminOrSuper && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {/* Dinamik Kural Yönetimi */}
                 <Box>
                   <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5 }}>
-                    {isEn ? 'Dynamic Reservation Rules (Admin & Super Admin)' : 'Dinamik Rezervasyon Kuralları (İdare & Sistem Yöneticisi)'}
+                    Dinamik Rezervasyon Kuralları
                   </Typography>
                   <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 2 }}>
                     {data.rules.map((rule) => (
@@ -610,27 +665,58 @@ export default function AdminPanel() {
                   </Box>
                 </Box>
 
-                {/* Sadece BİM SUPER_ADMIN İçin Denetim İzi (Audit Logs) */}
+                {/* MADDE 9: Sadece SUPER_ADMIN İçin Tüm Rezervasyon, Üye, İptal ve Yönetici Logları */}
                 {isSuperAdmin && (
-                  <Box>
-                    <Divider sx={{ mb: 3 }} />
-                    <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main' }}>
-                      {isEn ? 'IT Super Admin Audit Logs (Recent Actions)' : 'THKÜ BİM Sistem Denetim Logları (Sadece SUPER_ADMIN Görebilir)'}
-                    </Typography>
-                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      {data.auditLogs?.map((log) => (
-                        <Card key={log.id} sx={{ p: 1.5, bgcolor: 'action.hover', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Chip label={log.actionType} size="small" color="primary" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>{log.description}</Typography>
-                          </Box>
-                          <Typography variant="caption" color="text.secondary">
-                            İşlemi Yapan: {log.admin?.fullName} ({log.admin?.role}) • {new Date(log.createdAt).toLocaleTimeString('tr-TR')}
-                          </Typography>
-                        </Card>
-                      ))}
+                  <>
+                    <Divider />
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: 'primary.main' }}>
+                        1. Öğrenci & Sistem Hareket Logları (Rezervasyon Açma, Davet, Erken Çıkış, İptal)
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 340, overflowY: 'auto' }}>
+                        {data.userAuditLogs?.length === 0 ? (
+                          <Typography variant="body2" color="text.secondary">Henüz sistem hareket kaydı yok.</Typography>
+                        ) : (
+                          data.userAuditLogs?.map((uLog) => (
+                            <Card key={uLog.id} sx={{ p: 1.5, bgcolor: 'background.default', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                <Chip label={uLog.action} size="small" color="info" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                  {uLog.user?.fullName || 'Kullanıcı'} ({uLog.user?.email})
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  Detay: {JSON.stringify(uLog.newData)}
+                                </Typography>
+                              </Box>
+                              <Typography variant="caption" color="text.secondary">
+                                {new Date(uLog.createdAt).toLocaleString('tr-TR')}
+                              </Typography>
+                            </Card>
+                          ))
+                        )}
+                      </Box>
                     </Box>
-                  </Box>
+
+                    <Divider />
+                    <Box>
+                      <Typography variant="h6" sx={{ fontWeight: 700, mb: 1.5, color: 'warning.main' }}>
+                        2. Yönetici & Görevli Müdahale Logları (AdminAction)
+                      </Typography>
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, maxHeight: 340, overflowY: 'auto' }}>
+                        {data.auditLogs?.map((log) => (
+                          <Card key={log.id} sx={{ p: 1.5, bgcolor: 'action.hover', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Chip label={log.actionType} size="small" color="primary" sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }} />
+                              <Typography variant="body2" sx={{ fontWeight: 600 }}>{log.description}</Typography>
+                            </Box>
+                            <Typography variant="caption" color="text.secondary">
+                              Yetkili: {log.admin?.fullName} ({log.admin?.role}) • {new Date(log.createdAt).toLocaleString('tr-TR')}
+                            </Typography>
+                          </Card>
+                        ))}
+                      </Box>
+                    </Box>
+                  </>
                 )}
               </Box>
             )}
@@ -640,7 +726,7 @@ export default function AdminPanel() {
 
       <Footer />
 
-      <Snackbar open={snack.open} autoHideDuration={3500} onClose={() => setSnack(s => ({ ...s, open: false }))}>
+      <Snackbar open={snack.open} autoHideDuration={4000} onClose={() => setSnack(s => ({ ...s, open: false }))}>
         <Alert severity={snack.severity} variant="filled">{snack.message}</Alert>
       </Snackbar>
     </Box>
