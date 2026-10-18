@@ -108,6 +108,9 @@ export const authOptions = {
         email: { label: "Email", type: "text" },
       },
       async authorize(credentials) {
+        if (process.env.ENABLE_DEMO_LOGIN === "false") {
+          throw new Error("Demo girişi canlı ortamda devre dışı bırakılmıştır.");
+        }
         const targetEmail = credentials?.email?.trim().toLowerCase();
         const selectedDemo = DEMO_USERS[targetEmail] || DEMO_USERS["s220401001@stu.thk.edu.tr"];
 

@@ -243,48 +243,52 @@ const Login = () => {
             </Typography>
           </Box>
 
-          {/* --- SUNUM & TEST DEMO GİRİŞ BÖLÜMÜ --- */}
-          <Divider sx={{ my: 0.5 }}>
-            <Chip
-              label="SUNUM & TEST HIZLI GİRİŞ"
-              size="small"
-              sx={{ fontSize: '0.65rem', fontWeight: 700, bgcolor: 'action.hover', color: 'primary.main' }}
-            />
-          </Divider>
+{/* --- SUNUM & TEST DEMO GİRİŞ BÖLÜMÜ --- */}
+          {import.meta.env.VITE_ENABLE_DEMO_LOGIN !== 'false' && (
+            <>
+              <Divider sx={{ my: 0.5 }}>
+                <Chip
+                  label="SUNUM & TEST HIZLI GİRİŞ"
+                  size="small"
+                  sx={{ fontSize: '0.65rem', fontWeight: 700, bgcolor: 'action.hover', color: 'primary.main' }}
+                />
+              </Divider>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
-            {DEMO_ACCOUNTS.map((acc) => {
-              const isBusy = loadingEmail === acc.email;
-              return (
-                <Button
-                  key={acc.email}
-                  variant="outlined"
-                  color={acc.color}
-                  disabled={Boolean(loadingEmail)}
-                  onClick={() => handleDemoLogin(acc.email)}
-                  startIcon={isBusy ? <CircularProgress size={16} color="inherit" /> : acc.icon}
-                  sx={{
-                    justifyContent: 'flex-start',
-                    textAlign: 'left',
-                    py: 1,
-                    px: 1.5,
-                    borderRadius: 2,
-                    borderColor: 'divider',
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  <Box sx={{ overflow: 'hidden' }}>
-                    <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.primary', lineHeight: 1.2 }} noWrap>
-                      {acc.label}
-                    </Typography>
-                    <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary' }} noWrap>
-                      {acc.subLabel}
-                    </Typography>
-                  </Box>
-                </Button>
-              );
-            })}
-          </Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+                {DEMO_ACCOUNTS.map((acc) => {
+                  const isBusy = loadingEmail === acc.email;
+                  return (
+                    <Button
+                      key={acc.email}
+                      variant="outlined"
+                      color={acc.color}
+                      disabled={Boolean(loadingEmail)}
+                      onClick={() => handleDemoLogin(acc.email)}
+                      startIcon={isBusy ? <CircularProgress size={16} color="inherit" /> : acc.icon}
+                      sx={{
+                        justifyContent: 'flex-start',
+                        textAlign: 'left',
+                        py: 1,
+                        px: 1.5,
+                        borderRadius: 2,
+                        borderColor: 'divider',
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      <Box sx={{ overflow: 'hidden' }}>
+                        <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'text.primary', lineHeight: 1.2 }} noWrap>
+                          {acc.label}
+                        </Typography>
+                        <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary' }} noWrap>
+                          {acc.subLabel}
+                        </Typography>
+                      </Box>
+                    </Button>
+                  );
+                })}
+              </Box>
+            </>
+          )}
         </CardContent>
       </Card>
 
