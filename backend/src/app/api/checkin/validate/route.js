@@ -109,6 +109,19 @@ export async function POST(request) {
           checkedInById: currentUserId,
         },
       });
+
+      await prisma.auditLog.create({
+        data: {
+          userId: currentUserId,
+          action: "RESERVATION_CHECKED_IN",
+          entityType: "Reservation",
+          entityId: reservation.id,
+          newData: {
+            room: `${reservation.room.roomNumber} - ${reservation.room.name}`,
+            checkedInBy: session.user.email,
+          },
+        },
+      });
     }
 
     const startHour = new Date(reservation.startTime).getUTCHours();

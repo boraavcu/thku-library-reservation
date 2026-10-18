@@ -5,7 +5,7 @@ import prisma from "@/lib/db";
 
 const LIBRARY_OPEN = 0;
 const LIBRARY_CLOSE = 24;
-const TOTAL_HOURS = LIBRARY_CLOSE - LIBRARY_OPEN; 
+const TOTAL_HOURS = LIBRARY_CLOSE - LIBRARY_OPEN;
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -18,7 +18,7 @@ export async function GET() {
     const todayStr = new Date().toLocaleDateString("en-CA", {
       timeZone: "Europe/Istanbul",
     });
-    const todayDate = new Date(todayStr);
+    const todayDate = new Date(`${todayStr}T00:00:00Z`);
 
     const [rooms, reservations] = await Promise.all([
       prisma.room.findMany({
@@ -39,7 +39,11 @@ export async function GET() {
     for (const r of reservations) {
       const start = new Date(r.startTime).getUTCHours();
       const endDt = new Date(r.endTime);
-      const end = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+      const end =
+        endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59
+          ? 24
+          : endDt.getUTCHours();
+      const hours = Math.max(0, end - start);
       roomMap.set(r.roomId, (roomMap.get(r.roomId) || 0) + hours);
     }
 

@@ -17,13 +17,13 @@ export async function GET() {
     const [rooms, reservations, announcements, users, rules, auditLogs, userAuditLogs] = await Promise.all([
       prisma.room.findMany({ orderBy: { roomNumber: "asc" } }),
       prisma.reservation.findMany({
-        take: 50,
-        orderBy: [{ reservationDate: "desc" }, { startTime: "asc" }],
-        include: {
-          room: { select: { roomNumber: true, name: true } },
-          user: { select: { id: true, fullName: true, email: true, studentNumber: true } },
-          participants: { include: { user: { select: { id: true, fullName: true, email: true } } } },
-        },
+      take: 200,
+      orderBy: [{ reservationDate: "desc" }, { startTime: "asc" }],
+      include: {
+        room: { select: { roomNumber: true, name: true, capacity: true } },
+        user: { select: { id: true, fullName: true, email: true, studentNumber: true, department: true } },
+        participants: { include: { user: { select: { id: true, fullName: true, email: true, department: true } } } },
+      },
       }),
       prisma.announcement.findMany({
         orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
@@ -181,7 +181,7 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
-    // 4. MADDE 3 & 3.1: Görevli Tarafından Rezervasyon Süresini +1 Saat Uzatma
+// 4. MADDE 3 & 3.1: Görevli Tarafından Rezervasyon Süresini +1 Saat Uzatma
     if (action === "EXTEND_RESERVATION") {
       const { reservationId, extraHours = 1 } = payload;
       const resRecord = await prisma.reservation.findUnique({
@@ -195,16 +195,19 @@ export async function POST(request) {
 
       const currentEndHour = new Date(resRecord.endTime).getUTCHours();
       const currentEndMin = new Date(resRecord.endTime).getUTCMinutes();
-      const targetEndHour = currentEndHour + Number(extraHours);
 
-      if (targetEndHour > 23) {
+      if (currentEndHour >= 23 && currentEndMin >= 59) {
         return NextResponse.json(
-          { error: "Gün sonu (23:59) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
+          { error: "Gün sonu (24:00) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
           { status: 400 }
         );
       }
 
-      const newEndTime = new Date(Date.UTC(1970, 0, 1, targetEndHour, currentEndMin, 0));
+      const targetEndHour = currentEndHour + Number(extraHours);
+      const newEndTime =
+        targetEndHour >= 24
+          ? new Date(Date.UTC(1970, 0, 1, 23, 59, 59))
+          : new Date(Date.UTC(1970, 0, 1, targetEndHour, currentEndMin, 0));
 
       // Uzatılmak istenen saatte başka bir rezervasyon var mı kontrol et
       const conflict = await prisma.reservation.findFirst({
@@ -232,6 +235,8 @@ export async function POST(request) {
         data: { endTime: newEndTime },
       });
 
+      const formattedEnd = targetEndHour >= 24 ? "24:00" : `${String(targetEndHour).padStart(2, "0")}:00`;
+
       await prisma.adminAction.create({
         data: {
           adminId,
@@ -239,7 +244,7 @@ export async function POST(request) {
           targetEntityType: "Reservation",
           targetEntityId: reservationId,
           affectedUserId: resRecord.userId,
-          description: `${resRecord.room.roomNumber} odası rezervasyon süresi +${extraHours} saat uzatıldı (Yeni Bitiş: ${targetEndHour}:00).`,
+          description: `${resRecord.room.roomNumber} odası rezervasyon süresi +${extraHours} saat uzatıldı (Yeni Bitiş: ${formattedEnd}).`,
         },
       });
 
