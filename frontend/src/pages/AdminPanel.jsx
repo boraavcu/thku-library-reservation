@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box, Container, Typography, Card, Button, Chip, Tabs, Tab,
   Switch, TextField, Select, MenuItem, CircularProgress, Alert,
-  Snackbar, Divider, IconButton, Tooltip, Pagination, InputAdornment
+  Snackbar, Divider, IconButton, Tooltip, Pagination, InputAdornment,
+  LinearProgress
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
@@ -35,6 +36,9 @@ import BlockIcon from '@mui/icons-material/Block';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import MoreTimeIcon from '@mui/icons-material/MoreTime';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import RadarIcon from '@mui/icons-material/Radar';
+import SchoolIcon from '@mui/icons-material/School';
+import WhatshotIcon from '@mui/icons-material/Whatshot';
 
 const STAFF_ROLES = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'];
 const ITEMS_PER_PAGE = 10;
@@ -94,6 +98,12 @@ function formatReadableAuditLog(uLog) {
         badgeLabel: 'DAVET REDDEDİLDİ',
         badgeColor: 'warning',
         summary: `${d.room || 'Oda'} çalışma grubu davetini reddetti.`,
+      };
+    case 'RESERVATION_CHECKED_IN':
+      return {
+        badgeLabel: 'KİOSK GİRİŞİ (CHECK-IN)',
+        badgeColor: 'success',
+        summary: `${d.room || 'Çalışma Odası'} için Kiosk doğrulama kodunu girerek odaya giriş yaptı.`,
       };
     case 'RESERVATION_EXTENDED':
       return {
@@ -164,11 +174,11 @@ export default function AdminPanel() {
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
   // 1. Rezervasyon Alt Filtresi ve Sayfalama (10'arlı)
-  const [resFilter, setResFilter] = useState('ACTIVE'); // ACTIVE | PAST | PENALIZED
+  const [resFilter, setResFilter] = useState('ACTIVE');
   const [resPage, setResPage] = useState(1);
 
-  // 2. Kullanıcı Arama, Rol Grubu (Öğrenciler vs Yetkililer) ve Sayfalama (10'arlı)
-  const [userGroupTab, setUserGroupTab] = useState('STUDENTS'); // STUDENTS | STAFF
+  // 2. Kullanıcı Arama, Rol Grubu ve Sayfalama (10'arlı)
+  const [userGroupTab, setUserGroupTab] = useState('STUDENTS');
   const [userSearch, setUserSearch] = useState('');
   const [userPage, setUserPage] = useState(1);
 
@@ -221,7 +231,10 @@ export default function AdminPanel() {
 
   const fmtTime = (timeStr) => {
     const d = new Date(timeStr);
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    const h = d.getUTCHours();
+    const m = d.getUTCMinutes();
+    if (h === 23 && m >= 59) return '24:00';
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
   const fmtDate = (dateStr) => {
@@ -229,19 +242,117 @@ export default function AdminPanel() {
     return d.toLocaleDateString(isEn ? 'en-US' : 'tr-TR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
   };
 
-  // --- ANALİZ SEKMESİ İÇİN GÜNLÜK & ODA BAZLI YOĞUNLUK HESAPLAMASI ---
+  // --- GÜNLÜK REZERVASYON TRENDİ ---
   const dailyTrendData = useMemo(() => {
     const map = new Map();
     data.reservations.forEach((r) => {
       if (r.status === 'CANCELLED') return;
       const dStr = new Date(r.reservationDate).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', timeZone: 'UTC' });
       const startH = new Date(r.startTime).getUTCHours();
-      const endH = new Date(r.endTime).getUTCHours();
+      const endDt = new Date(r.endTime);
+      const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
       const hours = Math.max(1, endH - startH);
       const prev = map.get(dStr) || { date: dStr, count: 0, hours: 0 };
       map.set(dStr, { date: dStr, count: prev.count + 1, hours: prev.hours + hours });
     });
     return Array.from(map.values()).slice(0, 7).reverse();
+  }, [data.reservations]);
+
+  // --- FİKİR 6: GELECEK 1 SAAT OPERASYON RADARI ---
+  const radarStats = useMemo(() => {
+    const now = new Date();
+    const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+    const nowHour = now.getHours();
+    const nowMin = now.getMinutes();
+    const nowTotalMins = nowHour * 60 + nowMin;
+
+    let currentlyInRooms = 0;
+    let upcomingNextHourGroups = 0;
+    let upcomingNextHourStudents = 0;
+
+    data.reservations.forEach((r) => {
+      const rDateStr = new Date(r.reservationDate).toISOString().split('T')[0];
+      if (rDateStr !== todayIso) return;
+
+      const sH = new Date(r.startTime).getUTCHours();
+      const sM = new Date(r.startTime).getUTCMinutes();
+      const startMins = sH * 60 + sM;
+
+      const eDt = new Date(r.endTime);
+      const eH = eDt.getUTCHours() === 23 && eDt.getUTCMinutes() >= 59 ? 24 : eDt.getUTCHours();
+      const endMins = eH * 60;
+
+      const groupSize = 1 + (r.participants || []).filter((p) => p.status === 'ACCEPTED').length;
+
+      if (r.status === 'CHECKED_IN' && nowTotalMins >= startMins && nowTotalMins <= endMins) {
+        currentlyInRooms++;
+      }
+
+      if (['CONFIRMED', 'PENDING'].includes(r.status)) {
+        const diff = startMins - nowTotalMins;
+        if (diff >= -15 && diff <= 60) {
+          upcomingNextHourGroups++;
+          upcomingNextHourStudents += groupSize;
+        }
+      }
+    });
+
+    return { currentlyInRooms, upcomingNextHourGroups, upcomingNextHourStudents };
+  }, [data.reservations]);
+
+  // --- FİKİR 1: 24 SAATLİK YOĞUNLUK ISI HARİTASI (HEATMAP) ---
+  const hourlyHeatmap = useMemo(() => {
+    const counts = Array(24).fill(0);
+    data.reservations.forEach((r) => {
+      if (['CANCELLED', 'NO_SHOW'].includes(r.status)) return;
+      const sH = new Date(r.startTime).getUTCHours();
+      const eDt = new Date(r.endTime);
+      const eH = eDt.getUTCHours() === 23 && eDt.getUTCMinutes() >= 59 ? 24 : eDt.getUTCHours();
+      for (let h = sH; h < eH && h < 24; h++) {
+        counts[h]++;
+      }
+    });
+    const maxCount = Math.max(1, ...counts);
+    const peakHourIndex = counts.indexOf(Math.max(...counts));
+    return {
+      slots: counts.map((count, hour) => ({
+        hourLabel: `${String(hour).padStart(2, '0')}:00`,
+        count,
+        intensity: count / maxCount,
+      })),
+      peakHour: `${String(peakHourIndex).padStart(2, '0')}:00 - ${String(peakHourIndex + 1).padStart(2, '0')}:00`,
+      peakVal: counts[peakHourIndex],
+    };
+  }, [data.reservations]);
+
+  // --- FİKİR 4: BÖLÜM BAZLI KULLANIM DAĞILIMI ---
+  const departmentStats = useMemo(() => {
+    const deptMap = new Map();
+    let totalParticipations = 0;
+
+    data.reservations.forEach((r) => {
+      if (r.status === 'CANCELLED') return;
+      const orgDept = r.user?.department || 'Belirtilmemiş Bölüm';
+      deptMap.set(orgDept, (deptMap.get(orgDept) || 0) + 1);
+      totalParticipations++;
+
+      (r.participants || []).forEach((p) => {
+        if (p.status === 'ACCEPTED') {
+          const pDept = p.user?.department || 'Belirtilmemiş Bölüm';
+          deptMap.set(pDept, (deptMap.get(pDept) || 0) + 1);
+          totalParticipations++;
+        }
+      });
+    });
+
+    return Array.from(deptMap.entries())
+      .map(([name, count]) => ({
+        name,
+        count,
+        pct: totalParticipations > 0 ? Math.round((count / totalParticipations) * 100) : 0,
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
   }, [data.reservations]);
 
   // --- REZERVASYON KATEGORİ FİLTRESİ VE 10'ARLI SAYFALAMA ---
@@ -269,7 +380,7 @@ export default function AdminPanel() {
     resPage * ITEMS_PER_PAGE
   );
 
-  // --- KULLANICI ROL AYIRMA (ÖĞRENCİLER VS YETKİLİLER), ARAMA VE 10'ARLI SAYFALAMA ---
+  // --- KULLANICI ARAMA VE 10'ARLI SAYFALAMA ---
   const filteredUsers = useMemo(() => {
     const q = userSearch.trim().toLowerCase();
     return data.users.filter((u) => {
@@ -391,18 +502,55 @@ export default function AdminPanel() {
           </Tabs>
 
           <Box sx={{ p: { xs: 2, md: 3 } }}>
-            {/* ================= SEKME 0: YOĞUNLUK & DOLULUK ANALİZİ (İDARE RAPORU) ================= */}
+            {/* ================= SEKME 0: YOĞUNLUK, RADAR, ISI HARİTASI VE BÖLÜM ANALİZİ ================= */}
             {tab === 0 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                <Alert severity="info" sx={{ borderRadius: 2 }}>
-                  <strong>Kütüphane Yoğunluk Karar Destek Ekranı:</strong> Bu ekrandan bugünkü anlık oda doluluklarını ve günlere göre toplam kullanılan saatleri inceleyerek yoğun günlerde ek çalışma odalarını devreye alabilirsiniz.
-                </Alert>
+                {/* FİKİR 6: Gelecek 1 Saat Operasyon Radarı */}
+                <Card
+                  sx={{
+                    p: 2.5,
+                    bgcolor: alpha(theme.palette.primary.main, 0.04),
+                    border: '1px solid',
+                    borderColor: alpha(theme.palette.primary.main, 0.2),
+                    display: 'flex',
+                    flexDirection: { xs: 'column', md: 'row' },
+                    alignItems: { md: 'center' },
+                    justifyContent: 'space-between',
+                    gap: 2,
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                    <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: 'primary.main', color: '#fff', display: 'flex' }}>
+                      <RadarIcon />
+                    </Box>
+                    <Box>
+                      <Typography sx={{ fontWeight: 700, fontSize: '1rem' }}>
+                        Gelecek 1 Saat Operasyon Radarı (Canlı Banko Takibi)
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Önümüzdeki 60 dakika içinde Kiosk'tan giriş (Check-in) yapması beklenen grup ve öğrenci yoğunluğu.
+                      </Typography>
+                    </Box>
+                  </Box>
 
+                  <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                    <Chip
+                      label={`Şu An Odada Aktif: ${radarStats.currentlyInRooms} Grup`}
+                      color="success"
+                      sx={{ fontWeight: 700, height: 32, px: 1 }}
+                    />
+                    <Chip
+                      label={`Gelecek 1 Saatte Beklenen: ${radarStats.upcomingNextHourGroups} Grup (${radarStats.upcomingNextHourStudents} Öğrenci)`}
+                      color="primary"
+                      sx={{ fontWeight: 700, height: 32, px: 1 }}
+                    />
+                  </Box>
+                </Card>
+
+                {/* Üst İkili Grafik: Bugünkü Oda Yoğunluğu & Günlük Trend */}
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
-                  {/* Sol: Bugünkü Oda Yoğunluğu */}
                   <RoomDensityChart />
 
-                  {/* Sağ: Günlere Göre Rezervasyon Saati Trendi */}
                   <Card sx={{ p: 3 }}>
                     <Typography sx={{ fontSize: '0.95rem', fontWeight: 700, mb: 0.5 }}>
                       Günlere Göre Toplam Kullanım (Saat & Randevu Analizi)
@@ -430,13 +578,121 @@ export default function AdminPanel() {
                     )}
                   </Card>
                 </Box>
+
+                {/* Alt İkili Analiz: FİKİR 1 (24 Saatlik Isı Haritası) & FİKİR 4 (Bölüm Bazlı Dağılım) */}
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
+                  {/* FİKİR 1: Saatlik Yoğunluk Isı Haritası */}
+                  <Card sx={{ p: 3 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <WhatshotIcon color="warning" fontSize="small" />
+                        <Typography sx={{ fontSize: '0.95rem', fontWeight: 700 }}>
+                          7/24 Saatlik Yoğunluk Isı Haritası (Heatmap)
+                        </Typography>
+                      </Box>
+                      {hourlyHeatmap.peakVal > 0 && (
+                        <Chip
+                          label={`Zirve Saat: ${hourlyHeatmap.peakHour}`}
+                          size="small"
+                          color="error"
+                          sx={{ fontWeight: 700, fontSize: '0.68rem', height: 22 }}
+                        />
+                      )}
+                    </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                      Kütüphanenin 24 saatlik dilimde en çok hangi saatlerde tercih edildiğini renk yoğunluğuyla gösterir.
+                    </Typography>
+
+                    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 1 }}>
+                      {hourlyHeatmap.slots.map((slot) => {
+                        const bg =
+                          slot.count === 0
+                            ? theme.palette.background.default
+                            : slot.intensity >= 0.75
+                            ? alpha(theme.palette.error.main, 0.18)
+                            : slot.intensity >= 0.4
+                            ? alpha(theme.palette.warning.main, 0.18)
+                            : alpha(theme.palette.success.main, 0.15);
+
+                        const textColor =
+                          slot.count === 0
+                            ? 'text.disabled'
+                            : slot.intensity >= 0.75
+                            ? 'error.main'
+                            : slot.intensity >= 0.4
+                            ? 'warning.main'
+                            : 'success.main';
+
+                        return (
+                          <Tooltip key={slot.hourLabel} title={`${slot.hourLabel} diliminde toplam ${slot.count} oda kullanımı`}>
+                            <Box
+                              sx={{
+                                p: 1,
+                                borderRadius: 1.5,
+                                bgcolor: bg,
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                textAlign: 'center',
+                              }}
+                            >
+                              <Typography sx={{ fontSize: '0.7rem', fontWeight: 700, color: textColor }}>
+                                {slot.hourLabel}
+                              </Typography>
+                              <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 600 }}>
+                                {slot.count} Grup
+                              </Typography>
+                            </Box>
+                          </Tooltip>
+                        );
+                      })}
+                    </Box>
+                  </Card>
+
+                  {/* FİKİR 4: Fakülte & Bölüm Bazlı Kullanım Dağılımı */}
+                  <Card sx={{ p: 3 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <SchoolIcon color="primary" fontSize="small" />
+                      <Typography sx={{ fontSize: '0.95rem', fontWeight: 700 }}>
+                        Bölüm Bazlı Kütüphane Kullanım Dağılımı
+                      </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2.5 }}>
+                      Çalışma odalarını en aktif kullanan bölümlerin (Organizatör + Onaylı Katılımcı) dağılımı.
+                    </Typography>
+
+                    {departmentStats.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 6 }}>
+                        Henüz bölüm bazlı kullanım verisi oluşmadı.
+                      </Typography>
+                    ) : (
+                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {departmentStats.map((dept) => (
+                          <Box key={dept.name}>
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                              <Typography sx={{ fontSize: '0.8rem', fontWeight: 600 }}>
+                                {dept.name}
+                              </Typography>
+                              <Typography sx={{ fontSize: '0.75rem', fontWeight: 700, color: 'primary.main' }}>
+                                {dept.count} Öğrenci Katılımı (%{dept.pct})
+                              </Typography>
+                            </Box>
+                            <LinearProgress
+                              variant="determinate"
+                              value={dept.pct}
+                              sx={{ height: 8, borderRadius: 4, bgcolor: 'background.default' }}
+                            />
+                          </Box>
+                        ))}
+                      </Box>
+                    )}
+                  </Card>
+                </Box>
               </Box>
             )}
 
             {/* ================= SEKME 1: REZERVASYONLAR (GRUP FİLTRELİ & 10'ARLI SAYFALI) ================= */}
             {tab === 1 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                {/* Kategori Seçici Butonlar */}
                 <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', pb: 1, borderBottom: '1px solid', borderColor: 'divider' }}>
                   {[
                     { key: 'ACTIVE', label: `Şu An Devam Eden & Gelecek (${categorizedReservations.ACTIVE.length})`, color: 'success' },
@@ -768,10 +1024,9 @@ export default function AdminPanel() {
               </Box>
             )}
 
-            {/* ================= SEKME 4: ÖĞRENCİ ARAMA, CEZA/BAN VE YETKİLİLER (AYRI & 10'ARLI) ================= */}
+            {/* ================= SEKME 4: ÖĞRENCİ ARAMA, CEZA/BAN VE YETKİLİLER ================= */}
             {tab === 4 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-                {/* Üst Bar: Öğrenciler vs Görevli/Yöneticiler Ayrımı + Arama Kutusu */}
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { md: 'center' }, gap: 2 }}>
                   <Box sx={{ display: 'flex', gap: 1.5 }}>
                     <Button
@@ -1021,7 +1276,6 @@ export default function AdminPanel() {
                   </Box>
                 </Box>
 
-                {/* Sadece SUPER_ADMIN İçin Üst Üste Binmeyen, 10'arlı Sayfalanmış Sistem Logları */}
                 {isSuperAdmin && (
                   <>
                     <Divider />
