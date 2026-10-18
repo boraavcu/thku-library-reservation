@@ -1,23 +1,43 @@
 import { useEffect, useState } from 'react';
-import { Box, Card, Typography, CircularProgress, LinearProgress } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
+import { Box, Card, Typography, CircularProgress, LinearProgress, Alert, Button } from '@mui/material';
+import { useSession } from 'next-auth/react';
 import QrCode2Icon from '@mui/icons-material/QrCode2';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import api from '../api';
 
+const ALLOWED_ROLES = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'];
+
 export default function Kiosk() {
+  const navigate = useNavigate();
+  const { data: session, status } = useSession();
   const [data, setData] = useState({ token: '------', expiresIn: 30 });
   const [loading, setLoading] = useState(true);
+  const [unauthorized, setUnauthorized] = useState(false);
+
+  const isAuthorized = ALLOWED_ROLES.includes(session?.user?.role);
 
   const fetchToken = async () => {
     try {
       const res = await api.get('/kiosk/qr');
       setData(res.data);
       setLoading(false);
-    } catch {
+    } catch (err) {
+      if (err.response?.status === 403 || err.response?.status === 401) {
+        setUnauthorized(true);
+      }
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (status === 'loading') return;
+    if (status === 'unauthenticated' || !isAuthorized) {
+      setUnauthorized(true);
+      setLoading(false);
+      return;
+    }
+
     fetchToken();
     const interval = setInterval(() => {
       setData((prev) => {
@@ -29,7 +49,30 @@ export default function Kiosk() {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [status, isAuthorized]);
+
+  if (status === 'loading' || loading) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (unauthorized) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', bgcolor: 'background.default', p: 3 }}>
+        <Card sx={{ maxWidth: 460, width: '100%', p: 4, textAlign: 'center' }}>
+          <Alert severity="error" sx={{ mb: 3 }}>
+            Bu Kiosk ekranı yalnızca Kütüphane Görevlisi ve Sistem Yöneticisi yetkisiyle açılabilir.
+          </Alert>
+          <Button variant="contained" startIcon={<ArrowBackIcon />} onClick={() => navigate('/dashboard')}>
+            Ana Sayfaya Dön
+          </Button>
+        </Card>
+      </Box>
+    );
+  }
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
@@ -42,25 +85,19 @@ export default function Kiosk() {
           Oda rezervasyonunuzu başlatmak için aşağıdaki 6 haneli kodu öğrenci panelinizdeki Check-In ekranına giriniz.
         </Typography>
 
-        {loading ? (
-          <CircularProgress />
-        ) : (
-          <>
-            <Box sx={{ py: 3, px: 2, bgcolor: 'action.hover', borderRadius: 3, border: '2px dashed', borderColor: 'primary.main', mb: 3 }}>
-              <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: '0.25em', color: 'primary.main' }}>
-                {data.token}
-              </Typography>
-            </Box>
-            <LinearProgress
-              variant="determinate"
-              value={(data.expiresIn / 30) * 100}
-              sx={{ height: 8, borderRadius: 4, mb: 1 }}
-            />
-            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-              Yeni kod için kalan süre: {data.expiresIn} saniye
-            </Typography>
-          </>
-        )}
+        <Box sx={{ py: 3, px: 2, bgcolor: 'action.hover', borderRadius: 3, border: '2px dashed', borderColor: 'primary.main', mb: 3 }}>
+          <Typography variant="h2" sx={{ fontWeight: 900, letterSpacing: '0.25em', color: 'primary.main' }}>
+            {data.token}
+          </Typography>
+        </Box>
+        <LinearProgress
+          variant="determinate"
+          value={(data.expiresIn / 30) * 100}
+          sx={{ height: 8, borderRadius: 4, mb: 1 }}
+        />
+        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
+          Yeni kod için kalan süre: {data.expiresIn} saniye
+        </Typography>
       </Card>
     </Box>
   );

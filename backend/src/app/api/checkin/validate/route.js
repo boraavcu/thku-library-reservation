@@ -6,6 +6,8 @@ import redis from "@/lib/redis";
 
 const TOLERANCE_MINUTES = 15;
 const REDIS_KEY = "kiosk:current_token";
+const MAX_ATTEMPTS = 5;
+const LOCK_SECONDS = 300; // 5 dakika
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -13,24 +15,40 @@ export async function POST(request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { token } = await request.json();
-  if (!token) {
-    return NextResponse.json({ error: "Token gerekli." }, { status: 400 });
-  }
+  const currentUserId = session.user.id;
+  const attemptKey = `kiosk:attempts:${currentUserId}`;
 
   try {
+    // 1. Brute-Force (Deneme-Yanılma) Kontrolü
+    const attempts = Number((await redis.get(attemptKey)) || 0);
+    if (attempts >= MAX_ATTEMPTS) {
+      return NextResponse.json(
+        { error: "Çok fazla hatalı kod denemesi yaptınız. Lütfen 5 dakika sonra tekrar deneyiniz." },
+        { status: 429 }
+      );
+    }
+
+    const { token } = await request.json();
+    if (!token) {
+      return NextResponse.json({ error: "Token gerekli." }, { status: 400 });
+    }
+
     const currentToken = await redis.get(REDIS_KEY);
     if (!currentToken || currentToken !== token.trim().toUpperCase()) {
+      const newCount = await redis.incr(attemptKey);
+      if (newCount === 1) {
+        await redis.expire(attemptKey, LOCK_SECONDS);
+      }
       return NextResponse.json(
-        { error: "Geçersiz veya süresi dolmuş QR kod." },
+        { error: `Geçersiz veya süresi dolmuş Kiosk kodu. (Kalan deneme hakkı: ${Math.max(0, MAX_ATTEMPTS - newCount)})` },
         { status: 400 }
       );
     }
 
-    const now = new Date();
-    const currentUserId = session.user.id;
+    // Doğru girildiyse hatalı deneme sayacını temizle
+    await redis.del(attemptKey);
 
-    // Türkiye saat dilimine (Europe/Istanbul) göre tarih ve saat hesaplaması
+    const now = new Date();
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDate = new Date(`${todayStr}T00:00:00Z`);
 
@@ -82,7 +100,6 @@ export async function POST(request) {
       );
     }
 
-    // Rezervasyonu CHECKED_IN olarak güncelle
     if (reservation.status !== "CHECKED_IN") {
       await prisma.reservation.update({
         where: { id: reservation.id },
@@ -96,8 +113,9 @@ export async function POST(request) {
 
     const startHour = new Date(reservation.startTime).getUTCHours();
     const startMin = new Date(reservation.startTime).getUTCMinutes();
-    const endHour = new Date(reservation.endTime).getUTCHours();
-    const endMin = new Date(reservation.endTime).getUTCMinutes();
+    const endDt = new Date(reservation.endTime);
+    const endHour = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+    const endMin = endHour === 24 ? 0 : endDt.getUTCMinutes();
 
     const fmtTime = (h, m) =>
       `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
