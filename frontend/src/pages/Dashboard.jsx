@@ -58,6 +58,11 @@ function Dashboard() {
     }
     if (session?.user && !session.user.acceptedAgreementVersion) {
       navigate('/rules');
+      return;
+    }
+    // Görevli, Müdür ve BİM Yöneticisi doğrudan Yönetim & Analiz Merkezine gider
+    if (['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role)) {
+      navigate('/admin', { replace: true });
     }
   }, [session, status, navigate]);
 

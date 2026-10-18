@@ -127,7 +127,7 @@ export default function Navbar() {
 
             {/* Sol - THKÜ Logo */}
             <Box
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) ? '/admin' : '/dashboard')}
               sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: 'pointer' }}
             >
               <Avatar
@@ -151,38 +151,52 @@ export default function Navbar() {
               </Box>
             </Box>
 
-            {/* Orta - Menü Bağlantıları */}
-            <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 0.5 }}>
-              {NAV_LINKS.map(item => (
-                <Button
-                  key={item.path}
-                  onClick={() => navigate(item.path)}
-                  sx={{
-                    color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
-                    bgcolor: location.pathname === item.path ? 'action.hover' : 'transparent',
-                    fontWeight: location.pathname === item.path ? 700 : 500,
-                    fontSize: '0.875rem', px: 2,
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  {t(item.labelKey)}
-                </Button>
-              ))}
-
-              {['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) && (
-                <Button
-                  onClick={() => navigate('/admin')}
-                  sx={{
-                    color: location.pathname === '/admin' ? 'primary.main' : 'warning.main',
-                    bgcolor: location.pathname === '/admin' ? 'action.hover' : 'transparent',
-                    fontWeight: 700,
-                    fontSize: '0.875rem',
-                    px: 2,
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  {isEn ? 'Management Panel' : 'Yönetim Paneli'}
-                </Button>
+{/* Orta - Rol Bazlı Menü Bağlantıları */}
+            <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
+              {['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) ? (
+                <>
+                  <Button
+                    onClick={() => navigate('/admin')}
+                    sx={{
+                      color: location.pathname === '/admin' ? 'primary.main' : 'text.primary',
+                      bgcolor: location.pathname === '/admin' ? 'action.hover' : 'transparent',
+                      fontWeight: 700,
+                      fontSize: '0.875rem',
+                      px: 2,
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                  >
+                    {isEn ? 'Management & Analytics Center' : 'Yönetim & Analiz Merkezi'}
+                  </Button>
+                  <Button
+                    onClick={() => window.open('/kiosk', '_blank')}
+                    sx={{
+                      color: 'text.secondary',
+                      fontWeight: 600,
+                      fontSize: '0.875rem',
+                      px: 2,
+                      '&:hover': { bgcolor: 'action.hover', color: 'primary.main' },
+                    }}
+                  >
+                    {isEn ? 'Kiosk QR Screen' : 'Kiosk QR Ekranı'}
+                  </Button>
+                </>
+              ) : (
+                NAV_LINKS.map(item => (
+                  <Button
+                    key={item.path}
+                    onClick={() => navigate(item.path)}
+                    sx={{
+                      color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
+                      bgcolor: location.pathname === item.path ? 'action.hover' : 'transparent',
+                      fontWeight: location.pathname === item.path ? 700 : 500,
+                      fontSize: '0.875rem', px: 2,
+                      '&:hover': { bgcolor: 'action.hover' },
+                    }}
+                  >
+                    {t(item.labelKey)}
+                  </Button>
+                ))
               )}
             </Box>
 
