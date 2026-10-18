@@ -285,7 +285,9 @@ export async function GET() {
 }
 
 /**
- * PATCH /api/reservations -> MADDE 8: Organizatörün Odayı Erken Boşaltması (Early Check-Out)
+ * PATCH /api/reservations ->
+ * 1) EARLY_CHECKOUT: Organizatörün Odayı Erken Boşaltması (Madde 8)
+ * 2) SELF_EXTEND_1H: 7/24 Kütüphanede Önündeki Saat Boşsa Öğrencinin +1 Saat Uzatması (Madde 3)
  */
 export async function PATCH(request) {
   const session = await getServerSession(authOptions);
@@ -295,7 +297,7 @@ export async function PATCH(request) {
 
   try {
     const { reservationId, action } = await request.json();
-    if (!reservationId || action !== "EARLY_CHECKOUT") {
+    if (!reservationId || !["EARLY_CHECKOUT", "SELF_EXTEND_1H"].includes(action)) {
       return NextResponse.json({ error: "Geçersiz istek." }, { status: 400 });
     }
 
@@ -316,12 +318,82 @@ export async function PATCH(request) {
     const isStaff = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"].includes(user.role);
     if (reservation.userId !== user.id && !isStaff) {
       return NextResponse.json(
-        { error: "Odayı erken boşaltma işlemini yalnızca rezervasyon organizatörü veya görevli yapabilir." },
+        { error: "Bu işlemi yalnızca rezervasyon organizatörü veya görevli yapabilir." },
         { status: 403 }
       );
     }
 
-    // Şu anki Türkiye saatine göre bitiş saatini güncelle ki kalan saatler diğer öğrencilere açılsın
+    // --- SENARYO 1: ÖĞRENCİNİN KENDİ KENDİNE +1 SAAT SÜRE UZATMASI (7/24 Destekli) ---
+    if (action === "SELF_EXTEND_1H") {
+      if (!["CONFIRMED", "CHECKED_IN"].includes(reservation.status)) {
+        return NextResponse.json(
+          { error: "Yalnızca onaylanmış veya giriş yapılmış aktif rezervasyonlar uzatılabilir." },
+          { status: 400 }
+        );
+      }
+
+      const currentEndHour = new Date(reservation.endTime).getUTCHours();
+      const currentEndMin = new Date(reservation.endTime).getUTCMinutes();
+
+      if (currentEndHour >= 23) {
+        return NextResponse.json(
+          { error: "Gün sonu (23:59) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
+          { status: 400 }
+        );
+      }
+
+      const targetEndHour = currentEndHour + 1;
+      const newEndTime = new Date(Date.UTC(1970, 0, 1, targetEndHour, currentEndMin, 0));
+
+      // Odanın bir sonraki saatinde başka bir rezervasyon var mı?
+      const conflict = await prisma.reservation.findFirst({
+        where: {
+          id: { not: reservationId },
+          roomId: reservation.roomId,
+          reservationDate: reservation.reservationDate,
+          status: { notIn: ["CANCELLED", "NO_SHOW"] },
+          AND: [
+            { startTime: { lt: newEndTime } },
+            { endTime: { gt: reservation.endTime } },
+          ],
+        },
+      });
+
+      if (conflict) {
+        return NextResponse.json(
+          { error: "Odanın bir sonraki saat dilimi başka bir grup tarafından rezerve edildiği için uzatılamaz." },
+          { status: 409 }
+        );
+      }
+
+      const updated = await prisma.reservation.update({
+        where: { id: reservationId },
+        data: { endTime: newEndTime },
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          userId: user.id,
+          action: "RESERVATION_EXTENDED",
+          entityType: "Reservation",
+          entityId: reservationId,
+          oldData: { endTime: reservation.endTime },
+          newData: {
+            room: reservation.room.roomNumber,
+            newEndTime: `${String(targetEndHour).padStart(2, "0")}:00`,
+            extendedBy: user.email,
+          },
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: `Oda müsait olduğu için rezervasyonunuz saat ${String(targetEndHour).padStart(2, "0")}:00'a kadar +1 saat uzatıldı!`,
+        reservation: updated,
+      });
+    }
+
+    // --- SENARYO 2: ODAYI ERKEN BOŞALTMA (EARLY_CHECKOUT) ---
     const now = new Date();
     const trParts = new Intl.DateTimeFormat("en-GB", {
       timeZone: "Europe/Istanbul",
@@ -336,7 +408,6 @@ export async function PATCH(request) {
     const origStartH = new Date(reservation.startTime).getUTCHours();
     const origEndH = new Date(reservation.endTime).getUTCHours();
 
-    // Eğer oda kullanımı içindeyse bitiş saatini şu anki saate çek
     let newEndObj = reservation.endTime;
     if (curH >= origStartH && curH < origEndH) {
       newEndObj = new Date(Date.UTC(1970, 0, 1, curH, curM, 0));
@@ -372,7 +443,7 @@ export async function PATCH(request) {
       reservation: updated,
     });
   } catch (error) {
-    console.error("Early checkout error:", error);
+    console.error("Reservation PATCH error:", error);
     return NextResponse.json({ error: "İşlem başarısız." }, { status: 500 });
   }
 }
