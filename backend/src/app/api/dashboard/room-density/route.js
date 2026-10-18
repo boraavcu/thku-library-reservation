@@ -3,9 +3,9 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 
-const LIBRARY_OPEN = 8;
-const LIBRARY_CLOSE = 22;
-const TOTAL_HOURS = LIBRARY_CLOSE - LIBRARY_OPEN;
+const LIBRARY_OPEN = 0;
+const LIBRARY_CLOSE = 24;
+const TOTAL_HOURS = LIBRARY_CLOSE - LIBRARY_OPEN; 
 
 export async function GET() {
   const session = await getServerSession(authOptions);
