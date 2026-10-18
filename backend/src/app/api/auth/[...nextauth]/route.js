@@ -121,7 +121,6 @@ export const authOptions = {
             where: { email: demo.email },
             update: {
               fullName: demo.fullName,
-              role: demo.role,
               department: demo.department,
               isActive: true,
             },
