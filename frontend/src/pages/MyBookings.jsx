@@ -19,6 +19,7 @@ import EventNoteIcon from '@mui/icons-material/EventNote';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import MoreTimeIcon from '@mui/icons-material/MoreTime';
 
 export default function MyBookings() {
   const navigate = useNavigate();
@@ -53,7 +54,6 @@ export default function MyBookings() {
     fetchAllData();
   }, [status, navigate, fetchAllData]);
 
-  // MADDE 10: Rezervasyon Başlamadan İptal Etme
   const handleCancel = async (id) => {
     try {
       await api.delete(`/reservations?id=${id}`);
@@ -68,7 +68,6 @@ export default function MyBookings() {
     }
   };
 
-  // MADDE 8: Odayı Erken Boşaltma (Check-Out)
   const handleEarlyCheckout = async (id) => {
     try {
       const res = await api.patch('/reservations', { reservationId: id, action: 'EARLY_CHECKOUT' });
@@ -80,6 +79,25 @@ export default function MyBookings() {
       fetchAllData();
     } catch (err) {
       setSnack({ open: true, message: err.response?.data?.error || 'İşlem başarısız.', severity: 'error' });
+    }
+  };
+
+  // 7/24 Kütüphane: Önündeki 1 saat boşsa öğrencinin kendi süresini +1 saat uzatması
+  const handleSelfExtend = async (id) => {
+    try {
+      const res = await api.patch('/reservations', { reservationId: id, action: 'SELF_EXTEND_1H' });
+      setSnack({
+        open: true,
+        message: res.data?.message || 'Rezervasyon süresi +1 saat uzatıldı!',
+        severity: 'success',
+      });
+      fetchAllData();
+    } catch (err) {
+      setSnack({
+        open: true,
+        message: err.response?.data?.error || 'Süre uzatılamadı.',
+        severity: 'error',
+      });
     }
   };
 
@@ -138,8 +156,8 @@ export default function MyBookings() {
               <Typography variant="h4" sx={{ fontWeight: 700 }}>{t('navMyBookings')}</Typography>
               <Typography variant="body2" color="text.secondary">
                 {isEn
-                  ? 'Track your active sessions, group invitations, and past booking history.'
-                  : 'Aktif çalışma odası rezervasyonlarınızı, grup davetlerinizi ve geçmiş kayıtlarınızı yönetin.'}
+                  ? 'Track your active sessions, extend time if available, or manage invitations.'
+                  : 'Aktif rezervasyonlarınızı yönetin, oda müsaitse +1 saat uzatın veya erken boşaltın.'}
               </Typography>
             </Box>
           </Box>
@@ -175,7 +193,7 @@ export default function MyBookings() {
                     const statusColor = isCancelled ? 'error' : isConfirmed ? 'success' : 'warning';
 
                     return (
-                      <Card key={res.id} sx={{ p: 2.5, borderLeft: `4px solid ${theme.palette[statusColor].main}` }}>
+                      <Card key={res.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette[statusColor].main}` }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
                           <Box>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
@@ -221,19 +239,29 @@ export default function MyBookings() {
                             )}
                           </Box>
 
-                          {/* Organizatör Aksiyon Butonları (Madde 8 & Madde 10) */}
                           {tab === 0 && isOrganizer && (
                             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                               {['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
-                                <Button
-                                  variant="contained"
-                                  color="primary"
-                                  size="small"
-                                  startIcon={<ExitToAppIcon />}
-                                  onClick={() => handleEarlyCheckout(res.id)}
-                                >
-                                  {isEn ? 'Early Check-Out (Free Room)' : 'Odayı Erken Boşalt'}
-                                </Button>
+                                <>
+                                  <Button
+                                    variant="outlined"
+                                    color="primary"
+                                    size="small"
+                                    startIcon={<MoreTimeIcon />}
+                                    onClick={() => handleSelfExtend(res.id)}
+                                  >
+                                    {isEn ? '+1h Extend' : '+1 Saat Uzat'}
+                                  </Button>
+                                  <Button
+                                    variant="contained"
+                                    color="info"
+                                    size="small"
+                                    startIcon={<ExitToAppIcon />}
+                                    onClick={() => handleEarlyCheckout(res.id)}
+                                  >
+                                    {isEn ? 'Early Check-Out' : 'Odayı Erken Boşalt'}
+                                  </Button>
+                                </>
                               )}
 
                               {['PENDING', 'CONFIRMED'].includes(res.status) && (
@@ -257,7 +285,6 @@ export default function MyBookings() {
               )
             )}
 
-            {/* SEKME 1: GRUP DAVETLERİ */}
             {tab === 1 && (
               invitations.length === 0 ? (
                 <Box sx={{ py: 4, textAlign: 'center' }}>
@@ -266,7 +293,7 @@ export default function MyBookings() {
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {invitations.map((inv) => (
-                    <Card key={inv.id} sx={{ p: 2.5, borderLeft: `4px solid ${theme.palette.warning.main}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+                    <Card key={inv.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette.warning.main}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
                       <Box>
                         <Typography sx={{ fontWeight: 700 }}>
                           {t('invitedYouTo', { name: inv.reservation?.user?.fullName, room: `${inv.reservation?.room?.roomNumber} - ${inv.reservation?.room?.name}` })}
