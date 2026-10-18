@@ -38,8 +38,8 @@ export async function GET() {
     const roomMap = new Map();
     for (const r of reservations) {
       const start = new Date(r.startTime).getUTCHours();
-      const end = new Date(r.endTime).getUTCHours();
-      const hours = Math.max(0, end - start);
+      const endDt = new Date(r.endTime);
+      const end = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
       roomMap.set(r.roomId, (roomMap.get(r.roomId) || 0) + hours);
     }
 
