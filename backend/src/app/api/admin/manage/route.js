@@ -197,9 +197,9 @@ export async function POST(request) {
       const currentEndMin = new Date(resRecord.endTime).getUTCMinutes();
       const targetEndHour = currentEndHour + Number(extraHours);
 
-      if (targetEndHour > 22) {
+      if (targetEndHour > 23) {
         return NextResponse.json(
-          { error: "Kütüphane kapanış saati (22:00) aşıldığı için süre uzatılamaz." },
+          { error: "Gün sonu (23:59) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
           { status: 400 }
         );
       }
