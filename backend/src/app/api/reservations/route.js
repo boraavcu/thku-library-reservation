@@ -74,9 +74,12 @@ export async function POST(request) {
 
     const dateObj = new Date(reservationDate + "T00:00:00Z");
     const startObj = new Date(`1970-01-01T${startTime}:00Z`);
-    const endObj = new Date(`1970-01-01T${endTime}:00Z`);
+    const endObj =
+      endTime === "24:00"
+        ? new Date("1970-01-01T23:59:59Z")
+        : new Date(`1970-01-01T${endTime}:00Z`);
 
-    const durationHours = (endObj - startObj) / (1000 * 60 * 60);
+    const durationHours = Math.round((endObj - startObj) / (1000 * 60 * 60));
     if (durationHours <= 0 || durationHours > maxDurationHours) {
       return NextResponse.json(
         { error: `Rezervasyon süresi en fazla ${maxDurationHours} saat olabilir.` },
@@ -142,7 +145,8 @@ export async function POST(request) {
     });
 
     if (existingGroupBookingToday) {
-      const isCreatorBusy = existingGroupBookingToday.userId === creator.id ||
+      const isCreatorBusy =
+        existingGroupBookingToday.userId === creator.id ||
         existingGroupBookingToday.participants.some((p) => p.userId === creator.id);
 
       if (isCreatorBusy) {
@@ -152,10 +156,9 @@ export async function POST(request) {
         );
       }
 
-      const busyMember =
-        allGroupUserIds.includes(existingGroupBookingToday.userId)
-          ? existingGroupBookingToday.user.email
-          : existingGroupBookingToday.participants[0]?.user?.email;
+      const busyMember = allGroupUserIds.includes(existingGroupBookingToday.userId)
+        ? existingGroupBookingToday.user.email
+        : existingGroupBookingToday.participants[0]?.user?.email;
 
       return NextResponse.json(
         { error: `Grubunuzdaki ${busyMember} öğrencisinin seçilen tarihte zaten aktif bir rezervasyonu bulunmaktadır (Günlük 1 Rezervasyon Kuralı).` },
@@ -335,15 +338,18 @@ export async function PATCH(request) {
       const currentEndHour = new Date(reservation.endTime).getUTCHours();
       const currentEndMin = new Date(reservation.endTime).getUTCMinutes();
 
-      if (currentEndHour >= 23) {
+      if (currentEndHour >= 23 && currentEndMin >= 59) {
         return NextResponse.json(
-          { error: "Gün sonu (23:59) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
+          { error: "Gün sonu (24:00) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
           { status: 400 }
         );
       }
 
       const targetEndHour = currentEndHour + 1;
-      const newEndTime = new Date(Date.UTC(1970, 0, 1, targetEndHour, currentEndMin, 0));
+      const newEndTime =
+        targetEndHour >= 24
+          ? new Date(Date.UTC(1970, 0, 1, 23, 59, 59))
+          : new Date(Date.UTC(1970, 0, 1, targetEndHour, currentEndMin, 0));
 
       // Odanın bir sonraki saatinde başka bir rezervasyon var mı?
       const conflict = await prisma.reservation.findFirst({
@@ -371,6 +377,8 @@ export async function PATCH(request) {
         data: { endTime: newEndTime },
       });
 
+      const formattedTargetHour = targetEndHour >= 24 ? "24:00" : `${String(targetEndHour).padStart(2, "0")}:00`;
+
       await prisma.auditLog.create({
         data: {
           userId: user.id,
@@ -380,7 +388,7 @@ export async function PATCH(request) {
           oldData: { endTime: reservation.endTime },
           newData: {
             room: reservation.room.roomNumber,
-            newEndTime: `${String(targetEndHour).padStart(2, "0")}:00`,
+            newEndTime: formattedTargetHour,
             extendedBy: user.email,
           },
         },
@@ -388,7 +396,7 @@ export async function PATCH(request) {
 
       return NextResponse.json({
         success: true,
-        message: `Oda müsait olduğu için rezervasyonunuz saat ${String(targetEndHour).padStart(2, "0")}:00'a kadar +1 saat uzatıldı!`,
+        message: `Oda müsait olduğu için rezervasyonunuz saat ${formattedTargetHour}'a kadar +1 saat uzatıldı!`,
         reservation: updated,
       });
     }
@@ -487,7 +495,6 @@ export async function DELETE(request) {
       );
     }
 
-    // Öğrenci ise: Rezervasyon zaten başlamışsa veya CHECKED_IN olmuşsa "İptal" değil "Erken Bitir" kullanmalı
     if (!isStaff && reservation.status === "CHECKED_IN") {
       return NextResponse.json(
         { error: "Giriş (Check-in) yapılmış rezervasyon iptal edilemez; 'Odayı Erken Boşalt' butonunu kullanabilirsiniz." },

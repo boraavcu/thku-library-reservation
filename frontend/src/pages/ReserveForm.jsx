@@ -24,8 +24,8 @@ import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 
-const HOUR_START = 8;
-const HOUR_END = 22;
+const HOUR_START = 0;
+const HOUR_END = 24;
 const SLOT_HEIGHT = 56;
 
 const toDateStr = (d) => {
@@ -139,11 +139,15 @@ function ReserveForm() {
   };
 
   // ============ Occupied slots ============
-  const occupiedBlocks = useMemo(
-    () => occupiedSlots.map((s) => ({
-      startHour: new Date(s.startTime).getUTCHours(),
-      endHour: new Date(s.endTime).getUTCHours(),
-    })),
+ const occupiedBlocks = useMemo(
+    () => occupiedSlots.map((s) => {
+      const endDt = new Date(s.endTime);
+      const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+      return {
+        startHour: new Date(s.startTime).getUTCHours(),
+        endHour: endH,
+      };
+    }),
     [occupiedSlots]
   );
 

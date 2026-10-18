@@ -53,7 +53,7 @@ const resources = {
       // Dashboard - Welcome
       welcomeBack: "Welcome back, {{name}}",
       welcomeSubtitle: "Manage your study sessions and check library availability.",
-      libraryCloses: "Library closes at {{time}} today",
+      libraryCloses: "Library is Open 24/7",
 
       // Dashboard - Quick Actions
       quickActions: "Quick Actions",
@@ -278,7 +278,7 @@ const resources = {
       // Dashboard - Welcome
       welcomeBack: "Tekrar hoşgeldin, {{name}}",
       welcomeSubtitle: "Çalışma seanslarınızı yönetin ve kütüphane müsaitliğini kontrol edin.",
-      libraryCloses: "Kütüphane bugün {{time}}'da kapanıyor",
+      libraryCloses: "Kütüphane 7/24 Açık",
 
       // Dashboard - Quick Actions
       quickActions: "Hızlı İşlemler",
