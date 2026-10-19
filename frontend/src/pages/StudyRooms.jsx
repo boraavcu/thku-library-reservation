@@ -17,8 +17,9 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 
-const LIBRARY_OPEN = 8;
-const LIBRARY_CLOSE = 22;
+// 7/24 
+const LIBRARY_OPEN = 0;
+const LIBRARY_CLOSE = 24;
 
 function StudyRooms() {
   const navigate = useNavigate();
@@ -206,12 +207,12 @@ function StudyRooms() {
   );
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
 
       <Navbar />
 
       {/* ===== MAIN LAYOUT ===== */}
-      <Box sx={{ display: 'flex' }}>
+      <Box sx={{ display: 'flex', flex: 1 }}>
 
         {/* Desktop Filter Sidebar */}
         <Box
@@ -353,6 +354,7 @@ function StudyRooms() {
           </Box>
         </Box>
       </Box>
+      
       <Footer />
     </Box>
   );
