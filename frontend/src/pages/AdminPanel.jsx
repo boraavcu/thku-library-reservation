@@ -909,19 +909,38 @@ export default function AdminPanel() {
                         </Typography>
                       </Box>
 
-                      <Tooltip title={room.isActive ? 'Odayı Kapat' : 'Odayı Aç'}>
-                        <Switch
-                          checked={room.isActive}
-                          color="success"
-                          onChange={(e) =>
-                            runAction(
-                              'TOGGLE_ROOM',
-                              { roomId: room.id, isActive: e.target.checked },
-                              `${room.roomNumber} ${e.target.checked ? 'rezervasyona açıldı' : 'bakıma alındı'}.`
-                            )
-                          }
-                        />
-                      </Tooltip>
+                      {/* Sağ Taraf: Aç/Kapat Switch'i ve Silme Butonu Yan Yana */}
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Tooltip title={room.isActive ? 'Odayı Kapat' : 'Odayı Aç'}>
+                          <Switch
+                            checked={room.isActive}
+                            color="success"
+                            onChange={(e) =>
+                              runAction(
+                                'TOGGLE_ROOM',
+                                { roomId: room.id, isActive: e.target.checked },
+                                `${room.roomNumber} ${e.target.checked ? 'rezervasyona açıldı' : 'bakıma alındı'}.`
+                              )
+                            }
+                          />
+                        </Tooltip>
+
+                        {isAdminOrSuper && (
+                          <Tooltip title="Odayı Kalıcı Olarak Sil">
+                            <IconButton
+                              color="error"
+                              size="small"
+                              onClick={() => {
+                                if (window.confirm(`${room.roomNumber} - ${room.name} odasını silmek istediğinize emin misiniz?`)) {
+                                  runAction('DELETE_ROOM', { roomId: room.id }, 'Oda sistemden silindi.');
+                                }
+                              }}
+                            >
+                              <DeleteOutlineIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
                     </Card>
                   ))}
                 </Box>

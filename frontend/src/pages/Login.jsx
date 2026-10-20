@@ -248,7 +248,7 @@ const Login = () => {
             <>
               <Divider sx={{ my: 0.5 }}>
                 <Chip
-                  label="SUNUM & TEST HIZLI GİRİŞ"
+                  label="DEMO HIZLI GİRİŞ"
                   size="small"
                   sx={{ fontSize: '0.65rem', fontWeight: 700, bgcolor: 'action.hover', color: 'primary.main' }}
                 />

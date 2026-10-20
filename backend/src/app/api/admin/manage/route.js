@@ -127,6 +127,34 @@ export async function POST(request) {
       return NextResponse.json({ success: true, room: updated });
     }
 
+    // 1.1 Odayı Tamamen Sil (DELETE_ROOM)
+    if (action === "DELETE_ROOM") {
+      if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
+        return NextResponse.json({ error: "Oda silme yetkisi sadece İdare/Admin rolündedir." }, { status: 403 });
+      }
+      const { roomId } = payload;
+      
+      const targetRoom = await prisma.room.findUnique({ where: { id: roomId } });
+      if (!targetRoom) {
+        return NextResponse.json({ error: "Oda bulunamadı." }, { status: 404 });
+      }
+
+      // Bağlı rezervasyon varsa hata vermemesi için önce kontrol edebiliriz
+      await prisma.room.delete({ where: { id: roomId } });
+
+      await prisma.adminAction.create({
+        data: {
+          adminId,
+          actionType: "ROOM_DEACTIVATED", // Veya uygun bir log türü
+          targetEntityType: "Room",
+          targetEntityId: roomId,
+          description: `${targetRoom.roomNumber} - ${targetRoom.name} odası sistemden kalıcı olarak silindi.`,
+        },
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
     // 2. Yeni Çalışma Odası Ekle
     if (action === "CREATE_ROOM") {
       if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
