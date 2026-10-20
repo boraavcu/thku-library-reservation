@@ -382,10 +382,14 @@ export default function Navbar() {
                   <PersonIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                   <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('profile')}</Typography>
                 </MenuItem>
-                <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
-                  <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                  <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
-                </MenuItem>
+
+                {!['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) && (
+                  <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                    <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
+                  </MenuItem>
+                )}
+
                 <MenuItem onClick={() => navigate('/rules?view=true')} sx={{ py: 1, px: 2, gap: 1.25 }}>
                   <GavelIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
                   <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('reservationRules')}</Typography>
