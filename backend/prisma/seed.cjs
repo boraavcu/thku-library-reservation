@@ -3,7 +3,6 @@ const { PrismaClient } = require("@prisma/client");
 
 const prisma = new PrismaClient();
 
-// Yardımcı tarih ve saat oluşturucular (Komutun çalıştırıldığı güne göre dinamik)
 function getDateOffset(daysOffset) {
   const now = new Date();
   const trDateStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
@@ -17,9 +16,8 @@ function getTimeUTC(hour, minute = 0, second = 0) {
 }
 
 async function main() {
-  console.log("🌱 THKÜ Kütüphane Sistemi Kapsamlı Sunum & Test Verileri Yükleniyor...");
+  console.log("🌱 THKÜ Kütüphane Sistemi Mentor Sunumu Verileri Yükleniyor...");
 
-  // 1. Önce eski hareket kayıtlarını temizle (Temiz ve tutarlı bir demo için)
   await prisma.reservationParticipant.deleteMany();
   await prisma.penaltyHistory.deleteMany();
   await prisma.reservation.deleteMany();
@@ -27,7 +25,7 @@ async function main() {
   await prisma.auditLog.deleteMany();
   await prisma.announcement.deleteMany();
 
-  // 2. Yetkili Hesapları (SUPER_ADMIN, ADMIN, LIBRARIAN)
+  // 1. Yetkili Hesapları (SUPER_ADMIN, ADMIN, LIBRARIAN)
   const superAdmin = await prisma.user.upsert({
     where: { email: "admin@thk.edu.tr" },
     update: { role: "SUPER_ADMIN", fullName: "THKÜ Sistem Yöneticisi (BİM)", department: "Bilgi İşlem Müdürlüğü", acceptedAgreementVersion: "v1.0", isActive: true },
@@ -46,13 +44,12 @@ async function main() {
     create: { email: "kutuphane@thk.edu.tr", fullName: "Kütüphane Görevlisi", department: "Kütüphane ve Dokümantasyon", role: "LIBRARIAN", acceptedAgreementVersion: "v1.0", isActive: true },
   });
 
-  // 3. 18 Öğrenci (Farklı Bölümlerden - 10'arlı Sayfalama ve Bölüm Analizi İçin)
+  // 2. 18 Öğrenci (10'arlı Sayfalama ve Bölüm Analizi İçin)
   const studentDefinitions = [
     { email: "s250444902@stu.thk.edu.tr", fullName: "Bora Avcu (Öğrenci 1)", studentNumber: "250444902", department: "Bilgisayar Mühendisliği", penaltyPoints: 0, isBanned: false },
     { email: "s250201903@stu.thk.edu.tr", fullName: "Ayşe Yılmaz (Öğrenci 2)", studentNumber: "250201903", department: "Havacılık ve Uzay Mühendisliği", penaltyPoints: 0, isBanned: false },
     { email: "s220401001@stu.thk.edu.tr", fullName: "Mehmet Demir (Öğrenci 3)", studentNumber: "220401001", department: "Yazılım Mühendisliği", penaltyPoints: 0, isBanned: false },
     { email: "s220401002@stu.thk.edu.tr", fullName: "Zeynep Kaya (Öğrenci 4)", studentNumber: "220401002", department: "Elektrik-Elektronik Mühendisliği", penaltyPoints: 15, isBanned: false },
-    // Caner Aydın: 2 adet No-Show'u var (30 puan). Canlı demoda 1 kez daha No-Show basılınca otomatik banlanacak!
     { email: "s220401003@stu.thk.edu.tr", fullName: "Caner Aydın (Öğrenci 5 - Sınırda)", studentNumber: "220401003", department: "Makine Mühendisliği", penaltyPoints: 30, isBanned: false },
     { email: "s220401004@stu.thk.edu.tr", fullName: "Elif Şahin (Öğrenci 6)", studentNumber: "220401004", department: "Endüstri Mühendisliği", penaltyPoints: 0, isBanned: false },
     { email: "s220401005@stu.thk.edu.tr", fullName: "Burak Çelik (Öğrenci 7)", studentNumber: "220401005", department: "Pilotaj", penaltyPoints: 0, isBanned: false },
@@ -66,7 +63,6 @@ async function main() {
     { email: "s220401013@stu.thk.edu.tr", fullName: "Gizem Güler", studentNumber: "220401013", department: "Havacılık ve Uzay Mühendisliği", penaltyPoints: 0, isBanned: false },
     { email: "s220401014@stu.thk.edu.tr", fullName: "Tolga Doğan", studentNumber: "220401014", department: "Makine Mühendisliği", penaltyPoints: 15, isBanned: false },
     { email: "s220401015@stu.thk.edu.tr", fullName: "Büşra Korkmaz", studentNumber: "220401015", department: "Yazılım Mühendisliği", penaltyPoints: 0, isBanned: false },
-    // Banlı örnek öğrenci (Yönetim panelinde "Banı Aç" butonunu göstermek için)
     {
       email: "s220401016@stu.thk.edu.tr",
       fullName: "Hakan Yavuz (Banlı Öğrenci)",
@@ -113,7 +109,7 @@ async function main() {
   }
   console.log(`✅ ${students.length} öğrenci ve 3 yetkili kullanıcı hazır!`);
 
-  // 4. Çalışma Odaları
+  // 3. Çalışma Odaları
   const roomList = [
     { roomNumber: "R101", name: "Atatürk", capacity: 7, isActive: true },
     { roomNumber: "R102", name: "Gökçen", capacity: 7, isActive: true },
@@ -131,7 +127,7 @@ async function main() {
     rooms.push(rm);
   }
 
-  // 5. Aktif Sözleşme (v1.0) ve Kurallar
+  // 4. Aktif Sözleşme (v1.0) ve Kurallar
   const agreementContent = `1. Maksimum Rezervasyon Süresi
 Çalışma odaları günde en fazla 3 saat süreyle rezerve edilebilir. Süre uzatmaları müsaitlik durumuna bağlıdır ve süre dolmadan 15 dakika önce danışmadan talep edilmelidir. Aynı grubun farklı isimlerle ardışık rezervasyon yapması yasaktır.
 
@@ -173,13 +169,21 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
     });
   }
 
-  // 6. Zengin Rezervasyon Verileri (Son 5 Gün + Bugün + Yarın)
-  const nowHour = new Date().getHours();
-  const activeHour = Math.min(20, Math.max(8, nowHour));
-  const nextHour = Math.min(22, activeHour + 1);
+  // 5. Şu Anki Türkiye Saatine Göre Dinamik Rezervasyonlar
+  const trHourParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const nowHour = Number(trHourParts.find((p) => p.type === "hour").value);
+
+  // Bora'nın bugünkü randevusu şu anki saatte başlasın ve 2 saat sürsün (Sonraki saatleri +1 uzatma için boş!)
+  const boraStartH = Math.min(20, Math.max(0, nowHour));
+  const boraEndH = boraStartH + 2;
+  const nextHour = Math.min(21, boraStartH + 1);
 
   const sampleReservations = [
-    // --- GEÇMİŞ GÜNLER (Günlük Trend, Isı Haritası ve Bölüm Analizi İçin) ---
+    // --- GEÇMİŞ GÜNLER (Trend Grafiği, Isı Haritası ve Bölüm Analizi İçin) ---
     { dayOffset: -5, roomIdx: 0, orgIdx: 0, partIdxs: [1, 7, 10], startH: 10, endH: 13, status: "COMPLETED", purpose: "Algoritma Analizi Proje Çalışması" },
     { dayOffset: -5, roomIdx: 1, orgIdx: 2, partIdxs: [9, 16], startH: 14, endH: 16, status: "COMPLETED", purpose: "Yazılım Mimarisi Sunum Hazırlığı" },
     { dayOffset: -4, roomIdx: 0, orgIdx: 1, partIdxs: [8, 14], startH: 9, endH: 12, status: "COMPLETED", purpose: "Aerodinamik Rüzgar Tüneli Raporu" },
@@ -193,23 +197,73 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
     { dayOffset: -1, roomIdx: 1, orgIdx: 2, partIdxs: [0, 9, 10], startH: 13, endH: 16, status: "COMPLETED", purpose: "Full-Stack Web Geliştirme Toplantısı" },
     { dayOffset: -1, roomIdx: 2, orgIdx: 5, partIdxs: [12], startH: 19, endH: 22, status: "COMPLETED", purpose: "Gece Vize Çalışma Grubu" },
 
-    // --- BUGÜN (Canlı Oda Yoğunluğu, Gelecek 1 Saat Radarı ve Müdahale Testi İçin) ---
-    { dayOffset: 0, roomIdx: 0, orgIdx: 7, partIdxs: [10, 9], startH: 9, endH: 12, status: "COMPLETED", purpose: "Veri Yapıları Çalışması" },
-    { dayOffset: 0, roomIdx: 1, orgIdx: 8, partIdxs: [14, 6], startH: activeHour, endH: Math.min(23, activeHour + 2), status: "CHECKED_IN", purpose: "İtkı Sistemleri Tasarımı (Şu An Odada)" },
-    { dayOffset: 0, roomIdx: 2, orgIdx: 4, partIdxs: [15, 13], startH: nextHour, endH: Math.min(24, nextHour + 2), status: "CONFIRMED", purpose: "Caner'in Randevusu (No-Show Testi İçin)" },
-    { dayOffset: 0, roomIdx: 3, orgIdx: 11, partIdxs: [12, 16], startH: nextHour, endH: Math.min(24, nextHour + 3), status: "CONFIRMED", purpose: "Simülasyon ve Kontrol Grubu" },
+    // --- BUGÜN: 1) BORA AVCU (ÖĞRENCİ 1) ORGANİZATÖR OLARAK AKTİF RANDEVUDA (R101 - Atatürk) ---
+    // Durumu CONFIRMED: Kiosk kodu girilip CHECKED_IN yapılabilir, Rezervasyonlarım'dan +1 Saat Uzat ve Erken Boşalt yapılabilir!
+    {
+      dayOffset: 0,
+      roomIdx: 0, // R101 - Atatürk (Sonraki saatleri boş bırakıldı ki +1 Saat Uzat çalışsın!)
+      orgIdx: 0,  // Bora Avcu (Öğrenci 1 - Organizatör)
+      partIdxs: [2, 7], // Mehmet Demir ve Selin Arslan (ACCEPTED)
+      startH: boraStartH,
+      endH: boraEndH,
+      status: "CONFIRMED",
+      purpose: "Bilgisayar Müh. Bitirme Projesi Grup Çalışması (Bora Organizatör)",
+    },
 
-    // --- YARIN (Gelecek Randevular ve Davet Testi İçin) ---
-    { dayOffset: 1, roomIdx: 0, orgIdx: 1, partIdxs: [0, 2], startH: 10, endH: 13, status: "PENDING", purpose: "Yarınki Disiplinlerarası Proje Toplantısı" },
-    { dayOffset: 1, roomIdx: 1, orgIdx: 5, partIdxs: [12, 13], startH: 14, endH: 17, status: "CONFIRMED", purpose: "Mühendislik Ekonomisi Sunumu" },
+    // --- BUGÜN: 2) R102 - Gökçen (Şu An Odada CHECKED_IN Olan Başka Bir Grup) ---
+    {
+      dayOffset: 0,
+      roomIdx: 1,
+      orgIdx: 8,
+      partIdxs: [14, 6],
+      startH: boraStartH,
+      endH: boraEndH,
+      status: "CHECKED_IN",
+      purpose: "İtki Sistemleri Tasarımı (Şu An Odada Aktif Grup)",
+    },
+
+    // --- BUGÜN: 3) R103 - Uçantürk (Caner Aydın'ın Randevusu - Canlı 3. No-Show = 30 Gün Ban Şovu İçin) ---
+    {
+      dayOffset: 0,
+      roomIdx: 2,
+      orgIdx: 4, // Caner Aydın (2/3 No-Show'u var)
+      partIdxs: [15, 13],
+      startH: nextHour,
+      endH: Math.min(24, nextHour + 2),
+      status: "CONFIRMED",
+      purpose: "Caner'in Randevusu (Yönetim Panelinde No-Show Oto-Ban Testi İçin)",
+    },
+
+    // --- BUGÜN: 4) R104 - İstikbal (Gelecek 1 Saat Operasyon Radarı İçin) ---
+    {
+      dayOffset: 0,
+      roomIdx: 3,
+      orgIdx: 11,
+      partIdxs: [12, 16],
+      startH: nextHour,
+      endH: Math.min(24, nextHour + 2),
+      status: "CONFIRMED",
+      purpose: "Uçuş Simülasyon ve Kontrol Grubu",
+    },
+
+    // --- YARIN (dayOffset: 1): BORA AVCU'YA GELEN DAVET TESTİ İÇİN ---
+    {
+      dayOffset: 1,
+      roomIdx: 1, // R102 - Gökçen
+      orgIdx: 1,  // Ayşe Yılmaz (Öğrenci 2) davet gönderdi
+      partIdxs: [0, 2], // 0 = Bora Avcu (PENDING olarak bekleyen davet!)
+      startH: 10,
+      endH: 13,
+      status: "PENDING",
+      purpose: "Yarınki Disiplinlerarası Havacılık & Yazılım Toplantısı",
+    },
   ];
 
-  const createdReservations = [];
   for (const item of sampleReservations) {
     const orgUser = students[item.orgIdx];
     const room = rooms[item.roomIdx];
 
-    const res = await prisma.reservation.create({
+    await prisma.reservation.create({
       data: {
         roomId: room.id,
         userId: orgUser.id,
@@ -231,11 +285,10 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
         },
       },
     });
-    createdReservations.push(res);
   }
-  console.log(`✅ ${createdReservations.length} adet geçmiş, bugünkü ve gelecek rezervasyon oluşturuldu!`);
+  console.log(`✅ Bora Avcu bugün R101 - Atatürk odasında (${boraStartH}:00 - ${boraEndH}:00) Organizatör olarak atandı!`);
 
-  // 7. Ceza Kayıtları (Caner Aydın'a 2 adet aktif No-Show, Hakan Yavuz'a 3 adet No-Show)
+  // 6. Ceza Kayıtları (Caner Aydın: 2/3 No-Show, Hakan Yavuz: 3/3 Banlı)
   const caner = students[4];
   const hakan = students[17];
 
@@ -249,7 +302,7 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
     ],
   });
 
-  // 8. Duyurular (Dashboard ve Bildirim Zili İçin)
+  // 7. Duyurular
   await prisma.announcement.createMany({
     data: [
       {
@@ -258,8 +311,8 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
           en: "24/7 Group Study Rooms and Kiosk Check-In System is Now Active",
         },
         content: {
-          tr: "Kütüphanemiz 7/24 hizmet vermektedir. Rezervasyon başlangıç saatinden itibaren 15 dakika içinde Kiosk kodunu girerek giriş yapmayı unutmayınız. Odanın bir sonraki saati boşsa panelinizden +1 saat uzatma yapabilirsiniz.",
-          en: "Our library is open 24/7. Please remember to check in with the Kiosk code within 15 minutes of your start time. If the next hour is free, you can extend your session by +1 hour.",
+          tr: "Kütüphanemiz 7/24 hizmet vermektedir. Rezervasyon başlangıç saatinden itibaren Kiosk kodunu girerek giriş yapmayı unutmayınız. Odanın bir sonraki saati boşsa panelinizden +1 saat uzatma yapabilirsiniz.",
+          en: "Our library is open 24/7. Please remember to check in with the Kiosk code. If the next hour is free, you can extend your session by +1 hour.",
         },
         priority: "HIGH",
         isPinned: true,
@@ -285,7 +338,7 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
     ],
   });
 
-  // 9. SUPER_ADMIN İçin 12 Adet Öğrenci Logu ve 12 Adet Yönetici Logu (10'arlı Sayfalama Testi İçin)
+  // 8. 12 Öğrenci Logu + 12 Yönetici Logu (10'arlı Sayfalama Testi İçin)
   for (let i = 0; i < 12; i++) {
     const st = students[i % students.length];
     const rm = rooms[i % rooms.length];
@@ -321,7 +374,7 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
     });
   }
 
-  console.log("✅ Tüm analiz, grafik, ceza ve 10'arlı sayfalama verileri başarıyla yüklendi!");
+  console.log("✅ Tüm mentor sunumu verileri başarıyla yüklendi!");
 }
 
 main()

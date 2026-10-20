@@ -7,7 +7,7 @@ import redis from "@/lib/redis";
 const TOLERANCE_MINUTES = 15;
 const REDIS_KEY = "kiosk:current_token";
 const MAX_ATTEMPTS = 5;
-const LOCK_SECONDS = 300; // 5 dakika
+const LOCK_SECONDS = 300;
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -19,7 +19,6 @@ export async function POST(request) {
   const attemptKey = `kiosk:attempts:${currentUserId}`;
 
   try {
-    // 1. Brute-Force (Deneme-Yanılma) Kontrolü
     const attempts = Number((await redis.get(attemptKey)) || 0);
     if (attempts >= MAX_ATTEMPTS) {
       return NextResponse.json(
@@ -39,13 +38,13 @@ export async function POST(request) {
       if (newCount === 1) {
         await redis.expire(attemptKey, LOCK_SECONDS);
       }
+      const remaining = Math.max(0, MAX_ATTEMPTS - newCount);
       return NextResponse.json(
-        { error: `Geçersiz veya süresi dolmuş Kiosk kodu. (Kalan deneme hakkı: ${Math.max(0, MAX_ATTEMPTS - newCount)})` },
+        { error: `Geçersiz veya süresi dolmuş Kiosk kodu. (Kalan deneme hakkı: ${remaining})` },
         { status: 400 }
       );
     }
 
-    // Doğru girildiyse hatalı deneme sayacını temizle
     await redis.del(attemptKey);
 
     const now = new Date();
@@ -77,7 +76,8 @@ export async function POST(request) {
       where: {
         reservationDate: todayDate,
         status: { in: ["CONFIRMED", "CHECKED_IN"] },
-        startTime: { gte: windowStart, lte: windowEnd },
+        startTime: { lte: windowEnd },
+        endTime: { gte: windowStart },
         OR: [
           { userId: currentUserId },
           {
@@ -95,7 +95,7 @@ export async function POST(request) {
 
     if (!reservation) {
       return NextResponse.json(
-        { error: "Şu an için başlayan (±15 dk) onaylı bir rezervasyonunuz bulunamadı." },
+        { error: "Şu an için başlayan onaylı bir rezervasyonunuz bulunamadı." },
         { status: 404 }
       );
     }
@@ -110,6 +110,7 @@ export async function POST(request) {
         },
       });
 
+      const roomTitle = [reservation.room.roomNumber, reservation.room.name].join(" ");
       await prisma.auditLog.create({
         data: {
           userId: currentUserId,
@@ -117,7 +118,7 @@ export async function POST(request) {
           entityType: "Reservation",
           entityId: reservation.id,
           newData: {
-            room: `${reservation.room.roomNumber} - ${reservation.room.name}`,
+            room: roomTitle,
             checkedInBy: session.user.email,
           },
         },
