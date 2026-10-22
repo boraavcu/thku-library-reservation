@@ -5,9 +5,9 @@ import prisma from "@/lib/db";
 
 const DEFAULTS = {
   MIN_PARTICIPANTS: 2,
-  MAX_PARTICIPANTS: 7,
-  MAX_DURATION_HOURS: 3,
-  MAX_ADVANCE_DAYS: 3,
+  MAX_PARTICIPANTS: 8, // Madde 2: Oda kapasitesi 8 kişi
+  MAX_DURATION_HOURS: 3, // Madde 9: Maksimum 3 saat
+  MAX_ADVANCE_DAYS: 1, // Madde 3: İleri tarih maksimum 1 gün (Yönetimden değiştirilebilir)
   DAILY_RELEASE_HOUR: 8,
 };
 
