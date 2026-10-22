@@ -2,32 +2,78 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import redis from "@/lib/redis";
+import {
+  runReservationLifecycleChecks,
+  sendNoShowWarningEmail,
+  sendKioskCheckInEmailToStaff,
+} from "@/lib/lifecycle";
 
-const STAFF_ROLES = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"];
+const ALLOWED_ROLES = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"];
+
+function getIstanbulDateInfo() {
+  const now = new Date();
+  const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+  const todayDate = new Date(`${todayStr}T00:00:00Z`);
+
+  const timeParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+
+  const currentHour = Number(timeParts.find((p) => p.type === "hour").value);
+  const currentMinute = Number(timeParts.find((p) => p.type === "minute").value);
+
+  return { todayStr, todayDate, currentHour, currentMinute };
+}
 
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (!session?.user || !STAFF_ROLES.includes(session.user.role)) {
+  const userRole = session?.user?.role;
+
+  if (!session?.user?.id || !ALLOWED_ROLES.includes(userRole)) {
     return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 403 });
   }
 
   try {
-    const isSuper = session.user.role === "SUPER_ADMIN";
+    // 30 dk davet zaman aşımı ve son 2 saat hatırlatma kontrollerini çalıştır
+    await runReservationLifecycleChecks();
 
-    const [rooms, reservations, announcements, users, rules, auditLogs, userAuditLogs] = await Promise.all([
+    const now = new Date();
+    // Loglar 180 gün gösterilsin, 1 yıl (365 gün) arşivlensin
+    const days180Ago = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
+    const days365Ago = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+    // 1 yıldan (365 gün) eski logları otomatik temizle (Rotasyon)
+    await Promise.all([
+      prisma.auditLog.deleteMany({ where: { createdAt: { lt: days365Ago } } }),
+      prisma.adminAction.deleteMany({ where: { createdAt: { lt: days365Ago } } }),
+    ]);
+
+    const [
+      rooms,
+      reservations,
+      users,
+      rules,
+      announcements,
+      auditLogs,
+      adminActions,
+      archivedAuditCount,
+      archivedAdminCount,
+    ] = await Promise.all([
       prisma.room.findMany({ orderBy: { roomNumber: "asc" } }),
       prisma.reservation.findMany({
-      take: 200,
-      orderBy: [{ reservationDate: "desc" }, { startTime: "asc" }],
-      include: {
-        room: { select: { roomNumber: true, name: true, capacity: true } },
-        user: { select: { id: true, fullName: true, email: true, studentNumber: true, department: true } },
-        participants: { include: { user: { select: { id: true, fullName: true, email: true, department: true } } } },
-      },
-      }),
-      prisma.announcement.findMany({
-        orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
-        take: 20,
+        take: 150,
+        orderBy: [{ reservationDate: "desc" }, { startTime: "desc" }],
+        include: {
+          room: { select: { id: true, roomNumber: true, name: true, capacity: true } },
+          user: { select: { id: true, fullName: true, email: true, studentNumber: true, department: true } },
+          participants: {
+            include: { user: { select: { id: true, fullName: true, email: true, department: true } } },
+          },
+        },
       }),
       prisma.user.findMany({
         orderBy: [{ isBanned: "desc" }, { penaltyPoints: "desc" }, { createdAt: "desc" }],
@@ -42,134 +88,196 @@ export async function GET() {
           isBanned: true,
           banUntil: true,
           banReason: true,
-          isActive: true,
           _count: {
             select: {
-              penaltyHistory: { where: { penaltyType: "NO_SHOW", isActive: true } },
+              penalties: {
+                where: { penaltyType: "NO_SHOW", isActive: true },
+              },
             },
           },
         },
       }),
-      prisma.reservationRule.findMany({
-        where: { isActive: true },
-        orderBy: { ruleName: "asc" },
-      }),
-      isSuper
-        ? prisma.adminAction.findMany({
-            take: 40,
-            orderBy: { createdAt: "desc" },
-            include: {
-              admin: { select: { fullName: true, email: true, role: true } },
-              affectedUser: { select: { fullName: true, email: true } },
-            },
-          })
-        : Promise.resolve([]),
-      isSuper
+      prisma.reservationRule.findMany({ orderBy: { ruleName: "asc" } }),
+      prisma.announcement.findMany({ orderBy: { createdAt: "desc" }, take: 25 }),
+      // MADDE 11: Ekranda sadece son 180 günün logları gösterilir
+      userRole === "SUPER_ADMIN"
         ? prisma.auditLog.findMany({
-            take: 60,
+            where: { createdAt: { gte: days180Ago } },
+            take: 120,
             orderBy: { createdAt: "desc" },
-            include: {
-              user: { select: { fullName: true, email: true, role: true } },
-            },
+            include: { user: { select: { fullName: true, email: true, role: true } } },
           })
         : Promise.resolve([]),
+      userRole === "SUPER_ADMIN"
+        ? prisma.adminAction.findMany({
+            where: { createdAt: { gte: days180Ago } },
+            take: 120,
+            orderBy: { createdAt: "desc" },
+            include: { admin: { select: { fullName: true, email: true, role: true } } },
+          })
+        : Promise.resolve([]),
+      userRole === "SUPER_ADMIN"
+        ? prisma.auditLog.count({
+            where: { createdAt: { gte: days365Ago, lt: days180Ago } },
+          })
+        : Promise.resolve(0),
+      userRole === "SUPER_ADMIN"
+        ? prisma.adminAction.count({
+            where: { createdAt: { gte: days365Ago, lt: days180Ago } },
+          })
+        : Promise.resolve(0),
     ]);
+
+    // Analitik Hesaplamalar (Isı Haritası, Bölüm Dağılımı, Gelecek 1 Saat Radarı)
+    const { todayDate, currentHour, currentMinute } = getIstanbulDateInfo();
+    const nowTotalMins = currentHour * 60 + currentMinute;
+
+    const hourlyHeatmap = Array.from({ length: 24 }, (_, h) => ({
+      hour: `${String(h).padStart(2, "0")}:00`,
+      hourNum: h,
+      count: 0,
+    }));
+
+    const deptCounts = {};
+    let activeNowRooms = 0;
+    let upcomingHourReservations = 0;
+    let upcomingHourStudents = 0;
+
+    const validReservations = reservations.filter(
+      (r) => !["CANCELLED", "NO_SHOW"].includes(r.status)
+    );
+
+    for (const r of validReservations) {
+      const sH = new Date(r.startTime).getUTCHours();
+      const sM = new Date(r.startTime).getUTCMinutes();
+      const endDt = new Date(r.endTime);
+      const eH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+
+      for (let h = sH; h < eH; h++) {
+        if (h >= 0 && h < 24) {
+          hourlyHeatmap[h].count += 1;
+        }
+      }
+
+      const orgDept = r.user?.department || "Diğer Bölümler";
+      deptCounts[orgDept] = (deptCounts[orgDept] || 0) + 1;
+
+      for (const p of r.participants || []) {
+        if (p.status === "ACCEPTED") {
+          const pDept = p.user?.department || "Diğer Bölümler";
+          deptCounts[pDept] = (deptCounts[pDept] || 0) + 1;
+        }
+      }
+
+      const rDateStr = new Date(r.reservationDate).toISOString().split("T")[0];
+      const todayIsoStr = todayDate.toISOString().split("T")[0];
+
+      if (rDateStr === todayIsoStr) {
+        const startMins = sH * 60 + sM;
+        const endMins = eH * 60;
+        const confirmedGroupSize =
+          1 + (r.participants || []).filter((p) => p.status === "ACCEPTED").length;
+
+        if (r.status === "CHECKED_IN" || (nowTotalMins >= startMins && nowTotalMins < endMins)) {
+          activeNowRooms += 1;
+        }
+
+        const diffToStart = startMins - nowTotalMins;
+        if (diffToStart >= 0 && diffToStart <= 60 && ["CONFIRMED", "PENDING"].includes(r.status)) {
+          upcomingHourReservations += 1;
+          upcomingHourStudents += confirmedGroupSize;
+        }
+      }
+    }
+
+    const totalDeptUsage = Object.values(deptCounts).reduce((a, b) => a + b, 0) || 1;
+    const departmentBreakdown = Object.entries(deptCounts)
+      .map(([name, count]) => ({
+        name,
+        count,
+        percentage: Math.round((count / totalDeptUsage) * 100),
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    const peakHourObj = [...hourlyHeatmap].sort((a, b) => b.count - a.count)[0] || {
+      hour: "14:00",
+      count: 0,
+    };
 
     return NextResponse.json({
       rooms,
       reservations,
-      announcements,
       users,
       rules,
+      announcements,
       auditLogs,
-      userAuditLogs,
+      adminActions,
+      logRetentionPolicy: {
+        activeDisplayDays: 180,
+        archiveRetentionDays: 365,
+        archivedRecordsCount: archivedAuditCount + archivedAdminCount,
+      },
+      analytics: {
+        hourlyHeatmap,
+        departmentBreakdown,
+        peakHour: peakHourObj.hour,
+        activeNowRooms,
+        upcomingHourReservations,
+        upcomingHourStudents,
+      },
     });
   } catch (error) {
     console.error("Admin GET error:", error);
-    return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 });
+    return NextResponse.json({ error: "Veriler alınamadı." }, { status: 500 });
   }
 }
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user || !STAFF_ROLES.includes(session.user.role)) {
+  const currentRole = session?.user?.role;
+  const adminId = session?.user?.id;
+
+  if (!adminId || !ALLOWED_ROLES.includes(currentRole)) {
     return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 403 });
   }
 
   try {
     const body = await request.json();
     const { action, payload } = body;
-    const adminId = session.user.id;
-    const currentRole = session.user.role;
 
-    // 1. Odayı Aç/Kapat
+    // 1. Odayı Aktif / Pasif (Bakımda) Yap
     if (action === "TOGGLE_ROOM") {
-      const { roomId, isActive, capacity, name } = payload;
-      const updated = await prisma.room.update({
+      const { roomId, isActive } = payload;
+      const room = await prisma.room.update({
         where: { id: roomId },
-        data: {
-          ...(typeof isActive === "boolean" && { isActive }),
-          ...(capacity && { capacity: Number(capacity) }),
-          ...(name && { name: name.trim() }),
-        },
+        data: { isActive: Boolean(isActive) },
       });
 
       await prisma.adminAction.create({
         data: {
           adminId,
-          actionType: isActive === false ? "ROOM_DEACTIVATED" : "ROOM_UPDATED",
+          actionType: isActive ? "ROOM_UPDATED" : "ROOM_DEACTIVATED",
           targetEntityType: "Room",
           targetEntityId: roomId,
-          description: `${updated.roomNumber} (${updated.name}) durumu güncellendi (Aktif: ${updated.isActive}).`,
+          description: `${room.roomNumber} (${room.name}) odası ${isActive ? "rezervasyona açıldı" : "bakıma alındı (kapatıldı)"}.`,
         },
       });
 
-      return NextResponse.json({ success: true, room: updated });
+      return NextResponse.json({ success: true, room });
     }
 
-    // 1.1 Odayı Tamamen Sil (DELETE_ROOM)
-    if (action === "DELETE_ROOM") {
-      if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
-        return NextResponse.json({ error: "Oda silme yetkisi sadece İdare/Admin rolündedir." }, { status: 403 });
-      }
-      const { roomId } = payload;
-      
-      const targetRoom = await prisma.room.findUnique({ where: { id: roomId } });
-      if (!targetRoom) {
-        return NextResponse.json({ error: "Oda bulunamadı." }, { status: 404 });
-      }
-
-      // Bağlı rezervasyon varsa hata vermemesi için önce kontrol edebiliriz
-      await prisma.room.delete({ where: { id: roomId } });
-
-      await prisma.adminAction.create({
-        data: {
-          adminId,
-          actionType: "ROOM_DEACTIVATED", // Veya uygun bir log türü
-          targetEntityType: "Room",
-          targetEntityId: roomId,
-          description: `${targetRoom.roomNumber} - ${targetRoom.name} odası sistemden kalıcı olarak silindi.`,
-        },
-      });
-
-      return NextResponse.json({ success: true });
-    }
-
-    // 2. Yeni Çalışma Odası Ekle
+    // Yeni Çalışma Odası Ekle
     if (action === "CREATE_ROOM") {
       if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
         return NextResponse.json({ error: "Yeni oda ekleme yetkisi sadece İdare/Admin rolündedir." }, { status: 403 });
       }
       const { roomNumber, name, capacity } = payload;
-      if (!roomNumber || !name) {
-        return NextResponse.json({ error: "Oda numarası ve adı zorunludur." }, { status: 400 });
-      }
-
       const created = await prisma.room.create({
         data: {
           roomNumber: roomNumber.trim().toUpperCase(),
           name: name.trim(),
-          capacity: Number(capacity) || 7,
+          capacity: Number(capacity) || 8,
           isActive: true,
         },
       });
@@ -180,410 +288,430 @@ export async function POST(request) {
           actionType: "ROOM_CREATED",
           targetEntityType: "Room",
           targetEntityId: created.id,
-          description: `Yeni çalışma odası açıldı: ${created.roomNumber} - ${created.name}`,
+          description: `Yeni çalışma odası eklendi: ${created.roomNumber} (${created.name}) Kapasite: ${created.capacity}`,
         },
       });
 
       return NextResponse.json({ success: true, room: created });
     }
 
-    // 3. Manuel Check-In
-    if (action === "FORCE_CHECKIN") {
-      const { reservationId } = payload;
-      const updated = await prisma.reservation.update({
-        where: { id: reservationId },
-        data: { status: "CHECKED_IN", checkedInAt: new Date(), checkedInById: adminId },
-      });
+    //  Var Olan Odanın İsmini, Kodunu ve Kapasitesini Düzenle (UPDATE_ROOM)
+    if (action === "UPDATE_ROOM") {
+      if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
+        return NextResponse.json({ error: "Oda bilgilerini düzenleme yetkisi sadece İdare/Admin rolündedir." }, { status: 403 });
+      }
+      const { roomId, roomNumber, name, capacity } = payload;
+      if (!roomId || !roomNumber?.trim() || !name?.trim()) {
+        return NextResponse.json({ error: "Oda kodu ve oda adı boş bırakılamaz." }, { status: 400 });
+      }
 
-      await prisma.adminAction.create({
+      const updatedRoom = await prisma.room.update({
+        where: { id: roomId },
         data: {
-          adminId,
-          actionType: "RESERVATION_FORCE_CHECKIN",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          affectedUserId: updated.userId,
-          description: "Görevli tarafından manuel check-in yapıldı.",
-        },
-      });
-
-      return NextResponse.json({ success: true });
-    }
-
-// 4. MADDE 3 & 3.1: Görevli Tarafından Rezervasyon Süresini +1 Saat Uzatma
-    if (action === "EXTEND_RESERVATION") {
-      const { reservationId, extraHours = 1 } = payload;
-      const resRecord = await prisma.reservation.findUnique({
-        where: { id: reservationId },
-        include: { room: true },
-      });
-
-      if (!resRecord) {
-        return NextResponse.json({ error: "Rezervasyon bulunamadı." }, { status: 404 });
-      }
-
-      const currentEndHour = new Date(resRecord.endTime).getUTCHours();
-      const currentEndMin = new Date(resRecord.endTime).getUTCMinutes();
-
-      if (currentEndHour >= 23 && currentEndMin >= 59) {
-        return NextResponse.json(
-          { error: "Gün sonu (24:00) sınırına ulaşıldığı için aynı gün içinde daha fazla uzatılamaz." },
-          { status: 400 }
-        );
-      }
-
-      const targetEndHour = currentEndHour + Number(extraHours);
-      const newEndTime =
-        targetEndHour >= 24
-          ? new Date(Date.UTC(1970, 0, 1, 23, 59, 59))
-          : new Date(Date.UTC(1970, 0, 1, targetEndHour, currentEndMin, 0));
-
-      // Uzatılmak istenen saatte başka bir rezervasyon var mı kontrol et
-      const conflict = await prisma.reservation.findFirst({
-        where: {
-          id: { not: reservationId },
-          roomId: resRecord.roomId,
-          reservationDate: resRecord.reservationDate,
-          status: { notIn: ["CANCELLED", "NO_SHOW"] },
-          AND: [
-            { startTime: { lt: newEndTime } },
-            { endTime: { gt: resRecord.endTime } },
-          ],
-        },
-      });
-
-      if (conflict) {
-        return NextResponse.json(
-          { error: "Odanın bir sonraki saat dilimi başka bir grup tarafından rezerve edildiği için süre uzatılamaz." },
-          { status: 409 }
-        );
-      }
-
-      await prisma.reservation.update({
-        where: { id: reservationId },
-        data: { endTime: newEndTime },
-      });
-
-      const formattedEnd = targetEndHour >= 24 ? "24:00" : `${String(targetEndHour).padStart(2, "0")}:00`;
-
-      await prisma.adminAction.create({
-        data: {
-          adminId,
-          actionType: "SETTINGS_UPDATED",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          affectedUserId: resRecord.userId,
-          description: `${resRecord.room.roomNumber} odası rezervasyon süresi +${extraHours} saat uzatıldı (Yeni Bitiş: ${formattedEnd}).`,
-        },
-      });
-
-      return NextResponse.json({ success: true });
-    }
-
-    // 5. MADDE 3.1 & 8: Görevli Tarafından Rezervasyonu Anlık Bitirme / Odayı Boşaltma
-    if (action === "EARLY_CLOSE_RESERVATION") {
-      const { reservationId } = payload;
-      const resRecord = await prisma.reservation.findUnique({
-        where: { id: reservationId },
-        include: { room: true },
-      });
-
-      if (!resRecord) {
-        return NextResponse.json({ error: "Rezervasyon bulunamadı." }, { status: 404 });
-      }
-
-      const now = new Date();
-      const trParts = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Europe/Istanbul",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).formatToParts(now);
-      const curH = Number(trParts.find((p) => p.type === "hour").value);
-      const curM = Number(trParts.find((p) => p.type === "minute").value);
-
-      const origStartH = new Date(resRecord.startTime).getUTCHours();
-      const origEndH = new Date(resRecord.endTime).getUTCHours();
-
-      let adjustedEnd = resRecord.endTime;
-      if (curH >= origStartH && curH < origEndH) {
-        adjustedEnd = new Date(Date.UTC(1970, 0, 1, curH, curM, 0));
-      }
-
-      await prisma.reservation.update({
-        where: { id: reservationId },
-        data: {
-          status: "COMPLETED",
-          endTime: adjustedEnd,
+          roomNumber: roomNumber.trim().toUpperCase(),
+          name: name.trim(),
+          capacity: Math.max(2, Number(capacity) || 8),
         },
       });
 
       await prisma.adminAction.create({
         data: {
           adminId,
-          actionType: "RESERVATION_CANCELLED",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          affectedUserId: resRecord.userId,
-          description: `${resRecord.room.roomNumber} odası görevli tarafından erken sonlandırıldı ve kullanıma açıldı.`,
+          actionType: "ROOM_UPDATED",
+          targetEntityType: "Room",
+          targetEntityId: roomId,
+          description: `Oda bilgileri güncellendi: ${updatedRoom.roomNumber} (${updatedRoom.name}) Yeni Kapasite: ${updatedRoom.capacity} Kişi.`,
         },
       });
 
-      return NextResponse.json({ success: true });
+      return NextResponse.json({ success: true, room: updatedRoom });
     }
 
-    // 6. Rezervasyon İptali
-    if (action === "CANCEL_RESERVATION") {
-      const { reservationId, reason } = payload;
-      const updated = await prisma.reservation.update({
-        where: { id: reservationId },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          cancellationReason: reason || "Görevli tarafından iptal edildi.",
-        },
-      });
+    // Odayı Kalıcı Olarak Sil (DELETE_ROOM)
+    if (action === "DELETE_ROOM") {
+      if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
+        return NextResponse.json({ error: "Oda silme yetkisi sadece İdare/Admin rolündedir." }, { status: 403 });
+      }
+      const { roomId } = payload;
+      const targetRoom = await prisma.room.findUnique({ where: { id: roomId } });
+      if (!targetRoom) {
+        return NextResponse.json({ error: "Oda bulunamadı." }, { status: 404 });
+      }
+
+      // Bağlı rezervasyonlar varsa önce onları temizle ki FK hatası vermesin
+      await prisma.reservation.deleteMany({ where: { roomId } });
+      await prisma.room.delete({ where: { id: roomId } });
 
       await prisma.adminAction.create({
         data: {
           adminId,
-          actionType: "RESERVATION_CANCELLED",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          affectedUserId: updated.userId,
-          description: `Rezervasyon iptal edildi.`,
+          actionType: "ROOM_DEACTIVATED",
+          targetEntityType: "Room",
+          targetEntityId: roomId,
+          description: `${targetRoom.roomNumber} (${targetRoom.name}) odası sistemden kalıcı olarak silindi.`,
         },
       });
 
       return NextResponse.json({ success: true });
     }
 
-    // 7. MADDE 1 & MADDE 4: No-Show'da Tüm Onaylı Üyelere Ceza + 3. No-Show'da 30 Gün Otomatik Ban
-    if (action === "MARK_NO_SHOW") {
-      const { reservationId, points = 15 } = payload;
-      const resRecord = await prisma.reservation.findUnique({
+    // Rezervasyon Operasyonları (FORCE_CHECKIN, EARLY_FINISH, CANCEL, MARK_NO_SHOW)
+    // Not: EXTEND_1H (+1 Saat Uzatma) tamamen kaldırılmıştır.
+    if (action === "RESERVATION_OP") {
+      const { reservationId, op } = payload;
+      const target = await prisma.reservation.findUnique({
         where: { id: reservationId },
         include: {
+          user: true,
           room: true,
-          participants: { where: { status: "ACCEPTED" } },
+          participants: {
+            where: { status: "ACCEPTED" },
+            include: { user: true },
+          },
         },
       });
 
-      if (!resRecord) {
+      if (!target) {
         return NextResponse.json({ error: "Rezervasyon bulunamadı." }, { status: 404 });
       }
 
-      // Organizatör + Daveti ACCEPTED yapmış tüm grup üyeleri
-      const targetUserIds = [
-        resRecord.userId,
-        ...resRecord.participants.map((p) => p.userId),
-      ];
-      const uniqueUserIds = [...new Set(targetUserIds)];
-
-      await prisma.reservation.update({
-        where: { id: reservationId },
-        data: { status: "NO_SHOW", noShow: true, penaltyApplied: true },
-      });
-
-      const autoBannedEmails = [];
-
-      for (const uid of uniqueUserIds) {
-        await prisma.penaltyHistory.create({
+      if (op === "FORCE_CHECKIN") {
+        await prisma.reservation.update({
+          where: { id: reservationId },
+          data: { status: "CHECKED_IN", checkedInAt: new Date(), checkedInById: adminId },
+        });
+        await sendKioskCheckInEmailToStaff(reservationId, session.user.email);
+        await prisma.adminAction.create({
           data: {
-            userId: uid,
-            reservationId,
-            penaltyType: "NO_SHOW",
-            penaltyPoints: Number(points),
-            description: `${resRecord.room.roomNumber} odası rezervasyonuna gelinmedi (No-Show).`,
-            isActive: true,
+            adminId,
+            actionType: "RESERVATION_FORCE_CHECKIN",
+            targetEntityType: "Reservation",
+            targetEntityId: reservationId,
+            description: `${target.room.roomNumber} odası için görevli tarafından manuel Check-In yapıldı.`,
           },
         });
+      } else if (op === "EARLY_FINISH") {
+        const { currentHour, currentMinute } = getIstanbulDateInfo();
+        const origStartH = new Date(target.startTime).getUTCHours();
+        const origEndH = new Date(target.endTime).getUTCHours();
 
-        await prisma.user.update({
-          where: { id: uid },
-          data: { penaltyPoints: { increment: Number(points) } },
+        let newEndTime = target.endTime;
+        if (currentHour >= origStartH && currentHour < origEndH) {
+          newEndTime = new Date(Date.UTC(1970, 0, 1, currentHour, currentMinute, 0));
+        }
+
+        await prisma.reservation.update({
+          where: { id: reservationId },
+          data: { status: "COMPLETED", endTime: newEndTime },
         });
-
-        // Kullanıcının aktif NO_SHOW sayısını kontrol et (Madde 1: 3 kez No-Show = 30 Gün Ban)
-        const activeNoShowCount = await prisma.penaltyHistory.count({
-          where: {
-            userId: uid,
-            penaltyType: "NO_SHOW",
-            isActive: true,
+        await prisma.adminAction.create({
+          data: {
+            adminId,
+            actionType: "RESERVATION_OVERRIDE",
+            targetEntityType: "Reservation",
+            targetEntityId: reservationId,
+            description: `${target.room.roomNumber} odası erken boşaltıldı (COMPLETED) ve kalan süre boşa çıkarıldı.`,
           },
         });
+      } else if (op === "CANCEL") {
+        await prisma.reservation.update({
+          where: { id: reservationId },
+          data: {
+            status: "CANCELLED",
+            cancelledAt: new Date(),
+            cancellationReason: `Kütüphane görevlisi (${session.user.email}) tarafından iptal edildi.`,
+          },
+        });
+        await prisma.adminAction.create({
+          data: {
+            adminId,
+            actionType: "RESERVATION_FORCE_CANCEL",
+            targetEntityType: "Reservation",
+            targetEntityId: reservationId,
+            description: `${target.room.roomNumber} rezervasyonu görevli tarafından iptal edildi.`,
+          },
+        });
+      } else if (op === "MARK_NO_SHOW") {
+        // Kiosk'tan kişisel kodunu girmeyen üyeleri tespit et ve 1/3 uyarı maili gönder!
+        const checkedSetKey = `kiosk:checked_users:${reservationId}`;
+        const checkedUserIds = await redis.smembers(checkedSetKey);
 
-        if (activeNoShowCount >= 3) {
-          const banUntilDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-          const bannedUser = await prisma.user.update({
-            where: { id: uid },
-            data: {
-              isBanned: true,
-              banUntil: banUntilDate,
-              banReason: `Dönem içinde 3 kez No-Show (Rezervasyona Gelmeme) kural ihlali nedeniyle 30 gün otomatik yasaklama.`,
-            },
+        const allApprovedUsers = [
+          target.user,
+          ...target.participants.map((p) => p.user),
+        ];
+
+        // Kodu girmeyenleri filtrele (Hiç kimse girmediyse tüm grup, bazıları girdiyse sadece girmeyenler)
+        const absentUsers = allApprovedUsers.filter((u) => !checkedUserIds.includes(u.id));
+        const usersToPenalize = absentUsers.length > 0 ? absentUsers : allApprovedUsers;
+
+        // Eğer hiç kimse gelmediyse odayı NO_SHOW yap; gelenler varsa oda açık kalır sadece gelmeyenler uyarı alır
+        if (checkedUserIds.length < 2) {
+          await prisma.reservation.update({
+            where: { id: reservationId },
+            data: { status: "NO_SHOW", noShow: true, penaltyApplied: true },
           });
-
-          autoBannedEmails.push(bannedUser.email);
-
-          // Banlanan kullanıcının gelecekteki aktif rezervasyonlarını otomatik iptal et
-          await prisma.reservation.updateMany({
-            where: {
-              userId: uid,
-              status: { in: ["PENDING", "CONFIRMED"] },
-            },
-            data: {
-              status: "CANCELLED",
-              cancelledAt: new Date(),
-              cancellationReason: "Kullanıcı 3 kez No-Show nedeniyle 30 gün banlandığı için otomatik iptal edildi.",
-            },
-          });
-
-          await prisma.adminAction.create({
-            data: {
-              adminId,
-              actionType: "USER_BANNED",
-              targetEntityType: "User",
-              targetEntityId: uid,
-              affectedUserId: uid,
-              description: `${bannedUser.email} kullanıcısı 3. No-Show ihlaline ulaştığı için sistem tarafından otomatik olarak 30 gün banlandı.`,
-            },
+        } else {
+          await prisma.reservation.update({
+            where: { id: reservationId },
+            data: { penaltyApplied: true },
           });
         }
+
+        const roomLabel = `${target.room.roomNumber} (${target.room.name})`;
+        const dateStr = new Date(target.reservationDate).toLocaleDateString("tr-TR", {
+          day: "2-digit",
+          month: "long",
+          year: "numeric",
+          timeZone: "UTC",
+        });
+
+        const autoBannedNames = [];
+
+        for (const member of usersToPenalize) {
+          await prisma.penaltyHistory.create({
+            data: {
+              userId: member.id,
+              reservationId,
+              penaltyType: "NO_SHOW",
+              penaltyPoints: 15,
+              description: `${roomLabel} rezervasyonunda kişisel Kiosk kodu girilmedi (No-Show Uyarısı).`,
+              createdBy: adminId,
+            },
+          });
+
+          const activeNoShowCount = await prisma.penaltyHistory.count({
+            where: {
+              userId: member.id,
+              penaltyType: "NO_SHOW",
+              isActive: true,
+            },
+          });
+
+          const shouldBan = activeNoShowCount >= 3;
+          const banUntilDate = shouldBan
+            ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+            : undefined;
+
+          await prisma.user.update({
+            where: { id: member.id },
+            data: {
+              penaltyPoints: { increment: 15 },
+              ...(shouldBan && {
+                isBanned: true,
+                banUntil: banUntilDate,
+                banReason: `Dönem içinde 3 kez No-Show (Kiosk kodu girmeme) ihlali nedeniyle 30 gün otomatik banlandı.`,
+              }),
+            },
+          });
+
+          // Öğrenciye 1/3, 2/3 veya 3/3 Uyarı/Ban E-postası Gönder
+          await sendNoShowWarningEmail({
+            user: member,
+            activeNoShowCount,
+            roomLabel,
+            dateStr,
+            isBanned: shouldBan,
+            banUntilDate,
+          });
+
+          if (shouldBan) {
+            autoBannedNames.push(member.email);
+            await prisma.reservation.updateMany({
+              where: {
+                userId: member.id,
+                status: { in: ["PENDING", "CONFIRMED"] },
+                reservationDate: { gte: new Date() },
+              },
+              data: {
+                status: "CANCELLED",
+                cancelledAt: new Date(),
+                cancellationReason: "Kullanıcı 3. No-Show uyarısına ulaşıp banlandığı için otomatik iptal edildi.",
+              },
+            });
+          }
+        }
+
+        await prisma.adminAction.create({
+          data: {
+            adminId,
+            actionType: "PENALTY_ADDED",
+            targetEntityType: "Reservation",
+            targetEntityId: reservationId,
+            description: `${roomLabel} için Kiosk kodu girmeyen ${usersToPenalize.length} üyeye No-Show uyarısı ve maili gönderildi.${
+              autoBannedNames.length > 0
+                ? ` 3/3 uyarı dolduğu için otomatik banlananlar: ${autoBannedNames.join(", ")}`
+                : ""
+            }`,
+          },
+        });
+
+        return NextResponse.json({
+          success: true,
+          autoBannedNames,
+          penalizedCount: usersToPenalize.length,
+        });
       }
+
+      return NextResponse.json({ success: true });
+    }
+
+    // 6. Duyuru Yayınla / Sil
+    if (action === "CREATE_ANNOUNCEMENT") {
+      const { titleTr, titleEn, contentTr, contentEn, priority } = payload;
+      const created = await prisma.announcement.create({
+        data: {
+          title: { tr: titleTr, en: titleEn || titleTr },
+          content: { tr: contentTr, en: contentEn || contentTr },
+          priority: priority || "MEDIUM",
+          isPinned: priority === "HIGH" || priority === "URGENT",
+          isActive: true,
+          createdBy: adminId,
+          publishedAt: new Date(),
+        },
+      });
 
       await prisma.adminAction.create({
         data: {
           adminId,
-          actionType: "PENALTY_ADDED",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          affectedUserId: resRecord.userId,
-          description: `No-Show işlendi: ${uniqueUserIds.length} grup üyesine +${points} ceza puanı kesildi.${
-            autoBannedEmails.length > 0 ? ` Otomatik 30 gün banlananlar: ${autoBannedEmails.join(", ")}` : ""
-          }`,
+          actionType: "ANNOUNCEMENT_CREATED",
+          targetEntityType: "Announcement",
+          targetEntityId: created.id,
+          description: `Yeni duyuru yayınlandı: ${titleTr}`,
         },
       });
 
-      return NextResponse.json({
-        success: true,
-        penalizedCount: uniqueUserIds.length,
-        autoBannedEmails,
-      });
-    }
-
-    // 8. Duyuru Yayınla / Sil
-    if (action === "CREATE_ANNOUNCEMENT") {
-      const { titleTr, titleEn, contentTr, contentEn, priority = "MEDIUM", isPinned = false } = payload;
-      if (!titleTr || !contentTr) {
-        return NextResponse.json({ error: "Başlık ve içerik zorunludur." }, { status: 400 });
-      }
-      const announcement = await prisma.announcement.create({
-        data: {
-          title: { tr: titleTr.trim(), en: (titleEn || titleTr).trim() },
-          content: { tr: contentTr.trim(), en: (contentEn || contentTr).trim() },
-          priority,
-          isPinned: Boolean(isPinned),
-          isActive: true,
-          publishedAt: new Date(),
-          createdBy: adminId,
-        },
-      });
-      return NextResponse.json({ success: true, announcement });
+      return NextResponse.json({ success: true, announcement: created });
     }
 
     if (action === "DELETE_ANNOUNCEMENT") {
-      await prisma.announcement.delete({ where: { id: payload.announcementId } });
+      const { id } = payload;
+      await prisma.announcement.delete({ where: { id } });
       return NextResponse.json({ success: true });
     }
 
-    // 9. Kullanıcı Ban Açma / Banlama / Ceza Sıfırlama (No-Show Geçmişini de Temizler) / Rol Verme
-    if (action === "UPDATE_USER") {
+    //  Dönemsel veya Gün Seçmeli Banlama (BAN_USER) + Ban Açma + Ceza Sıfırlama
+    if (action === "USER_MODERATION") {
       if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
-        return NextResponse.json({ error: "Bu işlem için Admin veya Super Admin yetkisi gereklidir." }, { status: 403 });
+        return NextResponse.json({ error: "Bu işlem için İdare/Admin yetkisi gereklidir." }, { status: 403 });
       }
 
-      const { targetUserId, isBanned, banReason, resetPenalties, addPenaltyPoints, role } = payload;
+      const { targetUserId, modType, role, banDuration, banReason } = payload;
 
-      if (role && ["ADMIN", "SUPER_ADMIN"].includes(role) && currentRole !== "SUPER_ADMIN") {
-        return NextResponse.json({ error: "ADMIN veya SUPER_ADMIN rolünü yalnızca BİM Sistem Yöneticisi atayabilir." }, { status: 403 });
-      }
+      if (modType === "BAN_USER") {
+        // banDuration: 7, 14, 30 veya "SEMESTER" (180 gün - Dönem Boyu)
+        const days = banDuration === "SEMESTER" ? 180 : Number(banDuration) || 30;
+        const banUntilDate = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+        const durationLabel = banDuration === "SEMESTER" ? "Dönem Sonuna Kadar (180 Gün)" : `${days} Gün`;
+        const finalReason = banReason?.trim() || `Kütüphane İdaresi tarafından ${durationLabel} süreyle yasaklandı.`;
 
-      const updateData = {};
-      let actionType = "USER_ROLE_CHANGED";
-      let desc = "Kullanıcı güncellendi.";
+        const bannedUser = await prisma.user.update({
+          where: { id: targetUserId },
+          data: {
+            isBanned: true,
+            banUntil: banUntilDate,
+            banReason: finalReason,
+          },
+        });
 
-      if (typeof isBanned === "boolean") {
-        updateData.isBanned = isBanned;
-        updateData.banReason = isBanned ? (banReason || "Kütüphane kuralları ihlali") : null;
-        updateData.banUntil = isBanned ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) : null;
-        actionType = isBanned ? "USER_BANNED" : "USER_UNBANNED";
-        desc = isBanned ? "Kullanıcı 30 gün süreyle banlandı." : "Kullanıcının banı (yasağı) kaldırıldı.";
+        // Banlanan öğrencinin gelecekteki randevularını iptal et
+        await prisma.reservation.updateMany({
+          where: {
+            userId: targetUserId,
+            status: { in: ["PENDING", "CONFIRMED"] },
+            reservationDate: { gte: new Date() },
+          },
+          data: {
+            status: "CANCELLED",
+            cancelledAt: new Date(),
+            cancellationReason: `Kullanıcı idare tarafından (${durationLabel}) banlandığı için iptal edildi.`,
+          },
+        });
 
-        // Ban kaldırıldığında aktif No-Show sayaçlarını da pasife çek ki hemen tekrar banlanmasın
-        if (!isBanned) {
-          await prisma.penaltyHistory.updateMany({
-            where: { userId: targetUserId, isActive: true },
-            data: { isActive: false },
-          });
-        }
-      }
+        await prisma.emailQueue.create({
+          data: {
+            to: bannedUser.email,
+            subject: `THKÜ Kütüphane - Rezervasyon Yasağı (${durationLabel}) Bildirimi`,
+            body: `Sayın ${bannedUser.fullName},\n\nKütüphane çalışma odası rezervasyon yetkiniz ${banUntilDate.toLocaleDateString("tr-TR")} tarihine kadar (${durationLabel}) askıya alınmıştır.\n\nSebep: ${finalReason}`,
+            priority: 1,
+            status: "PENDING",
+          },
+        });
 
-      if (resetPenalties) {
-        updateData.penaltyPoints = 0;
-        actionType = "PENALTY_REMOVED";
-        desc = "Kullanıcının ceza puanları ve No-Show sayacı sıfırlandı.";
+        await prisma.adminAction.create({
+          data: {
+            adminId,
+            actionType: "USER_BANNED",
+            targetEntityType: "User",
+            targetEntityId: targetUserId,
+            description: `${bannedUser.email} kullanıcısı ${durationLabel} süreyle banlandı. Sebep: ${finalReason}`,
+          },
+        });
+      } else if (modType === "UNBAN") {
+        await prisma.user.update({
+          where: { id: targetUserId },
+          data: { isBanned: false, banUntil: null, banReason: null, penaltyPoints: 0 },
+        });
         await prisma.penaltyHistory.updateMany({
           where: { userId: targetUserId, isActive: true },
           data: { isActive: false },
         });
+        await prisma.adminAction.create({
+          data: {
+            adminId,
+            actionType: "USER_UNBANNED",
+            targetEntityType: "User",
+            targetEntityId: targetUserId,
+            description: "Öğrencinin yasağı (ban) kaldırıldı ve aktif No-Show uyarı sayacı sıfırlandı.",
+          },
+        });
+      } else if (modType === "RESET_PENALTY") {
+        await prisma.user.update({
+          where: { id: targetUserId },
+          data: { penaltyPoints: 0 },
+        });
+        await prisma.penaltyHistory.updateMany({
+          where: { userId: targetUserId, isActive: true },
+          data: { isActive: false },
+        });
+        await prisma.adminAction.create({
+          data: {
+            adminId,
+            actionType: "PENALTY_REMOVED",
+            targetEntityType: "User",
+            targetEntityId: targetUserId,
+            description: "Öğrencinin ceza puanları ve No-Show uyarı sayacı sıfırlandı.",
+          },
+        });
+      } else if (modType === "CHANGE_ROLE") {
+        if (role === "SUPER_ADMIN" && currentRole !== "SUPER_ADMIN") {
+          return NextResponse.json({ error: "Sadece BİM (SUPER_ADMIN) bu rolü atayabilir." }, { status: 403 });
+        }
+        await prisma.user.update({
+          where: { id: targetUserId },
+          data: { role },
+        });
       }
 
-      if (addPenaltyPoints) {
-        updateData.penaltyPoints = { increment: Number(addPenaltyPoints) };
-        actionType = "PENALTY_ADDED";
-        desc = `Kullanıcıya +${addPenaltyPoints} ceza puanı eklendi.`;
-      }
-
-      if (role) {
-        updateData.role = role;
-        actionType = "USER_ROLE_CHANGED";
-        desc = `Kullanıcı rolü ${role} olarak değiştirildi.`;
-      }
-
-      const updatedUser = await prisma.user.update({
-        where: { id: targetUserId },
-        data: updateData,
-      });
-
-      await prisma.adminAction.create({
-        data: {
-          adminId,
-          actionType,
-          targetEntityType: "User",
-          targetEntityId: targetUserId,
-          affectedUserId: targetUserId,
-          description: `${updatedUser.email}: ${desc}`,
-        },
-      });
-
-      return NextResponse.json({ success: true, user: updatedUser });
+      return NextResponse.json({ success: true });
     }
 
-    // 10. Kütüphane Rezervasyon Kurallarını Güncelle
+    // 8. Dinamik Rezervasyon Kuralı Güncelle 
     if (action === "UPDATE_RULE") {
       if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
-        return NextResponse.json({ error: "Yetkisiz işlem." }, { status: 403 });
+        return NextResponse.json({ error: "Kural değiştirme yetkisi sadece İdare/Admin rolündedir." }, { status: 403 });
       }
       const { ruleName, value } = payload;
-      await prisma.reservationRule.update({
+      await prisma.reservationRule.upsert({
         where: { ruleName },
-        data: { ruleValue: { value: Number(value) } },
+        update: { ruleValue: { value: Number(value) }, updatedBy: adminId },
+        create: { ruleName, ruleType: "INTEGER", ruleValue: { value: Number(value) }, isActive: true, updatedBy: adminId },
       });
 
       await prisma.adminAction.create({
         data: {
           adminId,
-          actionType: "SETTINGS_UPDATED",
+          actionType: "RULE_UPDATED",
           targetEntityType: "ReservationRule",
           description: `${ruleName} kuralı ${value} olarak güncellendi.`,
         },
