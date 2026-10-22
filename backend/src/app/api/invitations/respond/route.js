@@ -75,6 +75,57 @@ export async function POST(request) {
       }
     }
 
+    //  Gece 21:00-24:00 <-> Ertesi Gün 00:00-08:00 Davet Kabul Kontrolü
+      const resStartH = new Date(participant.reservation.startTime).getUTCHours();
+      const resEndDt = new Date(participant.reservation.endTime);
+      const resEndH = resEndDt.getUTCHours() === 23 && resEndDt.getUTCMinutes() >= 59 ? 24 : resEndDt.getUTCHours();
+
+      if (resStartH < 8) {
+        const prevDayObj = new Date(new Date(targetDate).getTime() - 24 * 60 * 60 * 1000);
+        const prevNight = await prisma.reservation.findFirst({
+          where: {
+            reservationDate: prevDayObj,
+            status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
+            endTime: { gt: new Date("1970-01-01T21:00:00Z") },
+            OR: [
+              { userId: user.id },
+              { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (prevNight) {
+          return NextResponse.json(
+            { error: "Bir önceki gece 21:00 - 24:00 saatleri arasında randevunuz bulunduğu için ertesi gün 00:00 - 08:00 arasındaki bir gruba katılamazsınız." },
+            { status: 400 }
+          );
+        }
+      }
+
+      if (resEndH > 21) {
+        const nextDayObj = new Date(new Date(targetDate).getTime() + 24 * 60 * 60 * 1000);
+        const nextMorning = await prisma.reservation.findFirst({
+          where: {
+            reservationDate: nextDayObj,
+            status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
+            startTime: { lt: new Date("1970-01-01T08:00:00Z") },
+            OR: [
+              { userId: user.id },
+              { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (nextMorning) {
+          return NextResponse.json(
+            { error: "Ertesi gün 00:00 - 08:00 saatleri arasında randevunuz bulunduğu için bir önceki gece 21:00 - 24:00 arasındaki gruba katılamazsınız." },
+            { status: 400 }
+          );
+        }
+      }
+
     const newStatus = action === "ACCEPT" ? "ACCEPTED" : "REJECTED";
 
     await prisma.reservationParticipant.update({
