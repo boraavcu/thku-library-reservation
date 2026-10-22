@@ -110,11 +110,11 @@ async function main() {
   console.log(`✅ ${students.length} öğrenci ve 3 yetkili kullanıcı hazır!`);
 
   // 3. Çalışma Odaları
-  const roomList = [
-    { roomNumber: "R101", name: "Atatürk", capacity: 7, isActive: true },
-    { roomNumber: "R102", name: "Gökçen", capacity: 7, isActive: true },
-    { roomNumber: "R103", name: "Uçantürk", capacity: 7, isActive: true },
-    { roomNumber: "R104", name: "İstikbal", capacity: 7, isActive: true },
+ const roomList = [
+    { roomNumber: "R101", name: "Atatürk", capacity: 8, isActive: true },
+    { roomNumber: "R102", name: "Gökçen", capacity: 8, isActive: true },
+    { roomNumber: "R103", name: "Uçantürk", capacity: 8, isActive: true },
+    { roomNumber: "R104", name: "İstikbal", capacity: 8, isActive: true },
   ];
 
   const rooms = [];
@@ -127,12 +127,12 @@ async function main() {
     rooms.push(rm);
   }
 
-  // 4. Aktif Sözleşme (v1.0) ve Kurallar
-  const agreementContent = `1. Maksimum Rezervasyon Süresi
-Çalışma odaları günde en fazla 3 saat süreyle rezerve edilebilir. Süre uzatmaları müsaitlik durumuna bağlıdır ve süre dolmadan 15 dakika önce danışmadan talep edilmelidir. Aynı grubun farklı isimlerle ardışık rezervasyon yapması yasaktır.
+  // 4. Aktif Sözleşme (v1.0) ve Güncel Kurallar
+  const agreementContent = `1. Maksimum Rezervasyon Süresi ve Günlük Hak
+Çalışma odaları günde yalnızca 1 (bir) defa ve en fazla 3 saat süreyle rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun veya üyelerin farklı isimlerle ardışık rezervasyon yapması yasaktır. Gece 21:00-24:00 saatleri arasına randevu alan kullanıcılar, ertesi gün 00:00-08:00 saatleri arasına randevu alamazlar.
 
-2. Geç Kalma / Gelmeme (No-Show)
-Başlangıç saatinden itibaren 15 dakika içinde odaya giriş yapılmazsa rezervasyon otomatik olarak iptal edilir ve oda diğer öğrencilerin kullanımına açılır. Tekrarlanan gelmeme durumları (dönem içinde 3 kezden fazla), rezervasyon ayrıcalıklarının 30 güne kadar askıya alınmasına neden olabilir.
+2. Kapı QR Kodu, Kişiye Özel Kod ve Gelmeme (No-Show)
+Oda girişlerinde bulunan QR kod okutularak her katılımcının kendisine özel üretilen doğrulama kodunu 15 dakika içinde girmesi zorunludur. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez. Randevusuna gelmeyen kullanıcılara e-posta ile uyarı gönderilir; 3 uyarı sonunda kullanıcı dönemsel/30 günlük rezervasyon yasağı (ban) alır.
 
 3. Sessizlik ve Kullanım Kuralları
 Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yüksek sesli konuşmalar, kulaklıksız müzik veya rahatsız edici davranışlara izin verilmez. Temizliği korumak için (kapalı şişedeki su hariç) yiyecek ve içecek tüketimi kesinlikle yasaktır.
@@ -140,11 +140,11 @@ Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yü
 4. Ekipman Sorumluluğu
 Kullanıcılar rezervasyon süresince kütüphane mülküne, mobilyalara veya teknik ekipmanlara verilen her türlü hasardan sorumludur. Kütüphane ekipmanlarının fişini çekmeyiniz. Lütfen odaya girdiğinizde mevcut sorunları derhal bildirin.
 
-5. Grup Çalışması
-Çalışma odaları grup çalışması (en az 2 kişi) için tasarlanmıştır. Her oda en fazla 7 kişi kapasitesine sahiptir. Bireysel çalışan öğrenciler genel okuma salonlarını kullanmalıdır.
+5. Grup Çalışması ve Davet Onay Süresi
+Çalışma odaları grup çalışması (en az 2 kişi, en fazla 8 kişi) için tasarlanmıştır. Gönderilen grup davetiyeleri 30 dakika içinde onaylanmalıdır; aksi takdirde rezervasyon otomatik olarak iptal edilir.
 
-6. Günlük Rezervasyon Limiti
-Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün içinde ikinci bir rezervasyon talebi sistem tarafından reddedilecektir.`;
+6. İleri Tarih Sınırı ve Erken Boşaltma
+Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken tamamlayan gruplar sistem üzerinden 'Odayı Erken Boşalt' işlemini yaparak odayı diğer öğrencilerin kullanımına açabilirler.`;
 
   await prisma.agreement.updateMany({ data: { isActive: false } });
   await prisma.agreement.upsert({
@@ -155,9 +155,9 @@ Her öğrenci günde yalnızca 1 (bir) adet rezervasyon yapabilir. Aynı gün i�
 
   const rules = [
     { ruleName: "MIN_PARTICIPANTS", ruleType: "INTEGER", ruleValue: { value: 2 } },
-    { ruleName: "MAX_PARTICIPANTS", ruleType: "INTEGER", ruleValue: { value: 7 } },
-    { ruleName: "MAX_DURATION_HOURS", ruleType: "INTEGER", ruleValue: { value: 3 } },
-    { ruleName: "MAX_ADVANCE_DAYS", ruleType: "INTEGER", ruleValue: { value: 3 } },
+    { ruleName: "MAX_PARTICIPANTS", ruleType: "INTEGER", ruleValue: { value: 8 } }, // Madde 2: 8 Kişi
+    { ruleName: "MAX_DURATION_HOURS", ruleType: "INTEGER", ruleValue: { value: 3 } }, // Madde 9: Maks 3 Saat
+    { ruleName: "MAX_ADVANCE_DAYS", ruleType: "INTEGER", ruleValue: { value: 1 } }, // Madde 3: Maks 1 Gün
     { ruleName: "DAILY_RELEASE_HOUR", ruleType: "INTEGER", ruleValue: { value: 8 } },
   ];
 
