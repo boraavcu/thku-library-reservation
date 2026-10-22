@@ -1,48 +1,28 @@
-// src/lib/api.js
 import axios from 'axios';
+
+function getOrCreateDeviceId() {
+  try {
+    let deviceId = localStorage.getItem('thku_kiosk_device_id');
+    if (!deviceId) {
+      const randomPart = Math.random().toString(36).substring(2, 12);
+      const timePart = Date.now().toString(36);
+      deviceId = `dev_${timePart}_${randomPart}`;
+      localStorage.setItem('thku_kiosk_device_id', deviceId);
+    }
+    return deviceId;
+  } catch {
+    return 'dev_fallback_browser';
+  }
+}
 
 const api = axios.create({
   baseURL: '/api',
   withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    // ✅ Kurallar kabul edilmemiş
-    if (error.response?.data?.requiresRulesAcceptance) {
-      console.warn("⚠️ Backend: Kurallar kabul edilmemiş!");
-      
-      // Event fırlat
-      window.dispatchEvent(new CustomEvent('rulesRejected'));
-      
-      // ✅ BONUS: Toast göster (eğer toast kütüphanesi kullanıyorsanız)
-      // toast.warning("Kuralları tekrar kabul etmeniz gerekiyor!");
-    }
-    
-    // ✅ Oturum süresi dolmuş
-    else if (error.response?.status === 401) {
-      console.log("Oturum süresi dolmuş, çıkış yapılıyor...");
-      
-      // ✅ BONUS: Toast göster
-      // toast.error("Oturumunuz sona erdi, lütfen tekrar giriş yapın.");
-      
-      // 1 saniye sonra yönlendir (toast görünsün diye)
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 1000);
-    }
-    
-    // ✅ Diğer hatalar
-    else {
-      console.error("API Hatası:", error.response?.data?.error || error.message);
-    }
-    
-    return Promise.reject(error);
-  }
-);
+api.interceptors.request.use((config) => {
+  config.headers['x-device-id'] = getOrCreateDeviceId();
+  return config;
+});
 
 export default api;
