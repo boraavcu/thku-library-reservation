@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import {
+  runReservationLifecycleChecks,
+  sendReservationConfirmedEmails,
+} from "@/lib/lifecycle";
 
 const DEFAULT_MIN = 2;
+const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -12,6 +17,8 @@ export async function POST(request) {
   }
 
   try {
+    await runReservationLifecycleChecks();
+
     const { participantId, action } = await request.json();
 
     if (!participantId || !["ACCEPT", "REJECT"].includes(action)) {
@@ -43,13 +50,39 @@ export async function POST(request) {
       return NextResponse.json({ error: "Davet bulunamadı." }, { status: 404 });
     }
 
+    if (participant.reservation.status === "CANCELLED") {
+      return NextResponse.json(
+        { error: "Bu rezervasyon (30 dakikalık onay süresi dolduğu veya iptal edildiği için) artık geçerli değil." },
+        { status: 400 }
+      );
+    }
+
+    // 30 Dakikalık Davet Onay Süresi Kontrolü
+    const elapsedMs = Date.now() - new Date(participant.reservation.createdAt).getTime();
+    if (participant.reservation.status === "PENDING" && elapsedMs > INVITATION_TIMEOUT_MS) {
+      await prisma.reservation.update({
+        where: { id: participant.reservationId },
+        data: {
+          status: "CANCELLED",
+          cancelledAt: new Date(),
+          cancellationReason: "Gönderilen davetiyeler 30 dakika içinde onaylanmadığı için otomatik iptal edildi.",
+        },
+      });
+      return NextResponse.json(
+        { error: "30 dakikalık davet onay süresi dolduğu için bu randevu otomatik olarak iptal edilmiştir." },
+        { status: 400 }
+      );
+    }
+
     if (participant.status !== "PENDING") {
       return NextResponse.json({ error: "Bu davete zaten yanıt verilmiş." }, { status: 400 });
     }
 
-    // MADDE 2: Daveti kabul eden kişinin o tarihte başka bir aktif rezervasyonu var mı?
+    // SADECE KABUL ET (ACCEPT) DURUMUNDA ÇALIŞACAK KONTROLLER
     if (action === "ACCEPT") {
       const targetDate = participant.reservation.reservationDate;
+
+      // 1. Günlük 1 Rezervasyon Limiti Kontrolü
       const existingBookingOnDate = await prisma.reservation.findFirst({
         where: {
           id: { not: participant.reservationId },
@@ -73,12 +106,14 @@ export async function POST(request) {
           { status: 400 }
         );
       }
-    }
 
-    //  Gece 21:00-24:00 <-> Ertesi Gün 00:00-08:00 Davet Kabul Kontrolü
+      // Gece 21:00-24:00 <-> Ertesi Gün 00:00-08:00 Davet Kabul Kontrolü
       const resStartH = new Date(participant.reservation.startTime).getUTCHours();
       const resEndDt = new Date(participant.reservation.endTime);
-      const resEndH = resEndDt.getUTCHours() === 23 && resEndDt.getUTCMinutes() >= 59 ? 24 : resEndDt.getUTCHours();
+      const resEndH =
+        resEndDt.getUTCHours() === 23 && resEndDt.getUTCMinutes() >= 59
+          ? 24
+          : resEndDt.getUTCHours();
 
       if (resStartH < 8) {
         const prevDayObj = new Date(new Date(targetDate).getTime() - 24 * 60 * 60 * 1000);
@@ -97,7 +132,10 @@ export async function POST(request) {
 
         if (prevNight) {
           return NextResponse.json(
-            { error: "Bir önceki gece 21:00 - 24:00 saatleri arasında randevunuz bulunduğu için ertesi gün 00:00 - 08:00 arasındaki bir gruba katılamazsınız." },
+            {
+              error:
+                "Bir önceki gece 21:00 - 24:00 saatleri arasında randevunuz bulunduğu için ertesi gün 00:00 - 08:00 arasındaki bir gruba katılamazsınız.",
+            },
             { status: 400 }
           );
         }
@@ -120,11 +158,15 @@ export async function POST(request) {
 
         if (nextMorning) {
           return NextResponse.json(
-            { error: "Ertesi gün 00:00 - 08:00 saatleri arasında randevunuz bulunduğu için bir önceki gece 21:00 - 24:00 arasındaki gruba katılamazsınız." },
+            {
+              error:
+                "Ertesi gün 00:00 - 08:00 saatleri arasında randevunuz bulunduğu için bir önceki gece 21:00 - 24:00 arasındaki gruba katılamazsınız.",
+            },
             { status: 400 }
           );
         }
       }
+    }
 
     const newStatus = action === "ACCEPT" ? "ACCEPTED" : "REJECTED";
 
@@ -157,10 +199,12 @@ export async function POST(request) {
           where: { id: participant.reservationId },
           data: { status: "CONFIRMED" },
         });
+
+        // Randevu CONFIRMED olduğu anda Görevliye ve Öğrencilere Mail Gönder!
+        await sendReservationConfirmedEmails(participant.reservationId);
       }
     }
 
-    // MADDE 9: AuditLog Kaydı
     await prisma.auditLog.create({
       data: {
         userId: user.id,
