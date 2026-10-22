@@ -2,7 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Container, Typography, Card, Chip, Button, Tabs, Tab,
-  CircularProgress, Alert, Snackbar
+  CircularProgress, Alert, Snackbar, Dialog, DialogTitle,
+  DialogContent, DialogActions, TextField, Tooltip
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
@@ -19,7 +20,8 @@ import EventNoteIcon from '@mui/icons-material/EventNote';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import MoreTimeIcon from '@mui/icons-material/MoreTime';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
+import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
 
 export default function MyBookings() {
   const navigate = useNavigate();
@@ -34,6 +36,11 @@ export default function MyBookings() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
+
+  // Madde 14: Sonradan Üye Ekleme Modal State
+  const [addMemberDialog, setAddMemberDialog] = useState({ open: false, reservationId: null, roomName: '' });
+  const [newMemberEmail, setNewMemberEmail] = useState('');
+  const [addingMember, setAddingMember] = useState(false);
 
   const fetchAllData = useCallback(() => {
     setLoading(true);
@@ -82,22 +89,38 @@ export default function MyBookings() {
     }
   };
 
-  // 7/24 Kütüphane: Önündeki 1 saat boşsa öğrencinin kendi süresini +1 saat uzatması
-  const handleSelfExtend = async (id) => {
+  // Sonradan Üye Ekleme
+  const handleAddParticipantSubmit = async () => {
+    if (!newMemberEmail.trim()) return;
+    setAddingMember(true);
     try {
-      const res = await api.patch('/reservations', { reservationId: id, action: 'SELF_EXTEND_1H' });
-      setSnack({
-        open: true,
-        message: res.data?.message || 'Rezervasyon süresi +1 saat uzatıldı!',
-        severity: 'success',
+      const res = await api.patch('/reservations', {
+        reservationId: addMemberDialog.reservationId,
+        action: 'ADD_PARTICIPANT',
+        participantEmail: newMemberEmail.trim(),
       });
+      setSnack({ open: true, message: res.data?.message || 'Yeni üye eklendi.', severity: 'success' });
+      setAddMemberDialog({ open: false, reservationId: null, roomName: '' });
+      setNewMemberEmail('');
       fetchAllData();
     } catch (err) {
-      setSnack({
-        open: true,
-        message: err.response?.data?.error || 'Süre uzatılamadı.',
-        severity: 'error',
+      setSnack({ open: true, message: err.response?.data?.error || 'Üye eklenemedi.', severity: 'error' });
+    } finally {
+      setAddingMember(false);
+    }
+  };
+
+  // Katılımcının Gruptan Çıkması (En Az 2 Kişi Kalana Kadar)
+  const handleLeaveReservation = async (id) => {
+    try {
+      const res = await api.patch('/reservations', {
+        reservationId: id,
+        action: 'LEAVE_RESERVATION',
       });
+      setSnack({ open: true, message: res.data?.message || 'Gruptan ayrıldınız.', severity: 'info' });
+      fetchAllData();
+    } catch (err) {
+      setSnack({ open: true, message: err.response?.data?.error || 'Gruptan çıkılamadı.', severity: 'error' });
     }
   };
 
@@ -121,7 +144,10 @@ export default function MyBookings() {
 
   const fmtTime = (timeStr) => {
     const d = new Date(timeStr);
-    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+    const h = d.getUTCHours();
+    const m = d.getUTCMinutes();
+    if (h === 23 && m >= 59) return '24:00';
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
   const fmtDate = (dateStr) => {
@@ -129,6 +155,27 @@ export default function MyBookings() {
     return d.toLocaleDateString(isEn ? 'en-US' : 'tr-TR', {
       day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
     });
+  };
+
+  //  Randevu başlangıcına 60 dakikadan az kaldı mı kontrolü
+  const isWithinOneHourOfStart = (res) => {
+    const now = new Date();
+    const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+    const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
+
+    const nowEpochMins =
+      Math.floor(new Date(todayIso + 'T00:00:00Z').getTime() / 60000) +
+      now.getHours() * 60 +
+      now.getMinutes();
+
+    const startH = new Date(res.startTime).getUTCHours();
+    const startM = new Date(res.startTime).getUTCMinutes();
+    const resStartEpochMins =
+      Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
+      startH * 60 +
+      startM;
+
+    return resStartEpochMins - nowEpochMins < 60;
   };
 
   const activeList = reservations.filter(r => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status));
@@ -156,8 +203,8 @@ export default function MyBookings() {
               <Typography variant="h4" sx={{ fontWeight: 700 }}>{t('navMyBookings')}</Typography>
               <Typography variant="body2" color="text.secondary">
                 {isEn
-                  ? 'Track your active sessions, extend time if available, or manage invitations.'
-                  : 'Aktif rezervasyonlarınızı yönetin, oda müsaitse +1 saat uzatın veya erken boşaltın.'}
+                  ? 'Manage your active sessions, add/leave group members, or free the room early.'
+                  : 'Aktif randevularınızı yönetin, oda kapasitesine göre üye ekleyin/çıkın veya odayı erken boşaltın.'}
               </Typography>
             </Box>
           </Box>
@@ -192,6 +239,20 @@ export default function MyBookings() {
                     const isConfirmed = res.status === 'CONFIRMED' || res.status === 'CHECKED_IN';
                     const statusColor = isCancelled ? 'error' : isConfirmed ? 'success' : 'warning';
 
+                    const activeParticipants = (res.participants || []).filter(p => p.status !== 'REJECTED');
+                    const acceptedParticipants = (res.participants || []).filter(p => p.status === 'ACCEPTED');
+                    const totalActiveOrPending = 1 + activeParticipants.length;
+                    const totalConfirmedPeople = 1 + acceptedParticipants.length;
+                    const roomCapacity = res.room?.capacity || 8;
+
+                   
+                    // 1) Organizatör ise ve oda kapasitesi (8) dolmamışsa üye ekleyebilir
+                    const canAddMember = isOrganizer && ['PENDING', 'CONFIRMED'].includes(res.status) && totalActiveOrPending < roomCapacity;
+                    // 2) Katılımcı ise ve içeride en az 3 onaylı kişi varsa (kendisi çıkınca >= 2 kalacaksa) gruptan çıkabilir
+                    const canLeaveGroup = !isOrganizer && ['PENDING', 'CONFIRMED'].includes(res.status) && totalConfirmedPeople > 2;
+                    // Madde 5: Başlangıca 1 saatten az kaldıysa iptal kilitlenir
+                    const cancelLocked = isWithinOneHourOfStart(res);
+
                     return (
                       <Card key={res.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette[statusColor].main}` }}>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
@@ -219,7 +280,9 @@ export default function MyBookings() {
                               </Box>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
                                 <GroupIcon sx={{ fontSize: 16 }} />
-                                <Typography variant="body2">{1 + (res.participants?.length || 0)} {isEn ? 'Participants' : 'Katılımcı'}</Typography>
+                                <Typography variant="body2">
+                                  {totalConfirmedPeople} Onaylı / Maks {roomCapacity} Kişi
+                                </Typography>
                               </Box>
                             </Box>
 
@@ -239,41 +302,76 @@ export default function MyBookings() {
                             )}
                           </Box>
 
-                          {tab === 0 && isOrganizer && (
-                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                              {['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
-                                <>
-                                  <Button
-                                    variant="outlined"
-                                    color="primary"
-                                    size="small"
-                                    startIcon={<MoreTimeIcon />}
-                                    onClick={() => handleSelfExtend(res.id)}
-                                  >
-                                    {isEn ? '+1h Extend' : '+1 Saat Uzat'}
-                                  </Button>
-                                  <Button
-                                    variant="contained"
-                                    color="info"
-                                    size="small"
-                                    startIcon={<ExitToAppIcon />}
-                                    onClick={() => handleEarlyCheckout(res.id)}
-                                  >
-                                    {isEn ? 'Early Check-Out' : 'Odayı Erken Boşalt'}
-                                  </Button>
-                                </>
-                              )}
-
-                              {['PENDING', 'CONFIRMED'].includes(res.status) && (
+                          {/* Aksiyon Butonları*/}
+                          {tab === 0 && (
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                              {/* Organizatör İçin Sonradan Üye Ekleme Butonu (Kapasite < 8 ise görünür) */}
+                              {canAddMember && (
                                 <Button
                                   variant="outlined"
-                                  color="error"
+                                  color="primary"
                                   size="small"
-                                  startIcon={<CancelOutlinedIcon />}
-                                  onClick={() => handleCancel(res.id)}
+                                  startIcon={<PersonAddAlt1Icon />}
+                                  onClick={() =>
+                                    setAddMemberDialog({
+                                      open: true,
+                                      reservationId: res.id,
+                                      roomName: `${res.room?.roomNumber} - ${res.room?.name}`,
+                                    })
+                                  }
                                 >
-                                  {t('cancel')}
+                                  + Üye Ekle ({roomCapacity - totalActiveOrPending} Boş)
                                 </Button>
+                              )}
+
+                              {/* Katılımcı İçin Gruptan Çık Butonu (En az 2 kişi kalacaksa görünür) */}
+                              {canLeaveGroup && (
+                                <Button
+                                  variant="outlined"
+                                  color="warning"
+                                  size="small"
+                                  startIcon={<PersonRemoveIcon />}
+                                  onClick={() => handleLeaveReservation(res.id)}
+                                >
+                                  Gruptan Çık
+                                </Button>
+                              )}
+
+                              {/*Odayı Erken Boşaltma */}
+                              {isOrganizer && ['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
+                                <Button
+                                  variant="contained"
+                                  color="info"
+                                  size="small"
+                                  startIcon={<ExitToAppIcon />}
+                                  onClick={() => handleEarlyCheckout(res.id)}
+                                >
+                                  {isEn ? 'Early Check-Out' : 'Odayı Erken Boşalt'}
+                                </Button>
+                              )}
+
+                              {/*Son 1 Saat Kala İptal Kilidi */}
+                              {isOrganizer && ['PENDING', 'CONFIRMED'].includes(res.status) && (
+                                <Tooltip
+                                  title={
+                                    cancelLocked
+                                      ? 'Randevu başlangıcına 1 saatten az kaldığı için iptal edilemez.'
+                                      : 'Randevuyu iptal et'
+                                  }
+                                >
+                                  <span>
+                                    <Button
+                                      variant="outlined"
+                                      color="error"
+                                      size="small"
+                                      disabled={cancelLocked}
+                                      startIcon={<CancelOutlinedIcon />}
+                                      onClick={() => handleCancel(res.id)}
+                                    >
+                                      {cancelLocked ? 'Son 1 Saat (İptal Kilitli)' : t('cancel')}
+                                    </Button>
+                                  </span>
+                                </Tooltip>
                               )}
                             </Box>
                           )}
@@ -299,7 +397,7 @@ export default function MyBookings() {
                           {t('invitedYouTo', { name: inv.reservation?.user?.fullName, room: `${inv.reservation?.room?.roomNumber} - ${inv.reservation?.room?.name}` })}
                         </Typography>
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                          {fmtDate(inv.reservation?.reservationDate)} | {fmtTime(inv.reservation?.startTime)} - {fmtTime(inv.reservation?.endTime)}
+                          {fmtDate(inv.reservation?.reservationDate)} | {fmtTime(inv.reservation?.startTime)} - {fmtTime(inv.reservation?.endTime)} • (30 dk içinde onaylanmalıdır)
                         </Typography>
                       </Box>
                       <Box sx={{ display: 'flex', gap: 1 }}>
@@ -320,6 +418,39 @@ export default function MyBookings() {
       </Container>
 
       <Footer />
+
+      {/* Sonradan Üye Ekleme Pop-up Dialog */}
+      <Dialog
+        open={addMemberDialog.open}
+        onClose={() => setAddMemberDialog({ open: false, reservationId: null, roomName: '' })}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          Gruba Yeni Üye Ekle ({addMemberDialog.roomName})
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Oda kapasitesini (maks. 8 kişi) aşmayacak şekilde davet etmek istediğiniz öğrencinin kurumsal e-posta adresini giriniz:
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            size="small"
+            placeholder="sXXXXXXXXX@stu.thk.edu.tr"
+            value={newMemberEmail}
+            onChange={(e) => setNewMemberEmail(e.target.value)}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setAddMemberDialog({ open: false, reservationId: null, roomName: '' })} color="inherit">
+            Vazgeç
+          </Button>
+          <Button variant="contained" onClick={handleAddParticipantSubmit} disabled={addingMember || !newMemberEmail.trim()}>
+            {addingMember ? <CircularProgress size={18} color="inherit" /> : 'Davet Gönder'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar open={snack.open} autoHideDuration={3500} onClose={() => setSnack(s => ({ ...s, open: false }))}>
         <Alert severity={snack.severity} variant="filled">{snack.message}</Alert>
