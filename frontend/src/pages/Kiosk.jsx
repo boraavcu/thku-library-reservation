@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Box, Typography, Card, Chip, CircularProgress, Button, TextField,
+  Box, Typography, Card, Chip, CircularProgress, Button,
   Alert, Divider, LinearProgress
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
@@ -13,41 +13,47 @@ import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import PhonelinkLockIcon from '@mui/icons-material/PhonelinkLock';
-import RefreshIcon from '@mui/icons-material/Refresh';
+import MyLocationIcon from '@mui/icons-material/MyLocation';
+import WifiIcon from '@mui/icons-material/Wifi';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import api from '../api';
-import thkuLogo from '../assets/thku-logo.png';
+
+const THKU_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png';
 
 export default function KioskPage() {
   const theme = useTheme();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: session, status } = useSession();
+
+  const doorParam = searchParams.get('door') || '';
 
   const [kioskData, setKioskData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [timeLeft, setTimeLeft] = useState(0);
-  const [inputCode, setInputCode] = useState('');
+  const [gpsCoords, setGpsCoords] = useState({ lat: null, lng: null, status: 'PENDING' });
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
   const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role);
 
-  const fetchKioskState = useCallback(async () => {
+  const fetchKioskState = useCallback(async (latVal, lngVal) => {
     try {
       setLoading(true);
-      const res = await api.get('/kiosk/qr');
+      const query = new URLSearchParams();
+      if (doorParam) query.set('door', doorParam);
+      if (typeof latVal === 'number' && typeof lngVal === 'number') {
+        query.set('lat', String(latVal));
+        query.set('lng', String(lngVal));
+      }
+
+      const res = await api.get(`/kiosk/qr?${query.toString()}`);
       setKioskData(res.data);
-      if (res.data?.ttl) {
-        setTimeLeft(res.data.ttl);
-      }
-      if (res.data?.personalCode) {
-        setInputCode(res.data.personalCode);
-      }
     } catch {
-      setKioskData({ mode: 'ERROR', error: 'Kiosk verisi alınamadı.' });
+      setKioskData({ mode: 'ERROR', error: 'Yoklama verisi alınamadı.' });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [doorParam]);
 
   useEffect(() => {
     if (status === 'loading') return;
@@ -55,46 +61,62 @@ export default function KioskPage() {
       navigate('/');
       return;
     }
-    fetchKioskState();
-  }, [status, navigate, fetchKioskState]);
 
-  // 10 Dakikalık (600 sn) geri sayım sayacı
-  useEffect(() => {
-    if (timeLeft <= 0) return;
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => Math.max(0, prev - 1));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [timeLeft]);
+    if (isStaff) {
+      fetchKioskState(null, null);
+      return;
+    }
 
-  const handleStudentVerify = async () => {
-    if (!inputCode.trim()) return;
+    // Öğrenci ise tarayıcıdan GPS koordinatını iste ve sunucuya gönder
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setGpsCoords({ lat, lng, status: 'GRANTED' });
+          fetchKioskState(lat, lng);
+        },
+        () => {
+          setGpsCoords({ lat: null, lng: null, status: 'DENIED' });
+          fetchKioskState(null, null);
+        },
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
+      );
+    } else {
+      setGpsCoords({ lat: null, lng: null, status: 'UNSUPPORTED' });
+      fetchKioskState(null, null);
+    }
+  }, [status, isStaff, navigate, fetchKioskState]);
+
+  const handleOneClickConfirm = async () => {
+    if (!kioskData?.personalSessionToken) return;
     setSubmitting(true);
     setFeedback(null);
     try {
-      const res = await api.post('/checkin/validate', { token: inputCode.trim() });
-      setFeedback({ type: 'success', text: res.data.message || 'Girişiniz başarıyla doğrulandı!' });
-      fetchKioskState();
+      const res = await api.post('/checkin/validate', {
+        personalSessionToken: kioskData.personalSessionToken,
+        lat: gpsCoords.lat,
+        lng: gpsCoords.lng,
+      });
+      setFeedback({ type: 'success', text: res.data.message || 'Oda girişiniz başarıyla onaylandı!' });
+      fetchKioskState(gpsCoords.lat, gpsCoords.lng);
     } catch (err) {
       setFeedback({
         type: 'error',
-        text: err.response?.data?.error || 'Doğrulama başarısız oldu.',
+        text: err.response?.data?.error || 'Onay işlemi başarısız oldu.',
       });
     } finally {
       setSubmitting(false);
     }
   };
 
-  const fmtSeconds = (sec) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  };
-
   if (status === 'loading' || loading) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', justifyContent: 'center', alignItems: 'center', bgcolor: '#0F172A' }}>
-        <CircularProgress sx={{ color: '#fff' }} />
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', bgcolor: '#0F172A', gap: 2 }}>
+        <CircularProgress sx={{ color: '#38BDF8' }} />
+        <Typography variant="body2" sx={{ color: '#94A3B8' }}>
+          Kapı QR, Kampüs Ağı ve GPS Konumu Doğrulanıyor...
+        </Typography>
       </Box>
     );
   }
@@ -120,7 +142,7 @@ export default function KioskPage() {
       >
         <Card
           sx={{
-            maxWidth: 560,
+            maxWidth: 580,
             width: '100%',
             p: { xs: 3, sm: 4.5 },
             borderRadius: 4,
@@ -131,10 +153,10 @@ export default function KioskPage() {
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)',
           }}
         >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, '@media print': { display: 'none' } }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, flexWrap: 'wrap', gap: 1, '@media print': { display: 'none' } }}>
             <Button
               size="small"
-               variant="outlined"
+              variant="outlined"
               startIcon={<ArrowBackIcon />}
               onClick={() => navigate('/admin')}
               sx={{ color: '#CBD5E1', borderColor: 'rgba(255,255,255,0.2)' }}
@@ -144,7 +166,7 @@ export default function KioskPage() {
             <Button
               size="small"
               variant="contained"
-               color="primary"
+              color="primary"
               startIcon={<PrintIcon />}
               onClick={() => window.print()}
             >
@@ -154,7 +176,7 @@ export default function KioskPage() {
 
           <Box
             component="img"
-            src={thkuLogo}
+            src={THKU_LOGO_URL}
             alt="THKÜ"
             sx={{ width: 76, height: 76, objectFit: 'contain', mx: 'auto', mb: 1.5, bgcolor: '#fff', p: 1, borderRadius: '50%' }}
           />
@@ -169,10 +191,9 @@ export default function KioskPage() {
             Grup Çalışma Odaları (R101 – R104) Kapı Doğrulama Noktası
           </Typography>
           <Typography variant="body2" sx={{ color: '#94A3B8', mb: 3 }}>
-            Odaya girişte gruptaki <strong>her öğrencinin</strong> kendi mobil cihazından bu QR kodu okutarak kendisine özel üretilen <strong>10 dakika geçerli kodu</strong> onaylaması zorunludur.
+            Randevu başlangıç saatinden <strong>±15 dakika içinde</strong> (Örn: 10:00 randevusu için 09:45 – 10:15 arası) her katılımcının kendi telefonundan bu QR kodu okutarak ekranda çıkan <strong>tek tıkla onay</strong> butonuna basması zorunludur.
           </Typography>
 
-          {/* Ortak Tekil QR Kod */}
           <Box
             sx={{
               bgcolor: '#fff',
@@ -193,12 +214,12 @@ export default function KioskPage() {
 
           <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'left' }}>
             <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 700, display: 'block', mb: 0.5 }}>
-              🛡️ AKTİF GÜVENLİK KURALLARI (MADDE 1 & 15):
+              🛡️ AKTİF GÜVENLİK MİMARİSİ (KAPI QR + GPS + KAMPÜS WI-FI + CİHAZ KİLİDİ):
             </Typography>
             <Typography variant="caption" sx={{ color: '#CBD5E1', display: 'block', lineHeight: 1.6 }}>
-              • Bu tekil QR kod 4 çalışma odasının (Atatürk, Gökçen, Uçantürk, İstikbal) girişine asılır.<br />
-              • QR okutulduğunda her öğrenciye <strong>birbirinden farklı ve 10 dakika geçerli kişisel kod</strong> üretilir.<br />
-              • <strong>Cihaz Kilidi Aktiftir:</strong> Bir telefondan başka bir öğrencinin hesabına girilerek onun yerine onay yapılamaz.
+              • Öğrenci anasayfasında Kiosk butonu bulunmaz; yalnızca bu QR kod okutulduğunda ekran açılır.<br />
+              • Kampüs Wi-Fi (eduroam), Anti-VPN ve GPS konum doğrulaması sayesinde QR resmi dışarıdaki bir arkadaşa gönderilse bile uzaktan onay verilemez.<br />
+              • Öğrencinin elle kod yazmasına gerek yoktur; ±15 dk içindeyse tek tıkla onaylar.
             </Typography>
           </Box>
         </Card>
@@ -207,7 +228,7 @@ export default function KioskPage() {
   }
 
   // =========================================================================
-  // MOD 2: ÖĞRENCİ EKRANI -> KAPI QR OKUTULDUĞUNDA AÇILAN KİŞİSEL KOD EKRANI
+  // MOD 2: ÖĞRENCİ EKRANI -> KAPI QR OKUTULDUĞUNDA AÇILAN TEK TIKLA ONAY EKRANI
   // =========================================================================
   return (
     <Box
@@ -234,7 +255,7 @@ export default function KioskPage() {
           boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
         }}
       >
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
           <Button
             size="small"
             variant="outlined"
@@ -244,39 +265,67 @@ export default function KioskPage() {
           >
             Ana Sayfaya Dön
           </Button>
-          <Chip
-            icon={<PhonelinkLockIcon sx={{ color: '#38BDF8 !important' }} />}
-            label="Cihaz Kilidi Aktif"
-            size="small"
-            sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700 }}
-          />
+          <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
+            <Chip
+              icon={<WifiIcon sx={{ color: '#4ADE80 !important', fontSize: 15 }} />}
+              label="Kampüs Ağı / Anti-VPN"
+              size="small"
+              sx={{ bgcolor: 'rgba(74,222,128,0.12)', color: '#4ADE80', fontWeight: 700, fontSize: '0.68rem' }}
+            />
+            <Chip
+              icon={<MyLocationIcon sx={{ color: '#38BDF8 !important', fontSize: 15 }} />}
+              label={gpsCoords.status === 'GRANTED' ? 'GPS Doğrulandı' : 'GPS Kontrolü'}
+              size="small"
+              sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, fontSize: '0.68rem' }}
+            />
+          </Box>
         </Box>
 
         <Box sx={{ textAlign: 'center', mb: 3 }}>
           <Box
             component="img"
-            src={thkuLogo}
+            src={THKU_LOGO_URL}
             alt="THKÜ"
             sx={{ width: 64, height: 64, objectFit: 'contain', mx: 'auto', mb: 1, bgcolor: '#fff', p: 0.75, borderRadius: '50%' }}
           />
           <Typography variant="h6" sx={{ fontWeight: 800 }}>
-            Kapı QR Yoklama & Kişisel Kod Doğrulama
+            Kapı QR Yoklama & Oda Giriş Onayı
           </Typography>
           <Typography variant="caption" sx={{ color: '#94A3B8' }}>
             {session?.user?.name} ({session?.user?.email})
           </Typography>
         </Box>
 
-        {kioskData?.mode === 'STUDENT_NO_ACTIVE_BOOKING' ? (
+        {kioskData?.mode === 'DOOR_QR_REQUIRED' ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <Alert severity="error" sx={{ borderRadius: 2 }}>
+              {kioskData.error}
+            </Alert>
+            {import.meta.env.DEV && (
+              <Button
+                variant="outlined"
+                color="info"
+                size="small"
+                startIcon={<OpenInNewIcon />}
+                onClick={() => navigate('/kiosk?door=thku-study-room')}
+              >
+                [Geliştirici Testi] Kapı QR Okutulmuş Gibi Aç (?door=thku-study-room)
+              </Button>
+            )}
+          </Box>
+        ) : kioskData?.mode === 'LOCATION_BLOCKED' ? (
+          <Alert severity="error" sx={{ borderRadius: 2 }}>
+            {kioskData.error}
+          </Alert>
+        ) : kioskData?.mode === 'OUTSIDE_TIME_WINDOW' || kioskData?.mode === 'STUDENT_NO_ACTIVE_BOOKING' ? (
           <Alert severity="warning" sx={{ borderRadius: 2 }}>
             {kioskData.error}
           </Alert>
         ) : kioskData?.mode === 'STUDENT_ACTIVE' ? (
           <>
-            {/* Oda ve Grup Yoklama Durumu */}
             <Box sx={{ p: 2, borderRadius: 2.5, bgcolor: '#0F172A', mb: 2.5, border: '1px solid rgba(255,255,255,0.08)' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                <Typography sx={{ fontWeight: 700, color: '#38BDF8' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1, flexWrap: 'wrap', gap: 1 }}>
+                <Typography sx={{ fontWeight: 800, color: '#38BDF8', fontSize: '1.05rem' }}>
                   {kioskData.room?.roomNumber} - {kioskData.room?.name}
                 </Typography>
                 <Chip
@@ -286,6 +335,14 @@ export default function KioskPage() {
                   sx={{ fontWeight: 700 }}
                 />
               </Box>
+
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.5, color: '#FBBF24' }}>
+                <AccessTimeIcon sx={{ fontSize: 16 }} />
+                <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                  Geçerli Onay Penceresi (±15 Dk): {kioskData.windowLabel}
+                </Typography>
+              </Box>
+
               <LinearProgress
                 variant="determinate"
                 value={(kioskData.checkedCount / Math.max(1, kioskData.totalCount)) * 100}
@@ -293,16 +350,16 @@ export default function KioskPage() {
               />
 
               <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 1 }}>
-                Grup Üyeleri Yoklama Durumu (Herkesin girmesi zorunludur):
+                Grup Üyeleri Yoklama Durumu (Herkesin kendi telefonundan onaylaması zorunludur):
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                 {kioskData.members?.map((m) => (
-                  <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem' }}>
-                    <Typography variant="body2" sx={{ color: '#E2E8F0', fontSize: '0.8rem' }}>
+                  <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Typography variant="body2" sx={{ color: '#E2E8F0', fontSize: '0.82rem' }}>
                       {m.fullName} ({m.role})
                     </Typography>
                     <Chip
-                      label={m.hasCheckedIn ? 'Giriş Yaptı ✓' : 'Bekleniyor...'}
+                      label={m.hasCheckedIn ? 'Onayladı ✓' : 'Bekleniyor...'}
                       size="small"
                       sx={{
                         height: 20,
@@ -317,96 +374,59 @@ export default function KioskPage() {
               </Box>
             </Box>
 
+            {feedback && (
+              <Alert severity={feedback.type} sx={{ mb: 2, borderRadius: 2 }}>
+                {feedback.text}
+              </Alert>
+            )}
+
             {kioskData.alreadyCheckedIn ? (
               <Alert icon={<CheckCircleIcon fontSize="inherit" />} severity="success" sx={{ borderRadius: 2, fontWeight: 600 }}>
-                Bu randevu için kişisel kapı doğrulamanızı tamamladınız! İyi çalışmalar dileriz.
+                Bu randevu için kapı QR giriş onayınızı tamamladınız! İyi çalışmalar dileriz.
               </Alert>
             ) : (
               <>
-                {/* Kişiye Özel 10 Dakikalık Kod Kutusu */}
                 <Box
                   sx={{
                     p: 2.5,
                     borderRadius: 3,
-                    bgcolor: 'rgba(56, 189, 248, 0.08)',
-                    border: '2px dashed #38BDF8',
+                    bgcolor: 'rgba(74, 222, 128, 0.08)',
+                    border: '1px solid rgba(74, 222, 128, 0.3)',
                     textAlign: 'center',
-                    mb: 2.5,
+                    mb: 2,
                   }}
                 >
-                  <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 700, letterSpacing: '0.08em' }}>
-                    SİZE ÖZEL ÜRETİLEN KİŞİSEL KODUNUZ (10 DK GEÇERLİ)
+                  <Typography variant="body2" sx={{ color: '#E2E8F0', fontWeight: 600, mb: 2 }}>
+                    Kapı QR kodunuz ve ±15 dakikalık randevu zaman diliminiz doğrulandı. Oda kullanımınızı başlatmak için aşağıdaki butona tıklayınız:
                   </Typography>
-                  <Typography
-                    sx={{
-                      fontSize: '2.4rem',
-                      fontWeight: 900,
-                      letterSpacing: '0.22em',
-                      fontFamily: 'monospace',
-                      color: '#fff',
-                      my: 1,
-                    }}
-                  >
-                    {kioskData.personalCode || '------'}
-                  </Typography>
-                  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 1 }}>
-                    <AccessTimeIcon sx={{ fontSize: 16, color: '#FBBF24' }} />
-                    <Typography variant="caption" sx={{ color: '#FBBF24', fontWeight: 700 }}>
-                      Kalan Geçerlilik Süresi: {fmtSeconds(timeLeft)}
-                    </Typography>
-                    {timeLeft === 0 && (
-                      <Button size="small" startIcon={<RefreshIcon />} onClick={fetchKioskState} sx={{ color: '#38BDF8' }}>
-                        Yeni Kod Üret
-                      </Button>
-                    )}
-                  </Box>
-                </Box>
 
-                {feedback && (
-                  <Alert severity={feedback.type} sx={{ mb: 2, borderRadius: 2 }}>
-                    {feedback.text}
-                  </Alert>
-                )}
-
-                <Box sx={{ display: 'flex', gap: 1.5 }}>
-                  <TextField
-                    fullWidth
-                    size="small"
-                    value={inputCode}
-                    onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                    placeholder="6 Haneli Kişisel Kodunuz"
-                    inputProps={{
-                      maxLength: 6,
-                      style: {
-                        color: '#fff',
-                        fontWeight: 800,
-                        letterSpacing: '0.2em',
-                        textAlign: 'center',
-                        fontFamily: 'monospace',
-                      },
-                    }}
-                    sx={{
-                      bgcolor: '#0F172A',
-                      borderRadius: 2,
-                      '& .MuiOutlinedInput-notchedOutline': { borderColor: 'rgba(255,255,255,0.2)' },
-                    }}
-                  />
                   <Button
+                    fullWidth
+                    size="large"
                     variant="contained"
                     color="success"
-                    disabled={submitting || inputCode.trim().length < 6}
-                    onClick={handleStudentVerify}
-                    startIcon={<VerifiedUserIcon />}
-                    sx={{ px: 3, fontWeight: 700, whiteSpace: 'nowrap' }}
+                    disabled={submitting}
+                    onClick={handleOneClickConfirm}
+                    startIcon={submitting ? <CircularProgress size={20} color="inherit" /> : <VerifiedUserIcon />}
+                    sx={{
+                      py: 1.6,
+                      fontWeight: 800,
+                      fontSize: '1rem',
+                      borderRadius: 2.5,
+                      boxShadow: '0 10px 25px -5px rgba(34, 197, 94, 0.5)',
+                    }}
                   >
-                    {submitting ? <CircularProgress size={20} color="inherit" /> : 'Onayla'}
+                    {submitting ? 'Onaylanıyor...' : 'Oda Girişimi Onayla (Check-In)'}
                   </Button>
                 </Box>
 
                 <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.08)' }} />
-                <Typography variant="caption" sx={{ color: '#64748B', display: 'block', textAlign: 'center' }}>
-                  Not: Cihaz kilidi nedeniyle bu telefondan başka bir öğrencinin hesabına girilerek onaylama yapılamaz.
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0.75, color: '#64748B' }}>
+                  <PhonelinkLockIcon sx={{ fontSize: 15 }} />
+                  <Typography variant="caption" sx={{ textAlign: 'center' }}>
+                    Cihaz kilidi aktiftir: Bu telefondan başka bir öğrencinin hesabına girilerek onay verilemez.
+                  </Typography>
+                </Box>
               </>
             )}
           </>

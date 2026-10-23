@@ -15,7 +15,6 @@ import {
 import WindowIcon from '@mui/icons-material/Window';
 import LanguageIcon from '@mui/icons-material/Language';
 import SchoolIcon from '@mui/icons-material/School';
-import GroupAddIcon from '@mui/icons-material/GroupAdd';
 import BadgeIcon from '@mui/icons-material/Badge';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useTranslation } from 'react-i18next';
@@ -31,65 +30,65 @@ const DEMO_ACCOUNTS = [
     color: 'primary',
   },
   {
-    label: 'Öğrenci 2 (Ayşe Yılmaz)',
-    subLabel: 's250201903@stu.thk.edu.tr',
-    email: 's250201903@stu.thk.edu.tr',
+    label: 'Öğrenci 2 (Ayşe Yılmaz - Demo)',
+    subLabel: 'demo.ogrenci2.x91@demo.local',
+    email: 'demo.ogrenci2.x91@demo.local',
     icon: <SchoolIcon fontSize="small" />,
     color: 'info',
   },
   {
-    label: 'Öğrenci 3 (Mehmet Demir)',
-    subLabel: 's220401001@stu.thk.edu.tr',
-    email: 's220401001@stu.thk.edu.tr',
+    label: 'Öğrenci 3 (Mehmet Demir - Demo)',
+    subLabel: 'demo.ogrenci3.k42@demo.local',
+    email: 'demo.ogrenci3.k42@demo.local',
     icon: <SchoolIcon fontSize="small" />,
     color: 'primary',
   },
   {
-    label: 'Öğrenci 4 (Zeynep Kaya)',
-    subLabel: 's220401002@stu.thk.edu.tr',
-    email: 's220401002@stu.thk.edu.tr',
+    label: 'Öğrenci 4 (Zeynep Kaya - Demo)',
+    subLabel: 'demo.ogrenci4.m18@demo.local',
+    email: 'demo.ogrenci4.m18@demo.local',
     icon: <SchoolIcon fontSize="small" />,
     color: 'primary',
   },
   {
-    label: 'Öğrenci 5 (Caner Aydın)',
-    subLabel: 's220401003@stu.thk.edu.tr',
-    email: 's220401003@stu.thk.edu.tr',
+    label: 'Öğrenci 5 (Caner Aydın - Sınırda)',
+    subLabel: 'demo.ogrenci5.p77@demo.local',
+    email: 'demo.ogrenci5.p77@demo.local',
     icon: <SchoolIcon fontSize="small" />,
     color: 'primary',
   },
   {
-    label: 'Öğrenci 6 (Elif Şahin)',
-    subLabel: 's220401004@stu.thk.edu.tr',
-    email: 's220401004@stu.thk.edu.tr',
+    label: 'Öğrenci 6 (Elif Şahin - Demo)',
+    subLabel: 'demo.ogrenci6.r33@demo.local',
+    email: 'demo.ogrenci6.r33@demo.local',
     icon: <SchoolIcon fontSize="small" />,
     color: 'primary',
   },
   {
-    label: 'Öğrenci 7 (Burak Çelik)',
-    subLabel: 's220401005@stu.thk.edu.tr',
-    email: 's220401005@stu.thk.edu.tr',
+    label: 'Öğrenci 7 (Burak Çelik - Demo)',
+    subLabel: 'demo.ogrenci7.t55@demo.local',
+    email: 'demo.ogrenci7.t55@demo.local',
     icon: <SchoolIcon fontSize="small" />,
     color: 'primary',
   },
   {
     label: 'Kütüphane Görevlisi (LIBRARIAN)',
-    subLabel: 'kutuphane@thk.edu.tr',
-    email: 'kutuphane@thk.edu.tr',
+    subLabel: 'gorevli.demo@demo.local',
+    email: 'gorevli.demo@demo.local',
     icon: <BadgeIcon fontSize="small" />,
     color: 'success',
   },
   {
     label: 'Kütüphane Müdürü (ADMIN)',
-    subLabel: 'mudur@thk.edu.tr',
-    email: 'mudur@thk.edu.tr',
+    subLabel: 'boraa-35@hotmail.com',
+    email: 'boraa-35@hotmail.com',
     icon: <AdminPanelSettingsIcon fontSize="small" />,
     color: 'warning',
   },
   {
     label: 'BİM Sistem Yöneticisi (SUPER_ADMIN)',
-    subLabel: 'admin@thk.edu.tr',
-    email: 'admin@thk.edu.tr',
+    subLabel: 'bim.demo@demo.local',
+    email: 'bim.demo@demo.local',
     icon: <AdminPanelSettingsIcon fontSize="small" />,
     color: 'error',
   },
@@ -125,7 +124,6 @@ const Login = () => {
         position: 'relative',
       }}
     >
-      {/* Dil Değiştirme Butonu */}
       <Box sx={{ position: 'absolute', top: 20, right: 20 }}>
         <Tooltip title={i18n.language === 'tr' ? 'Switch to English' : "Türkçe'ye Geç"}>
           <IconButton onClick={toggleLanguage} color="primary">
@@ -137,7 +135,6 @@ const Login = () => {
         </Tooltip>
       </Box>
 
-      {/* Login Kartı */}
       <Card
         elevation={0}
         sx={{
@@ -152,7 +149,6 @@ const Login = () => {
           mt: 4,
         }}
       >
-        {/* Üstteki Mavi Çizgi */}
         <Box
           sx={{
             position: 'absolute',
@@ -175,7 +171,6 @@ const Login = () => {
             gap: 2.5,
           }}
         >
-          {/* Floating Logo */}
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: -8, mb: 0.5 }}>
             <Box
               sx={{
@@ -203,7 +198,6 @@ const Login = () => {
             </Box>
           </Box>
 
-          {/* Başlıklar */}
           <Box sx={{ textAlign: 'center' }}>
             <Typography variant="h5" component="h1" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
               {t('universityName')}
@@ -216,7 +210,6 @@ const Login = () => {
             </Typography>
           </Box>
 
-          {/* Kurumsal Microsoft Giriş Butonu */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
             <Button
               fullWidth
@@ -243,12 +236,11 @@ const Login = () => {
             </Typography>
           </Box>
 
-{/* --- SUNUM & TEST DEMO GİRİŞ BÖLÜMÜ --- */}
           {import.meta.env.VITE_ENABLE_DEMO_LOGIN !== 'false' && (
             <>
               <Divider sx={{ my: 0.5 }}>
                 <Chip
-                  label="DEMO HIZLI GİRİŞ"
+                  label="DEMO HIZLI GİRİŞ (GÜVENLİ MAİL MODU)"
                   size="small"
                   sx={{ fontSize: '0.65rem', fontWeight: 700, bgcolor: 'action.hover', color: 'primary.main' }}
                 />
@@ -292,7 +284,6 @@ const Login = () => {
         </CardContent>
       </Card>
 
-      {/* Footer */}
       <Box component="footer" sx={{ mt: 4, textAlign: 'center', px: 2 }}>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>
           {t('footerRights')}

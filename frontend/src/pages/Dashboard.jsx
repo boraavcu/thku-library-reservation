@@ -3,8 +3,7 @@ import api from '../api';
 import { useNavigate } from 'react-router-dom';
 import {
   Container, Typography, Card, Box, CircularProgress, Alert,
-  IconButton, Button, Chip, Snackbar, Tooltip, Dialog,
-  DialogTitle, DialogContent, DialogActions, TextField
+  IconButton, Button, Chip, Snackbar, Tooltip
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from "next-auth/react";
@@ -16,7 +15,7 @@ import RoomDensityChart from '../components/dashboard/RoomDensityChart';
 
 import BoltIcon from '@mui/icons-material/Bolt';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
-import HistoryIcon from '@mui/icons-material/History';
+import EventNoteIcon from '@mui/icons-material/EventNote';
 import GavelIcon from '@mui/icons-material/Gavel';
 import GroupIcon from '@mui/icons-material/Group';
 import UpcomingIcon from '@mui/icons-material/Upcoming';
@@ -28,7 +27,6 @@ import MailOutlineIcon from '@mui/icons-material/MailOutline';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import PersonIcon from '@mui/icons-material/Person';
-import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 
 function Dashboard() {
   const navigate = useNavigate();
@@ -45,11 +43,6 @@ function Dashboard() {
   const [respondingId, setRespondingId] = useState(null);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
-  // Check-in Modal State
-  const [checkInOpen, setCheckInOpen] = useState(false);
-  const [kioskToken, setKioskToken] = useState('');
-  const [checkingIn, setCheckingIn] = useState(false);
-
   useEffect(() => {
     if (status === "loading") return;
     if (status === "unauthenticated") {
@@ -60,7 +53,6 @@ function Dashboard() {
       navigate('/rules');
       return;
     }
-    // Görevli, Müdür ve BİM Yöneticisi doğrudan Yönetim & Analiz Merkezine gider
     if (['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role)) {
       navigate('/admin', { replace: true });
     }
@@ -105,34 +97,14 @@ function Dashboard() {
         severity: action === 'ACCEPT' ? 'success' : 'info',
       });
       await Promise.all([fetchInvitations(), fetchActiveReservations()]);
-    } catch {
-      setSnack({ open: true, message: 'Bir hata oluştu.', severity: 'error' });
-    } finally {
-      setRespondingId(null);
-    }
-  };
-
-  const handleCheckInSubmit = async () => {
-    if (!kioskToken.trim()) return;
-    setCheckingIn(true);
-    try {
-      const res = await api.post('/checkin/validate', { token: kioskToken.trim().toUpperCase() });
-      setCheckInOpen(false);
-      setKioskToken('');
-      setSnack({
-        open: true,
-        message: res.data.warningMessage || `Check-in başarılı! Oda: ${res.data.room?.roomNumber}`,
-        severity: 'success',
-      });
-      await fetchActiveReservations();
     } catch (err) {
       setSnack({
         open: true,
-        message: err.response?.data?.error || 'Check-in doğrulanamadı.',
+        message: err.response?.data?.error || 'Bir hata oluştu.',
         severity: 'error',
       });
     } finally {
-      setCheckingIn(false);
+      setRespondingId(null);
     }
   };
 
@@ -147,9 +119,10 @@ function Dashboard() {
 
   const fmtTime = (timeStr) => {
     const d = new Date(timeStr);
-    const hh = String(d.getUTCHours()).padStart(2, '0');
-    const mm = String(d.getUTCMinutes()).padStart(2, '0');
-    return `${hh}:${mm}`;
+    const h = d.getUTCHours();
+    const m = d.getUTCMinutes();
+    if (h === 23 && m >= 59) return '24:00';
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
   };
 
   if (status === "loading" || loading) {
@@ -167,7 +140,6 @@ function Dashboard() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: 8, overflowX: 'hidden' }}>
       <Navbar />
       <Container maxWidth="lg" sx={{ pt: 4 }}>
-        {/* Welcome Section */}
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { xs: 'flex-start', md: 'flex-end' }, justifyContent: 'space-between', gap: 2, mb: 4 }}>
           <Box>
             <Typography variant="h4" sx={{ mb: 1, letterSpacing: '-0.02em' }}>
@@ -177,38 +149,23 @@ function Dashboard() {
               {t('welcomeSubtitle')}
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
-            <Button
-              variant="contained"
-              color="success"
-              startIcon={<QrCodeScannerIcon />}
-              onClick={() => setCheckInOpen(true)}
-              sx={{ borderRadius: 2, fontWeight: 700 }}
-            >
-              {t('checkIn')} (Kiosk Kodu)
-            </Button>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'action.hover', color: 'primary.main', px: 2, py: 1, borderRadius: 2 }}>
-              <InfoIcon fontSize="small" />
-              <Typography variant="body2" sx={{ fontWeight: 500, fontSize: '0.875rem' }}>
-                {t('libraryCloses', { time: '22:00' })}
-              </Typography>
-            </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, bgcolor: 'action.hover', color: 'primary.main', px: 2, py: 1, borderRadius: 2 }}>
+            <InfoIcon fontSize="small" />
+            <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.85rem' }}>
+              {currentLang === 'tr' ? 'Kütüphane 7/24 Açık (00:00 - 24:00)' : 'Library Open 24/7 (00:00 - 24:00)'}
+            </Typography>
           </Box>
         </Box>
 
-        {/* DASHBOARD GRID */}
         <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3 }}>
-          {/* ================= LEFT COLUMN ================= */}
           <Box sx={{ flex: { md: 1 }, minWidth: 0 }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {/* Quick Actions */}
               <Box>
                 <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
                   <BoltIcon color="primary" /> {t('quickActions')}
                 </Typography>
 
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, 1fr)' }, gap: 2 }}>
-                  {/* Primary CTA */}
                   <Box>
                     <Card
                       onClick={() => navigate('/reserve')}
@@ -234,21 +191,21 @@ function Dashboard() {
                     </Card>
                   </Box>
 
-                  {/* Secondary Action: Check-in / Active Bookings */}
                   <Box>
                     <Card
-                      onClick={() => setCheckInOpen(true)}
+                      onClick={() => navigate('/bookings')}
                       sx={{ p: 2.5, height: '100%', cursor: 'pointer', display: 'flex', flexDirection: 'column', transition: 'all 0.2s', '&:hover .icon-box': { bgcolor: 'action.hover', color: 'primary.main' } }}
                     >
                       <Box className="icon-box" sx={{ bgcolor: 'background.default', color: 'text.secondary', width: 'fit-content', p: 1, borderRadius: 2, mb: 2, transition: 'all 0.2s' }}>
-                        <HistoryIcon />
+                        <EventNoteIcon />
                       </Box>
-                      <Typography variant="h6" sx={{ fontSize: '1.125rem' }}>{t('checkIn')}</Typography>
-                      <Typography variant="subtitle2" sx={{ fontSize: '0.875rem' }}>{t('myReservationsDesc')}</Typography>
+                      <Typography variant="h6" sx={{ fontSize: '1.125rem' }}>{t('navMyBookings')}</Typography>
+                      <Typography variant="subtitle2" sx={{ fontSize: '0.875rem' }}>
+                        {currentLang === 'tr' ? 'Aktif randevularınızı görüntüleyin, gruba üye ekleyin veya erken boşaltın.' : 'View active bookings, manage group members, or check out early.'}
+                      </Typography>
                     </Card>
                   </Box>
 
-                  {/* Secondary Action: Rules */}
                   <Box>
                     <Card
                       onClick={() => navigate('/rules?view=true')}
@@ -264,11 +221,10 @@ function Dashboard() {
                 </Box>
               </Box>
 
-              {/* Pending Invitations */}
               {invitations.length > 0 && (
                 <Box>
                   <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <MailOutlineIcon color="warning" /> {t('pendingInvitations')}
+                    <MailOutlineIcon color="warning" /> {t('pendingInvitations')} (30 Dk Onay Süresi)
                   </Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                     {invitations.map((inv) => {
@@ -329,7 +285,6 @@ function Dashboard() {
                 </Box>
               )}
 
-              {/* My Reservations (Active) */}
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                   <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -379,7 +334,7 @@ function Dashboard() {
                                   <Box sx={{ display: { xs: 'none', sm: 'block' }, width: 4, height: 4, borderRadius: '50%', bgcolor: 'text.disabled' }} />
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: 'text.secondary' }}>
                                     <GroupIcon sx={{ fontSize: 16 }} />
-                                    <Typography variant="body2">{t('participantsCount', { count: totalPeople })}</Typography>
+                                    <Typography variant="body2">{t('participantsCount', { count: totalPeople })} / 8</Typography>
                                   </Box>
                                   <Box sx={{ display: { xs: 'none', sm: 'block' }, width: 4, height: 4, borderRadius: '50%', bgcolor: 'text.disabled' }} />
                                   <Chip label={statusLabel} size="small" sx={{ bgcolor: alpha(theme.palette[statusColor].main, 0.12), color: `${statusColor}.main`, fontWeight: 600, borderRadius: 1, height: 22 }} />
@@ -393,12 +348,10 @@ function Dashboard() {
                                 </Box>
                               </Box>
                             </Box>
-                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: { xs: 2, sm: 0 } }}>
-                              {res.status === 'CONFIRMED' && (
-                                <Button size="small" variant="outlined" color="success" onClick={() => setCheckInOpen(true)}>
-                                  {t('checkIn')}
-                                </Button>
-                              )}
+                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, mt: { xs: 2, sm: 0 } }}>
+                              <Button size="small" variant="outlined" onClick={() => navigate('/bookings')}>
+                                Yönet
+                              </Button>
                             </Box>
                           </Box>
                         </Card>
@@ -410,7 +363,6 @@ function Dashboard() {
             </Box>
           </Box>
 
-          {/* ================= RIGHT COLUMN (Sidebar) ================= */}
           <Box sx={{
             width: { xs: '100%', md: 320 },
             flexShrink: 0,
@@ -419,7 +371,6 @@ function Dashboard() {
             alignSelf: { md: 'flex-start' },
           }}>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {/* Announcements */}
               <Card sx={{ p: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3, pb: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
                   <CampaignIcon color="warning" />
@@ -461,58 +412,13 @@ function Dashboard() {
                 )}
               </Card>
 
-              {/* Room Density Chart */}
               <RoomDensityChart />
-
-              {/* Footer Links */}
-              <Box sx={{ px: 1 }}>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}>
-                  <Typography
-                    onClick={() => navigate('/rules?view=true')}
-                    sx={{
-                      fontSize: '0.75rem',
-                      color: 'text.secondary',
-                      cursor: 'pointer',
-                      '&:hover': { textDecoration: 'underline' },
-                    }}
-                  >
-                    {t('termsOfUse')}
-                  </Typography>
-                </Box>
-                <Typography sx={{ fontSize: '0.75rem', color: 'text.disabled' }}>
-                  {t('footerCopyright')}
-                </Typography>
-              </Box>
             </Box>
           </Box>
         </Box>
       </Container>
 
       <Footer />
-
-      {/* Kiosk Check-in Dialog */}
-      <Dialog open={checkInOpen} onClose={() => setCheckInOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Kiosk Check-In Doğrulama</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-            Kütüphane girişindeki Kiosk ekranında görünen 6 haneli doğrulama kodunu giriniz:
-          </Typography>
-          <TextField
-            autoFocus
-            fullWidth
-            placeholder="Örn: A7B9X2"
-            value={kioskToken}
-            onChange={(e) => setKioskToken(e.target.value.toUpperCase())}
-            inputProps={{ maxLength: 6, style: { letterSpacing: '0.25em', fontWeight: 700, textAlign: 'center', fontSize: '1.25rem' } }}
-          />
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2.5 }}>
-          <Button onClick={() => setCheckInOpen(false)} color="inherit">{t('cancel')}</Button>
-          <Button variant="contained" onClick={handleCheckInSubmit} disabled={checkingIn || kioskToken.trim().length < 6}>
-            {checkingIn ? <CircularProgress size={18} color="inherit" /> : t('checkIn')}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Snackbar
         open={snack.open}

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Container, Typography, Card, Grid, Tabs, Tab, Button, Chip,
+  Box, Container, Typography, Card, Tabs, Tab, Button, Chip,
   Switch, TextField, Select, MenuItem, IconButton, CircularProgress,
   Alert, Snackbar, Divider, Paper, Tooltip, InputAdornment, Pagination,
   LinearProgress, Dialog, DialogTitle, DialogContent, DialogActions
@@ -10,10 +10,8 @@ import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
-import RoomDensityChart from '../components/RoomDensityChart';
-import UsageChart from '../components/UsageChart';
+import RoomDensityChart from '../components/dashboard/RoomDensityChart';
 import api from '../api';
-import thkuLogo from '../assets/thku-logo.png';
 
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
@@ -36,16 +34,25 @@ import WhatshotIcon from '@mui/icons-material/Whatshot';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import AllInclusiveIcon from '@mui/icons-material/AllInclusive';
 
+const THKU_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png';
 const STAFF_ROLES = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'];
 const ITEMS_PER_PAGE = 10;
+
+const getFutureDateStr = (daysToAdd) => {
+  const d = new Date();
+  d.setDate(d.getDate() + daysToAdd);
+  return d.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+};
 
 const RULE_META = {
   MIN_PARTICIPANTS: {
     title: 'Minimum Katılımcı Sayısı (Kişi)',
-    desc: 'Bir çalışma odasının rezerve edilebilmesi için gereken en az öğrenci sayısı (Varsayılan: 2).',
+    desc: 'Bir çalışma odasının rezerve edilebilmesi için gereken en az öğrenci sayısı (Madde 2: En az 2 Kişi).',
     unit: 'Kişi',
-    min: 1,
+    min: 2,
     max: 8,
   },
   MAX_PARTICIPANTS: {
@@ -95,7 +102,7 @@ function formatAuditLogTurkish(log) {
       return {
         badge: 'Kişisel Kiosk Girişi',
         color: 'success',
-        title: `${actor} kapı QR kodundan kişisel doğrulama kodunu girerek yoklamasını tamamladı.`,
+        title: `${actor} kapı QR kodundan kişisel doğrulama onayı vererek yoklamasını tamamladı.`,
         detail: `Oda: ${d.room || '-'} | Doğrulayan: ${d.checkedInBy || actor} | Grup İlerlemesi: ${d.progress || '-'}`,
       };
     case 'RESERVATION_CANCELLED':
@@ -181,7 +188,6 @@ export default function AdminPanel() {
   const [newRoom, setNewRoom] = useState({ roomNumber: '', name: '', capacity: 8 });
   const [annForm, setAnnForm] = useState({ titleTr: '', titleEn: '', contentTr: '', contentEn: '', priority: 'HIGH' });
 
-  // Madde 7: Oda Düzenleme Modal State
   const [editRoomDialog, setEditRoomDialog] = useState({
     open: false,
     roomId: null,
@@ -190,13 +196,13 @@ export default function AdminPanel() {
     capacity: 8,
   });
 
-  // Madde 6: Dönemsel / Süreli Banlama Modal State
   const [banDialog, setBanDialog] = useState({
     open: false,
     userId: null,
     fullName: '',
     email: '',
-    banDuration: '30',
+    banMode: 'DATE', // 'DATE' | 'PERMANENT'
+    banUntilDateStr: getFutureDateStr(30),
     banReason: '',
   });
 
@@ -239,7 +245,6 @@ export default function AdminPanel() {
     }
   };
 
-  // Madde 12: Faaliyet Raporu PDF Çıktısı Alma
   const handlePrintPdfReport = () => {
     setTab(0);
     setTimeout(() => {
@@ -259,7 +264,7 @@ export default function AdminPanel() {
     new Date(dStr).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
   const filteredReservations = useMemo(() => {
-    return data.reservations.filter((r) => {
+    return (data.reservations || []).filter((r) => {
       if (resFilter === 'ACTIVE') return ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status);
       if (resFilter === 'COMPLETED') return r.status === 'COMPLETED';
       if (resFilter === 'CANCELLED') return ['CANCELLED', 'NO_SHOW'].includes(r.status);
@@ -282,8 +287,8 @@ export default function AdminPanel() {
       (u.department || '').toLowerCase().includes(q);
 
     return {
-      studentList: data.users.filter((u) => u.role === 'STUDENT' && matches(u)),
-      staffList: data.users.filter((u) => u.role !== 'STUDENT' && matches(u)),
+      studentList: (data.users || []).filter((u) => u.role === 'STUDENT' && matches(u)),
+      staffList: (data.users || []).filter((u) => u.role !== 'STUDENT' && matches(u)),
     };
   }, [data.users, userSearch]);
 
@@ -310,9 +315,11 @@ export default function AdminPanel() {
     );
   }
 
-  const activeBookingsCount = data.reservations.filter((r) => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status)).length;
-  const bannedUsersCount = data.users.filter((u) => u.isBanned).length;
+  const activeBookingsCount = (data.reservations || []).filter((r) => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status)).length;
+  const totalStudentsCount = (data.users || []).filter((u) => u.role === 'STUDENT').length;
+  const bannedUsersCount = (data.users || []).filter((u) => u.isBanned).length;
   const maxHeatCount = Math.max(1, ...(data.analytics?.hourlyHeatmap?.map((h) => h.count) || [1]));
+  const minTomorrowDateStr = getFutureDateStr(1);
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -321,7 +328,7 @@ export default function AdminPanel() {
       </Box>
 
       <Container maxWidth="lg" sx={{ pt: 3.5, pb: 6, flex: 1 }}>
-        {/* Sadece PDF Çıktısında Görünecek Resmi Antet (Madde 12) */}
+        {/* Sadece PDF Çıktısında Görünecek Resmi Antet */}
         <Box
           sx={{
             display: 'none',
@@ -336,7 +343,7 @@ export default function AdminPanel() {
           }}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box component="img" src={thkuLogo} alt="THKÜ" sx={{ width: 56, height: 56, objectFit: 'contain' }} />
+            <Box component="img" src={THKU_LOGO_URL} alt="THKÜ" sx={{ width: 56, height: 56, objectFit: 'contain' }} />
             <Box>
               <Typography variant="h6" sx={{ fontWeight: 800, color: '#0F172A' }}>
                 TÜRK HAVA KURUMU ÜNİVERSİTESİ
@@ -351,7 +358,7 @@ export default function AdminPanel() {
           </Typography>
         </Box>
 
-        {/* Üst Başlık ve Hızlı Kiosk Butonu */}
+        {/* Üst Başlık ve Hızlı Butonlar */}
         <Box
           sx={{
             display: 'flex',
@@ -375,13 +382,12 @@ export default function AdminPanel() {
                 <Chip label={userRole} color="primary" size="small" sx={{ fontWeight: 700 }} />
               </Box>
               <Typography variant="body2" color="text.secondary">
-                Oda düzenleme, kapı QR posteri, PDF faaliyet raporu, dönemsel ban ve sistem denetim paneli
+                Oda düzenleme, kapı QR posteri, PDF faaliyet raporu, takvimli/kalıcı ban ve denetim paneli
               </Typography>
             </Box>
           </Box>
 
           <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
-            {/* MADDE 12: PDF Faaliyet Raporu Çıktısı Butonu */}
             <Button
               variant="outlined"
               color="primary"
@@ -404,37 +410,39 @@ export default function AdminPanel() {
           </Box>
         </Box>
 
-        {/* Özet KPI Kartları */}
-        <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid size={{ xs: 12, sm: 3 }}>
-            <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.success.main}` }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>AKTİF ÇALIŞMA ODASI</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>
-                {data.rooms.filter((r) => r.isActive).length} / {data.rooms.length}
-              </Typography>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 3 }}>
-            <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.primary.main}` }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>AKTİF / BEKLEYEN RANDEVU</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{activeBookingsCount}</Typography>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 3 }}>
-            <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.warning.main}` }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>ZİRVE YOĞUNLUK SAATİ</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'warning.main' }}>
-                {data.analytics?.peakHour || '14:00'}
-              </Typography>
-            </Card>
-          </Grid>
-          <Grid size={{ xs: 12, sm: 3 }}>
-            <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.error.main}` }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>YASAKLI (BANLI) ÖĞRENCİ</Typography>
-              <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'error.main' }}>{bannedUsersCount}</Typography>
-            </Card>
-          </Grid>
-        </Grid>
+        {/* Özet KPI Kartları (5 Kart: Kayıtlı Öğrenci Sayısı Eklendi) */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(5, 1fr)' }, gap: 2, mb: 3 }}>
+          <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.success.main}` }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>AKTİF ÇALIŞMA ODASI</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>
+              {(data.rooms || []).filter((r) => r.isActive).length} / {(data.rooms || []).length}
+            </Typography>
+          </Card>
+
+          <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.primary.main}` }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>AKTİF / BEKLEYEN RANDEVU</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5 }}>{activeBookingsCount}</Typography>
+          </Card>
+
+          <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.warning.main}` }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>ZİRVE YOĞUNLUK SAATİ</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'warning.main' }}>
+              {data.analytics?.peakHour || '14:00'}
+            </Typography>
+          </Card>
+
+          <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.info.main}` }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>KAYITLI ÖĞRENCİ SAYISI</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'info.main' }}>
+              {totalStudentsCount}
+            </Typography>
+          </Card>
+
+          <Card sx={{ p: 2.25, borderLeft: `4px solid ${theme.palette.error.main}` }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>YASAKLI (BANLI) ÖĞRENCİ</Typography>
+            <Typography variant="h4" sx={{ fontWeight: 800, mt: 0.5, color: 'error.main' }}>{bannedUsersCount}</Typography>
+          </Card>
+        </Box>
 
         {/* Ana Yönetim Sekmeleri */}
         <Card>
@@ -454,12 +462,12 @@ export default function AdminPanel() {
             <Tab icon={<EventAvailableIcon />} iconPosition="start" label="Rezervasyon Yönetimi" />
             <Tab icon={<MeetingRoomIcon />} iconPosition="start" label="Odaları Ekle / Düzenle / Sil" />
             <Tab icon={<CampaignIcon />} iconPosition="start" label="Duyuru Yayınla" />
-            <Tab icon={<PeopleAltIcon />} iconPosition="start" label="Öğrenciler, Süreli Ban & Yetkiler" />
+            <Tab icon={<PeopleAltIcon />} iconPosition="start" label="Öğrenciler, Ban & Yetkiler" />
             {isAdminOrSuper && <Tab icon={<GavelIcon />} iconPosition="start" label="Kurallar & Loglar (180 Gün)" />}
           </Tabs>
 
           <Box sx={{ p: { xs: 2, sm: 3 } }}>
-            {/* ================= SEKME 0: YOĞUNLUK & DOLULUK ANALİZİ (MADDE 12 PDF RAPORU) ================= */}
+            {/* ================= SEKME 0: YOĞUNLUK & DOLULUK ANALİZİ ================= */}
             {tab === 0 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <Paper
@@ -499,100 +507,91 @@ export default function AdminPanel() {
                   </Button>
                 </Paper>
 
-                <Grid container spacing={2.5}>
-                  <Grid size={{ xs: 12, md: 6 }}>
+                <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2.5 }}>
+                  <Box>
                     <RoomDensityChart />
-                  </Grid>
-                  <Grid size={{ xs: 12, md: 6 }}>
-                    <UsageChart />
-                  </Grid>
-                </Grid>
+                  </Box>
 
-                <Grid container spacing={2.5}>
-                  <Grid size={{ xs: 12, md: 7 }}>
-                    <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2.5, border: '1px solid', borderColor: 'divider', height: '100%' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                        <WhatshotIcon color="warning" fontSize="small" />
-                        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                          7/24 Saatlik Yoğunluk Isı Haritası (Peak Hours Heatmap)
-                        </Typography>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                        00:00 – 24:00 arası hangi saat dilimlerinde çalışma odalarının daha çok tercih edildiğini gösterir.
+                  <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2.5, border: '1px solid', borderColor: 'divider' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                      <SchoolIcon color="primary" fontSize="small" />
+                      <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                        Bölüm Bazlı Kullanım Dağılımı
                       </Typography>
+                    </Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                      Çalışma odalarını en aktif kullanan fakülte ve bölümlerin oranı (Faaliyet Raporu Verisi).
+                    </Typography>
 
-                      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 1 }}>
-                        {(data.analytics?.hourlyHeatmap || []).map((slot) => {
-                          const ratio = slot.count / maxHeatCount;
-                          const bg =
-                            slot.count === 0
-                              ? alpha(theme.palette.text.disabled, 0.08)
-                              : ratio > 0.7
-                              ? alpha(theme.palette.error.main, 0.85)
-                              : ratio > 0.35
-                              ? alpha(theme.palette.warning.main, 0.75)
-                              : alpha(theme.palette.primary.main, 0.55);
-                          const textCol = slot.count === 0 ? 'text.secondary' : '#fff';
-
-                          return (
-                            <Tooltip key={slot.hour} title={`${slot.hour} diliminde toplam ${slot.count} rezervasyon`}>
-                              <Box
-                                sx={{
-                                  p: 1,
-                                  borderRadius: 1.5,
-                                  bgcolor: bg,
-                                  color: textCol,
-                                  textAlign: 'center',
-                                }}
-                              >
-                                <Typography sx={{ fontSize: '0.72rem', fontWeight: 800 }}>{slot.hour}</Typography>
-                                <Typography sx={{ fontSize: '0.65rem', opacity: 0.9 }}>{slot.count} Grup</Typography>
-                              </Box>
-                            </Tooltip>
-                          );
-                        })}
-                      </Box>
-                    </Paper>
-                  </Grid>
-
-                  <Grid size={{ xs: 12, md: 5 }}>
-                    <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2.5, border: '1px solid', borderColor: 'divider', height: '100%' }}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                        <SchoolIcon color="primary" fontSize="small" />
-                        <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
-                          Bölüm Bazlı Kullanım Dağılımı
-                        </Typography>
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                        Çalışma odalarını en aktif kullanan fakülte ve bölümlerin oranı (Faaliyet Raporu Verisi).
-                      </Typography>
-
-                      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.75 }}>
-                        {(data.analytics?.departmentBreakdown || []).map((dept) => (
-                          <Box key={dept.name}>
-                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
-                              <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.8rem' }}>
-                                {dept.name}
-                              </Typography>
-                              <Typography variant="caption" sx={{ fontWeight: 800, color: 'primary.main' }}>
-                                %{dept.percentage} ({dept.count} Katılım)
-                              </Typography>
-                            </Box>
-                            <LinearProgress
-                              variant="determinate"
-                              value={dept.percentage}
-                              sx={{ height: 7, borderRadius: 4 }}
-                            />
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.75 }}>
+                      {(data.analytics?.departmentBreakdown || []).map((dept) => (
+                        <Box key={dept.name}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, fontSize: '0.82rem' }}>
+                              {dept.name}
+                            </Typography>
+                            <Typography variant="caption" sx={{ fontWeight: 800, color: 'primary.main' }}>
+                              %{dept.percentage} ({dept.count} Katılım)
+                            </Typography>
                           </Box>
-                        ))}
-                      </Box>
-                    </Paper>
-                  </Grid>
-                </Grid>
+                          <LinearProgress
+                            variant="determinate"
+                            value={dept.percentage}
+                            sx={{ height: 8, borderRadius: 4 }}
+                          />
+                        </Box>
+                      ))}
+                    </Box>
+                  </Paper>
+                </Box>
+
+                <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2.5, border: '1px solid', borderColor: 'divider' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                    <WhatshotIcon color="warning" fontSize="small" />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+                      7/24 Saatlik Yoğunluk Isı Haritası (Peak Hours Heatmap)
+                    </Typography>
+                  </Box>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                    00:00 – 24:00 arası hangi saat dilimlerinde çalışma odalarının daha çok tercih edildiğini gösterir.
+                  </Typography>
+
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(4, 1fr)', sm: 'repeat(6, 1fr)', md: 'repeat(8, 1fr)' }, gap: 1 }}>
+                    {(data.analytics?.hourlyHeatmap || []).map((slot) => {
+                      const ratio = slot.count / maxHeatCount;
+                      const bg =
+                        slot.count === 0
+                          ? alpha(theme.palette.text.disabled, 0.08)
+                          : ratio > 0.7
+                          ? alpha(theme.palette.error.main, 0.85)
+                          : ratio > 0.35
+                          ? alpha(theme.palette.warning.main, 0.75)
+                          : alpha(theme.palette.primary.main, 0.55);
+                      const textCol = slot.count === 0 ? 'text.secondary' : '#fff';
+
+                      return (
+                        <Tooltip key={slot.hour} title={`${slot.hour} diliminde toplam ${slot.count} rezervasyon`}>
+                          <Box
+                            sx={{
+                              p: 1,
+                              borderRadius: 1.5,
+                              bgcolor: bg,
+                              color: textCol,
+                              textAlign: 'center',
+                            }}
+                          >
+                            <Typography sx={{ fontSize: '0.75rem', fontWeight: 800 }}>{slot.hour}</Typography>
+                            <Typography sx={{ fontSize: '0.68rem', opacity: 0.9 }}>{slot.count} Grup</Typography>
+                          </Box>
+                        </Tooltip>
+                      );
+                    })}
+                  </Box>
+                </Paper>
               </Box>
             )}
 
-            {/* ================= SEKME 1: REZERVASYONLAR (UZATMA YOK - MADDE 9) ================= */}
+            {/* ================= SEKME 1: REZERVASYONLAR (SABİT ALT BUTON DÜZENİ) ================= */}
             {tab === 1 && (
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5, mb: 2.5 }}>
@@ -601,7 +600,7 @@ export default function AdminPanel() {
                       label="Devam Eden & Bekleyenler"
                       color={resFilter === 'ACTIVE' ? 'primary' : 'default'}
                       onClick={() => { setResFilter('ACTIVE'); setResPage(1); }}
-                       sx={{ fontWeight: 700, cursor: 'pointer' }}
+                      sx={{ fontWeight: 700, cursor: 'pointer' }}
                     />
                     <Chip
                       label="Tamamlananlar (Geçmiş)"
@@ -625,99 +624,118 @@ export default function AdminPanel() {
                   {paginatedReservations.length === 0 ? (
                     <Alert severity="info">Bu kategoride rezervasyon kaydı bulunmuyor.</Alert>
                   ) : (
-                    paginatedReservations.map((r) => (
-                      <Paper key={r.id} variant="outlined" sx={{ p: 2.25, borderRadius: 2, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-                        <Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
-                            <Typography sx={{ fontWeight: 800 }}>
-                              {r.room?.roomNumber} - {r.room?.name}
-                            </Typography>
-                            <Chip
-                              label={r.status}
-                              size="small"
-                              color={
-                                r.status === 'CHECKED_IN' || r.status === 'CONFIRMED'
-                                  ? 'success'
-                                  : r.status === 'COMPLETED'
-                                  ? 'info'
-                                  : r.status === 'PENDING'
-                                  ? 'warning'
-                                  : 'error'
-                              }
-                              sx={{ fontWeight: 700, height: 22 }}
-                            />
-                            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-                              {fmtDate(r.reservationDate)} | {fmtTime(r.startTime)} - {fmtTime(r.endTime)}
-                            </Typography>
-                          </Box>
-                          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                            Organizatör: {r.user?.fullName} ({r.user?.email}) • {r.user?.department || 'Bölüm Belirtilmedi'}
-                          </Typography>
-                          {r.participants?.length > 0 && (
-                            <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
-                              {r.participants.map((p, idx) => (
-                                <Chip
-                                  key={idx}
-                                  size="small"
-                                  variant="outlined"
-                                  label={`${p.user?.fullName || p.user?.email} (${p.status})`}
-                                  color={p.status === 'ACCEPTED' ? 'success' : p.status === 'REJECTED' ? 'error' : 'warning'}
-                                  sx={{ height: 20, fontSize: '0.68rem' }}
-                                />
-                              ))}
+                    paginatedReservations.map((r) => {
+                      const hasActions = ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status);
+                      return (
+                        <Paper
+                          key={r.id}
+                          variant="outlined"
+                          sx={{
+                            p: 2.25,
+                            borderRadius: 2,
+                            flexShrink: 0,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 1.5,
+                          }}
+                        >
+                          <Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.75, flexWrap: 'wrap' }}>
+                              <Typography sx={{ fontWeight: 800, fontSize: '1rem' }}>
+                                {r.room?.roomNumber} - {r.room?.name}
+                              </Typography>
+                              <Chip
+                                label={r.status}
+                                size="small"
+                                color={
+                                  r.status === 'CHECKED_IN' || r.status === 'CONFIRMED'
+                                    ? 'success'
+                                    : r.status === 'COMPLETED'
+                                    ? 'info'
+                                    : r.status === 'PENDING'
+                                    ? 'warning'
+                                    : 'error'
+                                }
+                                sx={{ fontWeight: 700, height: 22 }}
+                              />
+                              <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                                {fmtDate(r.reservationDate)} | {fmtTime(r.startTime)} - {fmtTime(r.endTime)}
+                              </Typography>
                             </Box>
-                          )}
-                        </Box>
+                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                              Organizatör: {r.user?.fullName} ({r.user?.email}) • {r.user?.department || 'Bölüm Belirtilmedi'}
+                            </Typography>
+                            {r.participants?.length > 0 && (
+                              <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 1 }}>
+                                {r.participants.map((p, idx) => (
+                                  <Chip
+                                    key={idx}
+                                    size="small"
+                                    variant="outlined"
+                                    label={`${p.user?.fullName || p.user?.email} (${p.status})`}
+                                    color={p.status === 'ACCEPTED' ? 'success' : p.status === 'REJECTED' ? 'error' : 'warning'}
+                                    sx={{ height: 22, fontSize: '0.7rem' }}
+                                  />
+                                ))}
+                              </Box>
+                            )}
+                          </Box>
 
-                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                          {['PENDING', 'CONFIRMED'].includes(r.status) && (
-                            <Button
-                              size="small"
-                              variant="contained"
-                              color="success"
-                              startIcon={<CheckCircleOutlineIcon />}
-                              onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'FORCE_CHECKIN' }, 'Manuel Check-In yapıldı ve görevli maili gönderildi.')}
-                            >
-                              Manuel Check-In
-                            </Button>
-                          )}
+                          {hasActions && (
+                            <>
+                              <Divider />
+                              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                                {['PENDING', 'CONFIRMED'].includes(r.status) && (
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    color="success"
+                                    startIcon={<CheckCircleOutlineIcon />}
+                                    onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'FORCE_CHECKIN' }, 'Manuel Check-In yapıldı.')}
+                                  >
+                                    Manuel Check-In
+                                  </Button>
+                                )}
 
-                          {['CONFIRMED', 'CHECKED_IN'].includes(r.status) && (
-                            <Button
-                              size="small"
-                              variant="contained"
-                              color="info"
-                              startIcon={<DoneAllIcon />}
-                              onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'EARLY_FINISH' }, 'Oda erken boşaltıldı ve kalan saatler boşa çıkarıldı.')}
-                            >
-                              Erken Bitir (Boşalt)
-                            </Button>
-                          )}
+                                {['CONFIRMED', 'CHECKED_IN'].includes(r.status) && (
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    color="info"
+                                    startIcon={<DoneAllIcon />}
+                                    onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'EARLY_FINISH' }, 'Oda erken boşaltıldı ve kalan saatler boşa çıkarıldı.')}
+                                  >
+                                    Erken Bitir (Boşalt)
+                                  </Button>
+                                )}
 
-                          {['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status) && (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'MARK_NO_SHOW' }, 'Kiosk kodu girmeyenlere No-Show uyarısı (1/3) ve e-postası gönderildi.')}
-                            >
-                              No-Show Uyarısı Ver (Mail Gönder)
-                            </Button>
-                          )}
+                                {['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status) && (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="warning"
+                                    onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'MARK_NO_SHOW' }, 'Kiosk onayı vermeyenlere No-Show uyarısı (1/3) işlendi.')}
+                                  >
+                                    No-Show Uyarısı Ver
+                                  </Button>
+                                )}
 
-                          {['PENDING', 'CONFIRMED'].includes(r.status) && (
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="error"
-                              onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'CANCEL' }, 'Rezervasyon iptal edildi ve oda boşa çıkarıldı.')}
-                            >
-                              İptal Et
-                            </Button>
+                                {['PENDING', 'CONFIRMED'].includes(r.status) && (
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="error"
+                                    onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'CANCEL' }, 'Rezervasyon iptal edildi ve oda boşa çıkarıldı.')}
+                                  >
+                                    İptal Et
+                                  </Button>
+                                )}
+                              </Box>
+                            </>
                           )}
-                        </Box>
-                      </Paper>
-                    ))
+                        </Paper>
+                      );
+                    })
                   )}
                 </Box>
 
@@ -734,7 +752,7 @@ export default function AdminPanel() {
               </Box>
             )}
 
-            {/* ================= SEKME 2: ODALARI EKLE / DÜZENLE / SİL (MADDE 2 & MADDE 7) ================= */}
+            {/* ================= SEKME 2: ODALARI EKLE / DÜZENLE / SİL ================= */}
             {tab === 2 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {isAdminOrSuper && (
@@ -777,7 +795,7 @@ export default function AdminPanel() {
                 )}
 
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
-                  {data.rooms.map((room) => (
+                  {(data.rooms || []).map((room) => (
                     <Card key={room.id} sx={{ p: 2.5, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: `4px solid ${room.isActive ? theme.palette.success.main : theme.palette.error.main}` }}>
                       <Box>
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -811,9 +829,8 @@ export default function AdminPanel() {
                           />
                         </Tooltip>
 
-                        {/* MADDE 7: Odayı Oluşturduktan Sonra Bile İsim, Kod ve Kapasitesini Düzenleme */}
                         {isAdminOrSuper && (
-                          <Tooltip title="Oda Adını ve Kapasitesini Düzenle (Madde 7)">
+                          <Tooltip title="Oda Adını ve Kapasitesini Düzenle">
                             <IconButton
                               color="primary"
                               size="small"
@@ -856,8 +873,8 @@ export default function AdminPanel() {
 
             {/* ================= SEKME 3: DUYURU YAYINLA ================= */}
             {tab === 3 && (
-              <Grid container spacing={3}>
-                <Grid size={{ xs: 12, md: 5 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '5fr 7fr' }, gap: 3 }}>
+                <Box>
                   <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>Yeni Duyuru Yayınla</Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <TextField label="Türkçe Başlık" size="small" fullWidth value={annForm.titleTr} onChange={(e) => setAnnForm({ ...annForm, titleTr: e.target.value })} />
@@ -881,11 +898,12 @@ export default function AdminPanel() {
                       Duyuruyu Yayınla
                     </Button>
                   </Box>
-                </Grid>
-                <Grid size={{ xs: 12, md: 7 }}>
+                </Box>
+
+                <Box>
                   <Typography variant="h6" sx={{ fontWeight: 700, mb: 2 }}>Aktif Duyurular</Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                    {data.announcements.map((a) => (
+                    {(data.announcements || []).map((a) => (
                       <Paper key={a.id} variant="outlined" sx={{ p: 2, borderRadius: 2, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -900,17 +918,17 @@ export default function AdminPanel() {
                       </Paper>
                     ))}
                   </Box>
-                </Grid>
-              </Grid>
+                </Box>
+              </Box>
             )}
 
-            {/* ================= SEKME 4: ÖĞRENCİ ARAMA, DÖNEMSEL BAN & YETKİLİLER (MADDE 6) ================= */}
+            {/* ================= SEKME 4: ÖĞRENCİLER, TAKVİMLİ/PERMA BAN & YETKİLER (SABİT ALT BUTON DÜZENİ) ================= */}
             {tab === 4 && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <TextField
                   fullWidth
                   size="small"
-                  placeholder="Öğrenci adı, kurumsal e-posta (@stu.thk.edu.tr), öğrenci numarası veya bölüm ara..."
+                  placeholder="Öğrenci adı, e-posta, öğrenci numarası veya bölüm ara..."
                   value={userSearch}
                   onChange={(e) => { setUserSearch(e.target.value); setStudentPage(1); }}
                   InputProps={{
@@ -932,42 +950,60 @@ export default function AdminPanel() {
                     </Typography>
                   </Box>
 
-                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.75 }}>
                     {paginatedStudents.map((u) => {
                       const noShowCount = u._count?.penalties || 0;
-                      const banUntilFormatted = u.banUntil
-                        ? new Date(u.banUntil).toLocaleDateString('tr-TR')
-                        : 'Dönem Sonu';
+                      const banLabel = u.banUntil
+                        ? `BANLI (${new Date(u.banUntil).toLocaleDateString('tr-TR')} tarihine kadar)`
+                        : 'KALICI BANLI (PERMA BAN)';
 
                       return (
-                        <Paper key={u.id} variant="outlined" sx={{ p: 2, borderRadius: 2, flexShrink: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+                        <Paper
+                          key={u.id}
+                          variant="outlined"
+                          sx={{
+                            p: 2.25,
+                            borderRadius: 2,
+                            flexShrink: 0,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 1.5,
+                          }}
+                        >
                           <Box>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                              <Typography sx={{ fontWeight: 700 }}>{u.fullName || 'İsimsiz Öğrenci'}</Typography>
-                              {u.studentNumber && <Chip label={`#${u.studentNumber}`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />}
-                              {u.department && <Chip label={u.department} size="small" sx={{ height: 20, fontSize: '0.7rem' }} />}
+                              <Typography sx={{ fontWeight: 800, fontSize: '0.98rem' }}>
+                                {u.fullName || 'İsimsiz Öğrenci'}
+                              </Typography>
+                              {u.studentNumber && (
+                                <Chip label={`#${u.studentNumber}`} size="small" variant="outlined" sx={{ height: 22, fontSize: '0.72rem' }} />
+                              )}
+                              {u.department && (
+                                <Chip label={u.department} size="small" sx={{ height: 22, fontSize: '0.72rem' }} />
+                              )}
                               <Chip
                                 label={`No-Show Uyarısı: ${noShowCount} / 3`}
                                 size="small"
                                 color={noShowCount >= 3 ? 'error' : noShowCount > 0 ? 'warning' : 'default'}
-                                sx={{ height: 20, fontSize: '0.68rem', fontWeight: 700 }}
+                                sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }}
                               />
                               {u.isBanned && (
                                 <Chip
-                                  label={`BANLI (${banUntilFormatted}'e kadar)`}
+                                  label={banLabel}
                                   size="small"
                                   color="error"
-                                  sx={{ height: 20, fontSize: '0.68rem', fontWeight: 700 }}
+                                  sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }}
                                 />
                               )}
                             </Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, fontSize: '0.78rem' }}>
                               {u.email} {u.banReason ? `• Sebep: ${u.banReason}` : ''}
                             </Typography>
                           </Box>
 
+                          <Divider />
                           {isAdminOrSuper ? (
-                            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <Box sx={{ display: 'flex', gap: 1.25, alignItems: 'center', flexWrap: 'wrap' }}>
                               {(u.penaltyPoints > 0 || noShowCount > 0) && (
                                 <Button
                                   size="small"
@@ -989,7 +1025,6 @@ export default function AdminPanel() {
                                   Banı Aç (Yasağı Kaldır)
                                 </Button>
                               ) : (
-                                /* MADDE 6: Dönemsel veya Gün Seçmeli Banlama Butonu */
                                 <Button
                                   size="small"
                                   variant="outlined"
@@ -1001,29 +1036,33 @@ export default function AdminPanel() {
                                       userId: u.id,
                                       fullName: u.fullName || u.email,
                                       email: u.email,
-                                      banDuration: '30',
+                                      banMode: 'DATE',
+                                      banUntilDateStr: getFutureDateStr(30),
                                       banReason: '',
                                     })
                                   }
                                 >
-                                  Banla (Süre / Dönem Seç)
+                                  Banla (Tarih Seç / Kalıcı Ban)
                                 </Button>
                               )}
 
+                              {/* Admin Sadece Librarian Atayabilir; Admin ve SuperAdmin'i Sadece SuperAdmin Atayabilir */}
                               <Select
                                 size="small"
                                 value={u.role}
-                                onChange={(e) => runAction('USER_MODERATION', { targetUserId: u.id, modType: 'CHANGE_ROLE', role: e.target.value }, 'Rol güncellendi.')}
-                                sx={{ minWidth: 140, height: 32, fontSize: '0.8rem' }}
+                                onChange={(e) => runAction('USER_MODERATION', { targetUserId: u.id, modType: 'CHANGE_ROLE', role: e.target.value }, 'Kullanıcı rolü güncellendi.')}
+                                sx={{ minWidth: 220, height: 32, fontSize: '0.8rem' }}
                               >
                                 <MenuItem value="STUDENT">STUDENT (Öğrenci)</MenuItem>
-                                <MenuItem value="LIBRARIAN">LIBRARIAN (Görevli)</MenuItem>
-                                <MenuItem value="ADMIN">ADMIN (Müdür)</MenuItem>
-                                {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN (BİM)</MenuItem>}
+                                <MenuItem value="LIBRARIAN">LIBRARIAN (Görevli Ata)</MenuItem>
+                                {isSuperAdmin && <MenuItem value="ADMIN">ADMIN (Müdür Ata - Sadece BİM)</MenuItem>}
+                                {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN (BİM Ata)</MenuItem>}
                               </Select>
                             </Box>
                           ) : (
-                            <Chip label="Sadece Görüntüleme (Görevli)" size="small" variant="outlined" />
+                            <Box>
+                              <Chip label="Sadece Görüntüleme (Görevli)" size="small" variant="outlined" />
+                            </Box>
                           )}
                         </Paper>
                       );
@@ -1049,36 +1088,66 @@ export default function AdminPanel() {
                     Kütüphane Görevlileri ve Sistem Yöneticileri ({staffList.length} Yetkili)
                   </Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                    {staffList.map((u) => (
-                      <Paper key={u.id} variant="outlined" sx={{ p: 2, borderRadius: 2, flexShrink: 0, bgcolor: alpha(theme.palette.primary.main, 0.03), display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-                        <Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <Typography sx={{ fontWeight: 800 }}>{u.fullName}</Typography>
-                            <Chip label={u.role} size="small" color="primary" sx={{ height: 20, fontSize: '0.68rem', fontWeight: 700 }} />
+                    {staffList.map((u) => {
+                      const canModifyThisStaff =
+                        isSuperAdmin || (userRole === 'ADMIN' && u.role === 'LIBRARIAN');
+
+                      return (
+                        <Paper
+                          key={u.id}
+                          variant="outlined"
+                          sx={{
+                            p: 2.25,
+                            borderRadius: 2,
+                            flexShrink: 0,
+                            bgcolor: alpha(theme.palette.primary.main, 0.03),
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 1.5,
+                          }}
+                        >
+                          <Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Typography sx={{ fontWeight: 800 }}>{u.fullName}</Typography>
+                              <Chip label={u.role} size="small" color="primary" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }} />
+                            </Box>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                              {u.email} • {u.department}
+                            </Typography>
                           </Box>
-                          <Typography variant="caption" color="text.secondary">{u.email} • {u.department}</Typography>
-                        </Box>
-                        {isSuperAdmin && (
-                          <Select
-                            size="small"
-                            value={u.role}
-                            onChange={(e) => runAction('USER_MODERATION', { targetUserId: u.id, modType: 'CHANGE_ROLE', role: e.target.value }, 'Yetkili rolü güncellendi.')}
-                            sx={{ minWidth: 150, height: 32, fontSize: '0.8rem' }}
-                          >
-                            <MenuItem value="STUDENT">STUDENT (Öğrenci)</MenuItem>
-                            <MenuItem value="LIBRARIAN">LIBRARIAN (Görevli)</MenuItem>
-                            <MenuItem value="ADMIN">ADMIN (Müdür)</MenuItem>
-                            <MenuItem value="SUPER_ADMIN">SUPER_ADMIN (BİM)</MenuItem>
-                          </Select>
-                        )}
-                      </Paper>
-                    ))}
+
+                          <Divider />
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
+                            {canModifyThisStaff ? (
+                              <Select
+                                size="small"
+                                value={u.role}
+                                onChange={(e) => runAction('USER_MODERATION', { targetUserId: u.id, modType: 'CHANGE_ROLE', role: e.target.value }, 'Yetkili rolü güncellendi.')}
+                                sx={{ minWidth: 220, height: 32, fontSize: '0.8rem', bgcolor: 'background.paper' }}
+                              >
+                                <MenuItem value="STUDENT">STUDENT (Öğrenciye Düşür)</MenuItem>
+                                <MenuItem value="LIBRARIAN">LIBRARIAN (Görevli)</MenuItem>
+                                {isSuperAdmin && <MenuItem value="ADMIN">ADMIN (Müdür)</MenuItem>}
+                                {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN (BİM)</MenuItem>}
+                              </Select>
+                            ) : (
+                              <Chip
+                                label="Bu yetkili seviyesini yalnızca BİM (SUPER_ADMIN) değiştirebilir"
+                                size="small"
+                                variant="outlined"
+                                sx={{ fontSize: '0.72rem' }}
+                              />
+                            )}
+                          </Box>
+                        </Paper>
+                      );
+                    })}
                   </Box>
                 </Box>
               </Box>
             )}
 
-            {/* ================= SEKME 5: DİNAMİK KURALLAR & 180 GÜN LOGLAR (MADDE 3 & MADDE 11) ================= */}
+            {/* ================= SEKME 5: DİNAMİK KURALLAR & 180 GÜN LOGLAR ================= */}
             {tab === 5 && isAdminOrSuper && (
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <Box>
@@ -1088,8 +1157,8 @@ export default function AdminPanel() {
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
                     İleri tarih sınırı (varsayılan 1 gün), oda kapasitesi (8 kişi) ve süre kurallarını buradan anlık değiştirebilirsiniz.
                   </Typography>
-                  <Grid container spacing={2}>
-                    {data.rules.map((rule) => {
+                  <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 2 }}>
+                    {(data.rules || []).map((rule) => {
                       const meta = RULE_META[rule.ruleName] || {
                         title: rule.ruleName,
                         desc: 'Sistem rezervasyon parametresi.',
@@ -1100,53 +1169,50 @@ export default function AdminPanel() {
                       const currentVal = rule.ruleValue?.value ?? 1;
 
                       return (
-                        <Grid size={{ xs: 12, sm: 6 }} key={rule.id}>
-                          <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2.5, height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 2 }}>
-                            <Box>
-                              <Typography sx={{ fontWeight: 800, fontSize: '0.98rem', color: 'text.primary' }}>
-                                {meta.title}
-                              </Typography>
-                              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', mt: 0.5 }}>
-                                {meta.desc}
-                              </Typography>
+                        <Paper key={rule.id} variant="outlined" sx={{ p: 2.5, borderRadius: 2.5, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 2 }}>
+                          <Box>
+                            <Typography sx={{ fontWeight: 800, fontSize: '0.98rem', color: 'text.primary' }}>
+                              {meta.title}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.8rem', mt: 0.5 }}>
+                              {meta.desc}
+                            </Typography>
+                          </Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                            <Chip
+                              label={`Mevcut Değer: ${currentVal} ${meta.unit}`}
+                              color="primary"
+                              sx={{ fontWeight: 800 }}
+                            />
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                disabled={currentVal <= meta.min}
+                                onClick={() => runAction('UPDATE_RULE', { ruleName: rule.ruleName, value: Math.max(meta.min, currentVal - 1) }, `${meta.title} güncellendi.`)}
+                              >
+                                Azalt (-1)
+                              </Button>
+                              <Button
+                                size="small"
+                                variant="contained"
+                                disabled={currentVal >= meta.max}
+                                onClick={() => runAction('UPDATE_RULE', { ruleName: rule.ruleName, value: Math.min(meta.max, currentVal + 1) }, `${meta.title} güncellendi.`)}
+                              >
+                                Artır (+1)
+                              </Button>
                             </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
-                              <Chip
-                                label={`Mevcut Değer: ${currentVal} ${meta.unit}`}
-                                color="primary"
-                                sx={{ fontWeight: 800 }}
-                              />
-                              <Box sx={{ display: 'flex', gap: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  disabled={currentVal <= meta.min}
-                                  onClick={() => runAction('UPDATE_RULE', { ruleName: rule.ruleName, value: Math.max(meta.min, currentVal - 1) }, `${meta.title} güncellendi.`)}
-                                >
-                                  Azalt (-1)
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  disabled={currentVal >= meta.max}
-                                  onClick={() => runAction('UPDATE_RULE', { ruleName: rule.ruleName, value: Math.min(meta.max, currentVal + 1) }, `${meta.title} güncellendi.`)}
-                                >
-                                  Artır (+1)
-                                </Button>
-                              </Box>
-                            </Box>
-                          </Paper>
-                        </Grid>
+                          </Box>
+                        </Paper>
                       );
                     })}
-                  </Grid>
+                  </Box>
                 </Box>
 
                 {isSuperAdmin && (
                   <>
                     <Divider />
 
-                    {/* MADDE 11: 180 Gün Gösterim / 1 Yıl Arşiv Politikası Bilgi Kartı */}
                     <Paper
                       elevation={0}
                       sx={{
@@ -1182,8 +1248,8 @@ export default function AdminPanel() {
                       />
                     </Paper>
 
-                    <Grid container spacing={3}>
-                      <Grid size={{ xs: 12, md: 6 }}>
+                    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3 }}>
+                      <Box>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>
                             1. Öğrenci & Sistem Logları (Son 180 Gün)
@@ -1222,9 +1288,9 @@ export default function AdminPanel() {
                             />
                           </Box>
                         )}
-                      </Grid>
+                      </Box>
 
-                      <Grid size={{ xs: 12, md: 6 }}>
+                      <Box>
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5 }}>
                           <Typography variant="h6" sx={{ fontWeight: 800 }}>
                             2. Yönetici Müdahale Logları (Son 180 Gün)
@@ -1260,8 +1326,8 @@ export default function AdminPanel() {
                             />
                           </Box>
                         )}
-                      </Grid>
-                    </Grid>
+                      </Box>
+                    </Box>
                   </>
                 )}
               </Box>
@@ -1274,7 +1340,7 @@ export default function AdminPanel() {
         <Footer />
       </Box>
 
-      {/* MADDE 7: Var Olan Odanın İsmini, Kodunu ve Kapasitesini Düzenleme Modalı */}
+      {/* Çalışma Odası Bilgilerini Düzenleme Modalı */}
       <Dialog
         open={editRoomDialog.open}
         onClose={() => setEditRoomDialog({ ...editRoomDialog, open: false })}
@@ -1331,7 +1397,7 @@ export default function AdminPanel() {
         </DialogActions>
       </Dialog>
 
-      {/* MADDE 6: Dönemsel veya Gün Seçmeli Banlama Modalı */}
+      {/* Takvimden Tarih Seçmeli veya Kalıcı (Perma) Banlama Modalı */}
       <Dialog
         open={banDialog.open}
         onClose={() => setBanDialog({ ...banDialog, open: false })}
@@ -1339,23 +1405,71 @@ export default function AdminPanel() {
         fullWidth
       >
         <DialogTitle sx={{ fontWeight: 800, color: 'error.main' }}>
-          Öğrenciyi Yasakla (Süreli / Dönemsel Ban)
+          Öğrenciyi Yasakla (Takvimli / Kalıcı Ban)
         </DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2.25, pt: '12px !important' }}>
           <Typography variant="body2" color="text.secondary">
-            <strong>{banDialog.fullName}</strong> ({banDialog.email}) öğrencisi için uygulanacak ban süresini seçiniz:
+            <strong>{banDialog.fullName}</strong> ({banDialog.email}) öğrencisi için ban türünü seçiniz:
           </Typography>
+
           <Select
             size="small"
             fullWidth
-            value={banDialog.banDuration}
-            onChange={(e) => setBanDialog({ ...banDialog, banDuration: e.target.value })}
+            value={banDialog.banMode}
+            onChange={(e) => setBanDialog({ ...banDialog, banMode: e.target.value })}
           >
-            <MenuItem value="7">7 Gün Banla (1 Hafta)</MenuItem>
-            <MenuItem value="14">14 Gün Banla (2 Hafta)</MenuItem>
-            <MenuItem value="30">30 Gün Banla (1 Ay)</MenuItem>
-            <MenuItem value="SEMESTER">Dönemsel Banla (Dönem Sonuna Kadar - 180 Gün)</MenuItem>
+            <MenuItem value="DATE">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <CalendarMonthIcon fontSize="small" color="primary" />
+                <span>Belirli Bir Tarihe Kadar Banla (Takvimden Seç)</span>
+              </Box>
+            </MenuItem>
+            <MenuItem value="PERMANENT">
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <AllInclusiveIcon fontSize="small" color="error" />
+                <span>Kalıcı Banla (Perma Ban - Süresiz)</span>
+              </Box>
+            </MenuItem>
           </Select>
+
+          {banDialog.banMode === 'DATE' && (
+            <Box>
+              <TextField
+                label="Ban Bitiş Tarihi (Takvimden Gün Seçiniz)"
+                type="date"
+                size="small"
+                fullWidth
+                value={banDialog.banUntilDateStr}
+                onChange={(e) => setBanDialog({ ...banDialog, banUntilDateStr: e.target.value })}
+                inputProps={{ min: minTomorrowDateStr }}
+                InputLabelProps={{ shrink: true }}
+              />
+              <Box sx={{ display: 'flex', gap: 0.75, mt: 1, flexWrap: 'wrap' }}>
+                {[
+                  { label: '+7 Gün', days: 7 },
+                  { label: '+14 Gün', days: 14 },
+                  { label: '+30 Gün', days: 30 },
+                  { label: '+90 Gün', days: 90 },
+                ].map((preset) => (
+                  <Chip
+                    key={preset.days}
+                    label={preset.label}
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setBanDialog({ ...banDialog, banUntilDateStr: getFutureDateStr(preset.days) })}
+                    sx={{ cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600 }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {banDialog.banMode === 'PERMANENT' && (
+            <Alert severity="error" sx={{ py: 0.5, fontSize: '0.78rem' }}>
+              Kalıcı (Perma) ban seçildiğinde öğrencinin rezervasyon yetkisi yönetici tarafından manuel açılana kadar süresiz kapatılır.
+            </Alert>
+          )}
+
           <TextField
             label="Ban Sebebi (Öğrenciye e-posta ile iletilir)"
             size="small"
@@ -1380,10 +1494,13 @@ export default function AdminPanel() {
                 {
                   targetUserId: banDialog.userId,
                   modType: 'BAN_USER',
-                  banDuration: banDialog.banDuration,
+                  banMode: banDialog.banMode,
+                  banUntilDateStr: banDialog.banUntilDateStr,
                   banReason: banDialog.banReason,
                 },
-                'Öğrenci seçilen süre boyunca banlandı ve bilgilendirme e-postası gönderildi.'
+                banDialog.banMode === 'PERMANENT'
+                  ? 'Öğrenci kalıcı olarak (Perma Ban) yasaklandı.'
+                  : `Öğrenci ${banDialog.banUntilDateStr} tarihine kadar banlandı.`
               );
               setBanDialog({ ...banDialog, open: false });
             }}

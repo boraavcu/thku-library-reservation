@@ -5,19 +5,41 @@ import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import crypto from "crypto";
 
-const PERSONAL_OTP_TTL = 600; // Kişiye özel kod 10 dakika (600 sn) geçerli
-const ALLOWED_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const PERSONAL_OTP_TTL = 600; // Kişiye özel oturum anahtarı 10 dakika geçerli
+const TOLERANCE_MINUTES = 15; // Başlangıç saatine ±15 dakika kuralı (Örn: 10:00 -> 09:45 - 10:15)
 
-function generatePersonalCode(length = 6) {
-  const bytes = crypto.randomBytes(length);
-  let token = "";
-  for (let i = 0; i < length; i++) {
-    token += ALLOWED_CHARS[bytes[i] % ALLOWED_CHARS.length];
-  }
-  return token;
+// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (Etimesgut / Ankara)
+const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9482);
+const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.6881);
+const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 250);
+
+function getClientIp(request) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return request.headers.get("x-real-ip") || "127.0.0.1";
 }
 
-export async function GET() {
+// Haversine formülü ile öğrenci GPS koordinatı ve kütüphane arasındaki mesafeyi (metre) hesaplar
+function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+function fmtMinsToTime(totalMins) {
+  const normalized = Math.max(0, Math.min(24 * 60, totalMins));
+  const h = Math.floor(normalized / 60);
+  const m = normalized % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+export async function GET(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,7 +63,69 @@ export async function GET() {
       });
     }
 
-    // 2. ÖĞRENCİ İSE: Bugünkü Aktif Randevusunu Bul ve Kişiye Özel 10 Dakikalık Kod Üret
+    // 2. ÖĞRENCİ İSE: Kapıdaki QR Kodun Okutulup Okutulmadığını Kontrol Et (?door=thku-study-room)
+    const { searchParams } = new URL(request.url);
+    const doorParam = searchParams.get("door");
+
+    if (doorParam !== "thku-study-room") {
+      return NextResponse.json({
+        mode: "DOOR_QR_REQUIRED",
+        error:
+          "Yoklama ekranına anasayfadan veya doğrudan linkle girilemez. Lütfen çalışma odasının kapısındaki fiziksel QR kodu telefon kameranızla okutunuz.",
+      });
+    }
+
+    // 3. KAMPÜS WI-FI & ANTI-VPN KONTROLÜ
+    const ip = getClientIp(request);
+    const enforceCampusNetwork = process.env.ENFORCE_CAMPUS_WIFI === "true";
+    const allowedPrefix = process.env.CAMPUS_IP_PREFIX || "193.255.";
+    const vpnPrefix = process.env.CAMPUS_VPN_PREFIX || "10.254."; // BİM VPN IP bloğu
+
+    if (ip.startsWith(vpnPrefix)) {
+      return NextResponse.json({
+        mode: "LOCATION_BLOCKED",
+        error:
+          "Güvenlik İhlali: Kampüs VPN bağlantısı üzerinden uzaktan kapı QR doğrulaması yapılamaz. Lütfen kütüphanede fiziksel olarak bulununuz.",
+      });
+    }
+
+    if (enforceCampusNetwork) {
+      const isLocal = ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.");
+      if (!ip.startsWith(allowedPrefix) && !isLocal) {
+        return NextResponse.json({
+          mode: "LOCATION_BLOCKED",
+          error:
+            "Kampüs Wi-Fi (eduroam) ağına bağlı olmadığınız tespit edildi. Evden veya mobil veri üzerinden kapı QR kodu açılamaz.",
+        });
+      }
+    }
+
+    // 4. GPS FİZİKSEL KONUM DOĞRULAMASI (VPN veya WhatsApp Fotoğraf Paylaşımını Engeller)
+    const latParam = searchParams.get("lat");
+    const lngParam = searchParams.get("lng");
+    const enforceGps = process.env.ENFORCE_CAMPUS_GPS === "true";
+
+    let distanceMeters = null;
+    if (latParam !== null && lngParam !== null) {
+      const userLat = parseFloat(latParam);
+      const userLng = parseFloat(lngParam);
+      if (!isNaN(userLat) && !isNaN(userLng)) {
+        distanceMeters = calculateDistanceMeters(userLat, userLng, LIBRARY_LAT, LIBRARY_LNG);
+        if (enforceGps && distanceMeters > MAX_DISTANCE_METERS) {
+          return NextResponse.json({
+            mode: "LOCATION_BLOCKED",
+            error: `Fiziksel Konum Hatası: Kütüphane binasına ${distanceMeters} metre uzaklıktasınız (Maksimum sınır: ${MAX_DISTANCE_METERS}m). VPN açık olsa dahi kütüphane dışından onay verilemez.`,
+          });
+        }
+      }
+    } else if (enforceGps) {
+      return NextResponse.json({
+        mode: "LOCATION_BLOCKED",
+        error: "Oda girişini onaylayabilmek için tarayıcınızın Konum (GPS) iznini açmanız zorunludur.",
+      });
+    }
+
+    // 5. ÖĞRENCİNİN BUGÜNKÜ RANDEVUSUNU VE ±15 DAKİKA PENCERESİNİ KONTROL ET
     const now = new Date();
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDate = new Date(`${todayStr}T00:00:00Z`);
@@ -57,18 +141,10 @@ export async function GET() {
     const curM = Number(trTimeParts.find((p) => p.type === "minute").value);
     const nowMins = curH * 60 + curM;
 
-    const winStartMins = Math.max(0, nowMins - 15);
-    const winEndMins = Math.min(24 * 60 - 1, nowMins + 15);
-
-    const windowStart = new Date(Date.UTC(1970, 0, 1, Math.floor(winStartMins / 60), winStartMins % 60, 0));
-    const windowEnd = new Date(Date.UTC(1970, 0, 1, Math.floor(winEndMins / 60), winEndMins % 60, 59));
-
-    const reservation = await prisma.reservation.findFirst({
+    const todayReservations = await prisma.reservation.findMany({
       where: {
         reservationDate: todayDate,
         status: { in: ["CONFIRMED", "CHECKED_IN"] },
-        startTime: { lte: windowEnd },
-        endTime: { gte: windowStart },
         OR: [
           { userId },
           { participants: { some: { userId, status: "ACCEPTED" } } },
@@ -85,55 +161,73 @@ export async function GET() {
       orderBy: { startTime: "asc" },
     });
 
-    if (!reservation) {
+    if (todayReservations.length === 0) {
       return NextResponse.json({
         mode: "STUDENT_NO_ACTIVE_BOOKING",
-        error: "Şu anki saat diliminde (±15 dk) onaylanmış aktif bir oda randevunuz bulunmamaktadır.",
+        error: "Bugün için onaylanmış aktif bir çalışma odası randevunuz bulunmamaktadır.",
       });
     }
 
-    const checkedSetKey = `kiosk:checked_users:${reservation.id}`;
+    // Başlangıç saatine ±15 dakika içinde olan (Örn: 10:00 randevusu için 09:45 - 10:15 arası) randevuyu bul
+    let matchedReservation = null;
+    let windowInfoError = null;
+
+    for (const r of todayReservations) {
+      const sH = new Date(r.startTime).getUTCHours();
+      const sM = new Date(r.startTime).getUTCMinutes();
+      const startTotalMins = sH * 60 + sM;
+      const minAllowed = startTotalMins - TOLERANCE_MINUTES;
+      const maxAllowed = startTotalMins + TOLERANCE_MINUTES;
+
+      if (nowMins >= minAllowed && nowMins <= maxAllowed) {
+        matchedReservation = r;
+        break;
+      } else {
+        windowInfoError = `${r.room.roomNumber} - ${r.room.name} odasındaki ${fmtMinsToTime(
+          startTotalMins
+        )} randevunuz için kapı QR onayı yalnızca ±15 dakika içinde (${fmtMinsToTime(
+          minAllowed
+        )} – ${fmtMinsToTime(maxAllowed)} saatleri arasında) yapılabilir. Şu anki saat: ${fmtMinsToTime(nowMins)}`;
+      }
+    }
+
+    if (!matchedReservation) {
+      return NextResponse.json({
+        mode: "OUTSIDE_TIME_WINDOW",
+        error:
+          windowInfoError ||
+          "Şu anki saat, randevunuzun ±15 dakikalık başlangıç onay penceresi dışındadır.",
+      });
+    }
+
+    const sH = new Date(matchedReservation.startTime).getUTCHours();
+    const sM = new Date(matchedReservation.startTime).getUTCMinutes();
+    const startTotalMins = sH * 60 + sM;
+    const windowLabel = `${fmtMinsToTime(startTotalMins - TOLERANCE_MINUTES)} – ${fmtMinsToTime(
+      startTotalMins + TOLERANCE_MINUTES
+    )}`;
+
+    const checkedSetKey = `kiosk:checked_users:${matchedReservation.id}`;
     const checkedUserIds = await redis.smembers(checkedSetKey);
     const alreadyCheckedIn = checkedUserIds.includes(userId);
 
-    // Kişiye özel 10 dakikalık OTP anahtarı
-    const otpKey = `kiosk:personal_otp:${reservation.id}:${userId}`;
-    let personalCode = await redis.get(otpKey);
-    let remainingSeconds = await redis.ttl(otpKey);
+    // Arka planda bu öğrenciye özel kriptografik tek kullanımlık onay anahtarı üret (ekranda elle yazılmaz)
+    const otpKey = `kiosk:personal_otp:${matchedReservation.id}:${userId}`;
+    let personalSessionToken = await redis.get(otpKey);
 
-    if (!alreadyCheckedIn && (!personalCode || remainingSeconds <= 0)) {
-      personalCode = generatePersonalCode(6);
-      await redis.set(otpKey, personalCode, "EX", PERSONAL_OTP_TTL);
-      remainingSeconds = PERSONAL_OTP_TTL;
-
-      const roomTitle = [reservation.room.roomNumber, reservation.room.name].join(" - ");
-
-      // Öğrencinin bildirim ziline ve e-posta kuyruğuna kişisel kodunu gönder
-      await prisma.notification.create({
-        data: {
-          userId,
-          title: `Kişisel Kapı Kodu: ${personalCode}`,
-          message: `${roomTitle} odasına giriş için size özel üretilen 10 dakika geçerli doğrulama kodunuz: ${personalCode}`,
-          type: "KIOSK_OTP",
-          relatedEntityType: "Reservation",
-          relatedEntityId: reservation.id,
-        },
-      });
-
-      await prisma.emailQueue.create({
-        data: {
-          to: session.user.email,
-          subject: `THKÜ Kütüphane - Kişisel Oda Giriş Kodunuz: ${personalCode}`,
-          body: `Sayın ${session.user.name || session.user.email},\n\n${roomTitle} çalışma odasına giriş için size özel üretilen ve 10 dakika geçerli olan doğrulama kodunuz:\n\n👉 ${personalCode}\n\nNot: Her katılımcı kendi mobil cihazından kendi kişisel kodunu girmek zorundadır.`,
-          priority: 1,
-          status: "PENDING",
-        },
-      });
+    if (!alreadyCheckedIn && !personalSessionToken) {
+      personalSessionToken = crypto.randomBytes(16).toString("hex");
+      await redis.set(otpKey, personalSessionToken, "EX", PERSONAL_OTP_TTL);
     }
 
     const allMembers = [
-      { id: reservation.user.id, fullName: reservation.user.fullName, email: reservation.user.email, role: "Organizatör" },
-      ...reservation.participants.map((p) => ({
+      {
+        id: matchedReservation.user.id,
+        fullName: matchedReservation.user.fullName,
+        email: matchedReservation.user.email,
+        role: "Organizatör",
+      },
+      ...matchedReservation.participants.map((p) => ({
         id: p.user.id,
         fullName: p.user.fullName,
         email: p.user.email,
@@ -146,17 +240,18 @@ export async function GET() {
 
     return NextResponse.json({
       mode: "STUDENT_ACTIVE",
-      reservationId: reservation.id,
-      room: reservation.room,
-      personalCode: alreadyCheckedIn ? null : personalCode,
-      ttl: alreadyCheckedIn ? 0 : Math.max(0, remainingSeconds),
+      reservationId: matchedReservation.id,
+      room: matchedReservation.room,
+      windowLabel,
+      distanceMeters,
+      personalSessionToken: alreadyCheckedIn ? null : personalSessionToken,
       alreadyCheckedIn,
       members: allMembers,
       checkedCount: checkedUserIds.length,
       totalCount: allMembers.length,
     });
   } catch (error) {
-    console.error("Kiosk QR/Personal OTP error:", error);
-    return NextResponse.json({ error: "Kod üretilirken hata oluştu." }, { status: 500 });
+    console.error("Kiosk QR/Personal check error:", error);
+    return NextResponse.json({ error: "Yoklama bilgileri alınırken hata oluştu." }, { status: 500 });
   }
 }

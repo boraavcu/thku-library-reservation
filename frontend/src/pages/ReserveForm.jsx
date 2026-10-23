@@ -45,7 +45,14 @@ function ReserveForm() {
 
   const [step, setStep] = useState(1);
   const [room, setRoom] = useState(null);
-  const [rules, setRules] = useState({ minParticipants: 2, maxParticipants: 7 });
+  // Madde 2 & Madde 3 & Madde 9 varsayılanları: Min 2, Maks 8 Kişi, Maks 3 Saat, Maks 1 Gün
+  const [rules, setRules] = useState({
+    minParticipants: 2,
+    maxParticipants: 8,
+    maxDurationHours: 3,
+    maxAdvanceDays: 1,
+    dailyReleaseHour: 8,
+  });
   const [initLoading, setInitLoading] = useState(true);
 
   const today = toDateStr(new Date());
@@ -79,7 +86,7 @@ function ReserveForm() {
       .then((res) => {
         const foundRoom = res.data.rooms.find(r => r.id === roomIdParam);
         setRoom(foundRoom || null);
-        setRules(res.data.rules);
+        if (res.data.rules) setRules(res.data.rules);
         setInitLoading(false);
       })
       .catch(() => setInitLoading(false));
@@ -87,7 +94,6 @@ function ReserveForm() {
 
   const updateForm = (fields) => setFormData((prev) => ({ ...prev, ...fields }));
 
-  // ============ Availability ============
   const fetchAvailability = useCallback(async (roomId, date) => {
     if (!roomId || !date) return;
     setAvailLoading(true);
@@ -107,7 +113,6 @@ function ReserveForm() {
     }
   }, [formData.roomId, formData.date, initLoading, fetchAvailability]);
 
-  // ============ Week days (today + next 6 days) ============
   const weekDays = useMemo(() => {
     const base = new Date(today + 'T12:00:00');
     return Array.from({ length: 7 }, (_, i) => {
@@ -117,12 +122,9 @@ function ReserveForm() {
     });
   }, [today]);
 
+  // Madde 3: İleri tarih maksimum 1 gün (Yönetim panelinden değiştirilebilir)
   const maxSelectableDate = useMemo(() => {
-    const now = new Date();
-    const currentHour = now.getHours();
-    const advanceDays = currentHour > (rules.dailyReleaseHour ?? 8)
-      ? (rules.maxAdvanceDays ?? 3)
-      : (rules.maxAdvanceDays ?? 3) - 1;
+    const advanceDays = rules.maxAdvanceDays ?? 1;
     const max = new Date(today + 'T12:00:00');
     max.setDate(max.getDate() + advanceDays);
     return toDateStr(max);
@@ -138,8 +140,7 @@ function ReserveForm() {
     });
   };
 
-  // ============ Occupied slots ============
- const occupiedBlocks = useMemo(
+  const occupiedBlocks = useMemo(
     () => occupiedSlots.map((s) => {
       const endDt = new Date(s.endTime);
       const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
@@ -162,7 +163,6 @@ function ReserveForm() {
   const isToday = formData.date === today;
   const isSlotPast = useCallback((hour) => isToday && (hour + 1) * 60 <= nowMinutes, [isToday, nowMinutes]);
 
-  // ============ Time selection ============
   const { startTime: selectedStart, endTime: selectedEnd } = formData;
   const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
   const hasSelection = selectedStart !== null && selectedEnd !== null;
@@ -193,11 +193,11 @@ function ReserveForm() {
     updateForm({ endTime: potentialEndHour });
   };
 
-  // ============ Participants ============
+  // Madde 2: En az 2, En fazla 8 kişi
   const totalPeople = formData.participants.length + 1;
-  const maxCapacity = room?.capacity || rules.maxParticipants;
-  const effectiveMax = Math.min(rules.maxParticipants, maxCapacity);
-  const isCountValid = totalPeople >= rules.minParticipants && totalPeople <= effectiveMax;
+  const maxCapacity = room?.capacity || rules.maxParticipants || 8;
+  const effectiveMax = Math.min(rules.maxParticipants || 8, maxCapacity);
+  const isCountValid = totalPeople >= (rules.minParticipants || 2) && totalPeople <= effectiveMax;
 
   const addEmail = () => {
     const email = emailInput.trim().toLowerCase();
@@ -213,7 +213,6 @@ function ReserveForm() {
     updateForm({ participants: formData.participants.filter((e) => e !== email) });
   };
 
-  // ============ Submit ============
   const handleSubmit = async () => {
     setApiError(null);
     setMissingEmails([]);
@@ -238,7 +237,6 @@ function ReserveForm() {
     }
   };
 
-  // ============ Loading ============
   if (authStatus === 'loading' || initLoading) {
     return <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', bgcolor: 'background.default' }}><CircularProgress /></Box>;
   }
@@ -253,17 +251,12 @@ function ReserveForm() {
 
   const stripedBg = `repeating-linear-gradient(45deg, ${alpha('#e5e7eb', 0.4)}, ${alpha('#e5e7eb', 0.4)} 10px, ${alpha('#f3f4f6', 0.4)} 10px, ${alpha('#f3f4f6', 0.4)} 20px)`;
 
-  // ======================= RENDER =======================
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
 
-      {/* ============================================================= */}
-      {/*  STEP 1 — TIME SELECTION (Calendar & Time Picker)             */}
-      {/* ============================================================= */}
       {step === 1 && (
         <>
-          {/* ---- Room Info Bar ---- */}
           <Box sx={{ bgcolor: 'background.paper', borderBottom: '1px solid', borderColor: 'divider', boxShadow: '0 1px 3px rgba(0,0,0,0.04)', py: 2 }}>
             <Box sx={{ maxWidth: 1400, mx: 'auto', px: { xs: 3, lg: 5 }, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, alignItems: { sm: 'center' }, justifyContent: 'space-between', gap: 2 }}>
               <Box>
@@ -302,9 +295,7 @@ function ReserveForm() {
             </Box>
           </Box>
 
-          {/* ---- Main Content ---- */}
           <Box sx={{ flex: 1, maxWidth: 1400, mx: 'auto', width: '100%', px: { xs: 3, lg: 5 }, pb: 16, pt: 3 }}>
-            {/* Breadcrumbs */}
             <Box sx={{ display: 'flex', gap: 1, mb: 3 }}>
               {[
                 { label: t('navDashboard'), onClick: () => navigate('/dashboard') },
@@ -328,10 +319,7 @@ function ReserveForm() {
               ))}
             </Box>
 
-            {/* Calendar Layout */}
             <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, gap: 3, minHeight: { md: 'calc(100vh - 280px)' } }}>
-
-              {/* ---- Week Sidebar ---- */}
               <Card sx={{
                 width: { xs: '100%', md: 200, lg: 220 }, flexShrink: 0,
                 display: 'flex', flexDirection: { xs: 'row', md: 'column' },
@@ -371,9 +359,7 @@ function ReserveForm() {
                 })}
               </Card>
 
-              {/* ---- Time Grid Card ---- */}
               <Card sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                {/* Legend */}
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, px: 2.5, py: 1.5, borderBottom: '1px solid', borderColor: 'divider', overflow: 'auto', flexShrink: 0 }}>
                   {[
                     { color: '#fff', border: theme.palette.grey[300], label: t('rfAvailable') },
@@ -392,9 +378,7 @@ function ReserveForm() {
                   ))}
                 </Box>
 
-                {/* Scrollable Grid */}
                 <Box sx={{ display: 'flex', flex: 1, overflow: 'auto' }}>
-                  {/* Hour labels column */}
                   <Box sx={{
                     width: { xs: 56, sm: 68 }, flexShrink: 0,
                     borderRight: '1px solid', borderColor: 'divider',
@@ -410,7 +394,6 @@ function ReserveForm() {
                     ))}
                   </Box>
 
-                  {/* Slot area */}
                   <Box sx={{ flex: 1, position: 'relative' }}>
                     {availLoading ? (
                       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: SLOT_HEIGHT * hours.length }}>
@@ -418,14 +401,12 @@ function ReserveForm() {
                       </Box>
                     ) : (
                       <>
-                        {/* Dashed grid lines */}
                         <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0 }}>
                           {hours.map((h) => (
                             <Box key={h} sx={{ height: SLOT_HEIGHT, borderBottom: '1px dashed', borderColor: alpha(theme.palette.divider, 0.4) }} />
                           ))}
                         </Box>
 
-                        {/* Occupied blocks (absolute overlay) */}
                         {occupiedBlocks.map((block, i) => (
                           <Box
                             key={`occ-${i}`}
@@ -453,7 +434,6 @@ function ReserveForm() {
                           </Box>
                         ))}
 
-                        {/* Start-only marker (first click, waiting for end) */}
                         {selectedStart !== null && selectedEnd === null && (
                           <Box
                             sx={{
@@ -479,7 +459,6 @@ function ReserveForm() {
                           </Box>
                         )}
 
-                        {/* Selected block (absolute overlay) */}
                         {hasSelection && (
                           <Box
                             sx={{
@@ -519,7 +498,6 @@ function ReserveForm() {
                           </Box>
                         )}
 
-                        {/* Clickable rows (main layer) */}
                         <Box sx={{ position: 'relative', zIndex: 5 }}>
                           {hours.map((hour) => {
                             const occupied = isSlotOccupied(hour);
@@ -547,7 +525,6 @@ function ReserveForm() {
             </Box>
           </Box>
 
-          {/* ---- Fixed Bottom Bar ---- */}
           <Box sx={{
             position: 'fixed', bottom: 0, left: 0, width: '100%', zIndex: 50,
             bgcolor: alpha(theme.palette.background.paper, 0.95),
@@ -627,13 +604,8 @@ function ReserveForm() {
         </>
       )}
 
-      {/* ============================================================= */}
-      {/*  STEP 2 — PARTICIPANTS                                        */}
-      {/* ============================================================= */}
       {step === 2 && (
         <Box sx={{ flex: 1, maxWidth: 960, mx: 'auto', width: '100%', px: { xs: 2, md: 4 }, py: { xs: 2, md: 4 }, display: 'flex', flexDirection: 'column', gap: 3 }}>
-
-          {/* Back link */}
           <Button
             startIcon={<ArrowBackIcon sx={{ fontSize: '18px !important' }} />}
             onClick={() => setStep(1)}
@@ -642,9 +614,7 @@ function ReserveForm() {
             {t('rfBackToTime')}
           </Button>
 
-          {/* Main Card */}
           <Card sx={{ overflow: 'hidden' }}>
-            {/* Header */}
             <Box sx={{ p: { xs: 3, md: 4 }, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, alignItems: { md: 'flex-start' }, justifyContent: 'space-between', gap: 2 }}>
                 <Box>
@@ -670,7 +640,6 @@ function ReserveForm() {
               </Box>
             </Box>
 
-            {/* Context Banner */}
             <Box sx={{ bgcolor: 'action.hover', px: { xs: 3, md: 4 }, py: 2.5, borderBottom: '1px solid', borderColor: 'divider' }}>
               <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(3, 1fr)' }, gap: { xs: 2, md: 4 } }}>
                 {[
@@ -689,9 +658,7 @@ function ReserveForm() {
               </Box>
             </Box>
 
-            {/* Content */}
             <Box sx={{ p: { xs: 3, md: 4 }, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {/* API Error */}
               {apiError && (
                 <Alert severity="error" sx={{ borderRadius: 2 }} onClose={() => { setApiError(null); setMissingEmails([]); }}>
                   {apiError}
@@ -703,7 +670,6 @@ function ReserveForm() {
                 </Alert>
               )}
 
-              {/* Capacity Progress */}
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 1.5 }}>
                   <Typography sx={{ fontWeight: 600, fontSize: '0.95rem' }}>{t('rfRoomCapacity')}</Typography>
@@ -723,11 +689,14 @@ function ReserveForm() {
                 />
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mt: 1 }}>
                   <InfoOutlinedIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
-                  <Typography sx={{ fontSize: '0.7rem', color: 'text.disabled' }}>{t('rfCapacityPolicy')}</Typography>
+                  <Typography sx={{ fontSize: '0.7rem', color: 'text.disabled' }}>
+                    {currentLang === 'tr'
+                      ? `En az 2 kişi, en fazla ${maxCapacity} kişi katılabilir. Davetlerin 30 dakika içinde onaylanması gerekir.`
+                      : `Minimum 2, maximum ${maxCapacity} participants allowed. Invitations must be accepted within 30 minutes.`}
+                  </Typography>
                 </Box>
               </Box>
 
-              {/* Add Participant Input */}
               <Box>
                 <Typography sx={{ fontWeight: 600, fontSize: '0.95rem', mb: 1.5 }}>{t('rfAddParticipant')}</Typography>
                 <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5 }}>
@@ -760,7 +729,6 @@ function ReserveForm() {
                 </Box>
               </Box>
 
-              {/* Attendee List */}
               <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
                 <Box sx={{ bgcolor: 'action.hover', px: 2.5, py: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
                   <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'text.secondary' }}>
@@ -768,7 +736,6 @@ function ReserveForm() {
                   </Typography>
                 </Box>
 
-                {/* Creator row */}
                 <Box sx={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2,
                   borderBottom: '1px solid', borderColor: 'divider',
@@ -798,7 +765,6 @@ function ReserveForm() {
                   </Typography>
                 </Box>
 
-                {/* Participant rows */}
                 {formData.participants.map((email) => {
                   const initials = email.split('@')[0].slice(0, 2).toUpperCase();
                   return (
@@ -846,7 +812,6 @@ function ReserveForm() {
               </Box>
             </Box>
 
-            {/* Footer Actions */}
             <Box sx={{
               p: { xs: 3, md: 4 }, borderTop: '1px solid', borderColor: 'divider',
               bgcolor: 'action.hover',

@@ -10,7 +10,6 @@ function extractStudentNumber(email) {
   return match ? match[1] : null;
 }
 
-// Test İçin Demo Profilleri (7 Öğrenci + 3 Yetkili Rol)
 const DEMO_USERS = {
   "s250444902@stu.thk.edu.tr": {
     email: "s250444902@stu.thk.edu.tr",
@@ -19,65 +18,65 @@ const DEMO_USERS = {
     department: "Bilgisayar Mühendisliği",
     role: "STUDENT",
   },
-  "s250201903@stu.thk.edu.tr": {
-    email: "s250201903@stu.thk.edu.tr",
-    fullName: "Ayşe Yılmaz (Öğrenci 2)",
-    studentNumber: "250201903",
+  "demo.ogrenci2.x91@demo.local": {
+    email: "demo.ogrenci2.x91@demo.local",
+    fullName: "Ayşe Yılmaz (Demo Öğrenci 2)",
+    studentNumber: "990000002",
     department: "Havacılık ve Uzay Mühendisliği",
     role: "STUDENT",
   },
-  "s220401001@stu.thk.edu.tr": {
-    email: "s220401001@stu.thk.edu.tr",
-    fullName: "Mehmet Demir (Öğrenci 3)",
-    studentNumber: "220401001",
+  "demo.ogrenci3.k42@demo.local": {
+    email: "demo.ogrenci3.k42@demo.local",
+    fullName: "Mehmet Demir (Demo Öğrenci 3)",
+    studentNumber: "990000003",
     department: "Yazılım Mühendisliği",
     role: "STUDENT",
   },
-  "s220401002@stu.thk.edu.tr": {
-    email: "s220401002@stu.thk.edu.tr",
-    fullName: "Zeynep Kaya (Öğrenci 4)",
-    studentNumber: "220401002",
+  "demo.ogrenci4.m18@demo.local": {
+    email: "demo.ogrenci4.m18@demo.local",
+    fullName: "Zeynep Kaya (Demo Öğrenci 4)",
+    studentNumber: "990000004",
     department: "Elektrik-Elektronik Mühendisliği",
     role: "STUDENT",
   },
-  "s220401003@stu.thk.edu.tr": {
-    email: "s220401003@stu.thk.edu.tr",
-    fullName: "Caner Aydın (Öğrenci 5)",
-    studentNumber: "220401003",
+  "demo.ogrenci5.p77@demo.local": {
+    email: "demo.ogrenci5.p77@demo.local",
+    fullName: "Caner Aydın (Demo Öğrenci 5 - Sınırda)",
+    studentNumber: "990000005",
     department: "Makine Mühendisliği",
     role: "STUDENT",
   },
-  "s220401004@stu.thk.edu.tr": {
-    email: "s220401004@stu.thk.edu.tr",
-    fullName: "Elif Şahin (Öğrenci 6)",
-    studentNumber: "220401004",
+  "demo.ogrenci6.r33@demo.local": {
+    email: "demo.ogrenci6.r33@demo.local",
+    fullName: "Elif Şahin (Demo Öğrenci 6)",
+    studentNumber: "990000006",
     department: "Endüstri Mühendisliği",
     role: "STUDENT",
   },
-  "s220401005@stu.thk.edu.tr": {
-    email: "s220401005@stu.thk.edu.tr",
-    fullName: "Burak Çelik (Öğrenci 7)",
-    studentNumber: "220401005",
+  "demo.ogrenci7.t55@demo.local": {
+    email: "demo.ogrenci7.t55@demo.local",
+    fullName: "Burak Çelik (Demo Öğrenci 7)",
+    studentNumber: "990000007",
     department: "Pilotaj",
     role: "STUDENT",
   },
-  "kutuphane@thk.edu.tr": {
-    email: "kutuphane@thk.edu.tr",
-    fullName: "Kütüphane Görevlisi",
+  "gorevli.demo@demo.local": {
+    email: "gorevli.demo@demo.local",
+    fullName: "Kütüphane Görevlisi (Demo)",
     studentNumber: null,
     department: "Kütüphane ve Dokümantasyon",
     role: "LIBRARIAN",
   },
-  "mudur@thk.edu.tr": {
-    email: "mudur@thk.edu.tr",
-    fullName: "Kütüphane Müdürü (İdare)",
+  "boraa-35@hotmail.com": {
+    email: "boraa-35@hotmail.com",
+    fullName: "Kütüphane Müdürü (Bora Avcu)",
     studentNumber: null,
     department: "Kütüphane ve Dokümantasyon Daire Bşk.",
     role: "ADMIN",
   },
-  "admin@thk.edu.tr": {
-    email: "admin@thk.edu.tr",
-    fullName: "THKÜ Sistem Yöneticisi (BİM)",
+  "bim.demo@demo.local": {
+    email: "bim.demo@demo.local",
+    fullName: "THKÜ Sistem Yöneticisi (BİM - Demo)",
     studentNumber: null,
     department: "Bilgi İşlem Müdürlüğü",
     role: "SUPER_ADMIN",
@@ -87,7 +86,6 @@ const DEMO_USERS = {
 export const authOptions = {
   debug: process.env.NODE_ENV === "development",
   providers: [
-    // 1. Kurumsal Microsoft Azure AD Girişi
     AzureADProvider({
       clientId: process.env.AZURE_AD_CLIENT_ID || "placeholder-client-id",
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "placeholder-secret",
@@ -100,7 +98,6 @@ export const authOptions = {
       },
     }),
 
-    // 2. Sunum & Test İçin Geçici Demo Girişi
     CredentialsProvider({
       id: "demo-login",
       name: "Demo Girişi",
@@ -112,16 +109,15 @@ export const authOptions = {
           throw new Error("Demo girişi canlı ortamda devre dışı bırakılmıştır.");
         }
         const targetEmail = credentials?.email?.trim().toLowerCase();
-        const selectedDemo = DEMO_USERS[targetEmail] || DEMO_USERS["s220401001@stu.thk.edu.tr"];
+        const selectedDemo = DEMO_USERS[targetEmail] || DEMO_USERS["s250444902@stu.thk.edu.tr"];
 
-        // Grup rezervasyonunda arkadaş davetinin (s220401002@stu.thk.edu.tr)
-        // hata vermemesi için tüm demo kullanıcılarının DB'de var olduğundan emin ol
         for (const demo of Object.values(DEMO_USERS)) {
           await prisma.user.upsert({
             where: { email: demo.email },
             update: {
               fullName: demo.fullName,
               department: demo.department,
+              role: demo.role,
               isActive: true,
             },
             create: {
@@ -130,6 +126,7 @@ export const authOptions = {
               studentNumber: demo.studentNumber,
               department: demo.department,
               role: demo.role,
+              acceptedAgreementVersion: "v1.0",
               isActive: true,
               lastLoginAt: new Date(),
             },
@@ -155,11 +152,9 @@ export const authOptions = {
   callbacks: {
     async signIn({ user, account }) {
       if (!user?.email) {
-        console.error("❌ HATA: Kullanıcının emaili gelmedi!");
         return false;
       }
 
-      // Demo girişi ise authorize() içinde zaten DB kaydı yapıldı
       if (account?.provider === "demo-login") {
         return true;
       }

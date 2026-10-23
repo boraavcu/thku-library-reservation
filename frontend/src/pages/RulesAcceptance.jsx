@@ -18,13 +18,13 @@ const THKU_LOGO = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava
 const ENGLISH_RULES = [
   {
     id: 1,
-    title: "Maximum Reservation Duration",
-    desc: "Study rooms can be reserved for a maximum of 3 hours per day. Extensions are subject to availability and must be requested at the front desk 15 minutes before expiry. Consecutive bookings by the same group under different names are prohibited.",
+    title: "Maximum Reservation Duration & Daily Limit",
+    desc: "Study rooms can be reserved only once (1) per day for a maximum of 3 hours. Extensions are not permitted. Users who book between 21:00–24:00 cannot book between 00:00–08:00 the following day.",
   },
   {
     id: 2,
-    title: "Lateness / No-Show Policy",
-    desc: "If the room is not checked into within 15 minutes of the start time, the reservation is automatically cancelled and opened to other students. Repeated no-shows (more than 3 times in a semester) may result in a suspension of reservation privileges for up to 30 days.",
+    title: "Door QR Code, Personal OTP & No-Show Policy",
+    desc: "Each participant must scan the common QR code at the room entrance and enter their personal 10-minute verification code within 15 minutes. Reservations cannot be cancelled within 1 hour of the start time. Users who fail to check in receive an email warning; 3 warnings result in a 30-day or semester ban.",
   },
   {
     id: 3,
@@ -38,13 +38,13 @@ const ENGLISH_RULES = [
   },
   {
     id: 5,
-    title: "Group Study Requirement",
-    desc: "Study rooms are designed for group study (minimum 2 participants, maximum 7 capacity). Students studying individually should use the general reading halls.",
+    title: "Group Study & 30-Minute Invitation Timeout",
+    desc: "Study rooms are designed for group study (minimum 2 participants, maximum 8 capacity). Group invitations must be accepted within 30 minutes; otherwise, the reservation is automatically cancelled.",
   },
   {
     id: 6,
-    title: "Daily Reservation Limit",
-    desc: "Each student may make only 1 (one) reservation per day. A second reservation request on the same day will be automatically rejected by the system.",
+    title: "Advance Booking Window & Early Check-Out",
+    desc: "Reservations can be made up to 1 day in advance. Groups that finish early can use the 'Early Check-Out' button to free the remaining time for other students.",
   },
 ];
 
@@ -137,8 +137,6 @@ const RulesAcceptance = () => {
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: 'background.default', color: 'text.primary' }}>
-
-      {/* --- HEADER --- */}
       <Paper elevation={0} sx={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1100, borderBottom: '1px solid', borderColor: 'divider', px: { xs: 2, md: 4 }, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'background.paper' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: alreadyAccepted ? 'pointer' : 'default' }} onClick={() => alreadyAccepted && navigate('/dashboard')}>
           <Avatar
@@ -166,10 +164,8 @@ const RulesAcceptance = () => {
         </Box>
       </Paper>
 
-      {/* --- CONTENT --- */}
       <Box sx={{ flexGrow: 1, pt: { xs: '100px', md: '100px' }, pb: { xs: '180px', md: '150px' } }}>
         <Container maxWidth="lg" sx={{ px: { xs: 2, sm: 4, lg: 8 } }}>
-
           {agreementLoading && (
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, mt: 8 }}>
               <CircularProgress />
@@ -222,7 +218,6 @@ const RulesAcceptance = () => {
         </Container>
       </Box>
 
-      {/* --- SABİT ONAY BAR --- */}
       {agreement && !agreementLoading && (
         <Paper elevation={0} sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 1100, borderTop: '1px solid', borderColor: 'divider', p: { xs: 2.5, md: 3 }, bgcolor: 'background.paper' }}>
           <Container maxWidth="md">

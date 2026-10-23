@@ -1,6 +1,34 @@
 import prisma from "@/lib/db";
 
-const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; 
+const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
+
+// KESİN E-POSTA KİLİDİ: Sadece bu 2 adrese mail gönderilebilir!
+export const ALLOWED_STUDENT_EMAIL = "s250444902@stu.thk.edu.tr";
+export const ALLOWED_DIRECTOR_EMAIL = "boraa-35@hotmail.com";
+const SAFE_EMAIL_WHITELIST = new Set([
+  ALLOWED_STUDENT_EMAIL.toLowerCase(),
+  ALLOWED_DIRECTOR_EMAIL.toLowerCase(),
+]);
+
+export async function queueSafeEmail({ to, subject, body, priority = 2 }) {
+  if (!to) return;
+  const normalizedTo = to.trim().toLowerCase();
+
+  // Sadece s250444902@stu.thk.edu.tr ve boraa-35@hotmail.com adreslerine izin ver!
+  if (!SAFE_EMAIL_WHITELIST.has(normalizedTo)) {
+    return;
+  }
+
+  await prisma.emailQueue.create({
+    data: {
+      to: normalizedTo,
+      subject,
+      body,
+      priority,
+      status: "PENDING",
+    },
+  });
+}
 
 function fmtTimeUTC(dt) {
   const d = new Date(dt);
@@ -20,6 +48,7 @@ function fmtDateUTC(dt) {
 }
 
 /**
+ * MADDE 10 & MADDE 5:
  * 1) Oluşturulmasının üzerinden 30 dakika geçtiği halde onaylanmamış (PENDING) randevuları otomatik iptal eder.
  * 2) Başlamasına 2 saat (120 dk) veya daha az kalmış onaylı randevular için öğrencilere "Son 2 Saat" hatırlatma maili atar.
  */
@@ -50,18 +79,15 @@ export async function runReservationLifecycleChecks() {
         },
       });
 
-      await prisma.emailQueue.create({
-        data: {
-          to: stale.user.email,
-          subject: "THKÜ Kütüphane - Rezervasyonunuz Onay Süresi Dolduğu İçin İptal Edildi",
-          body: `Sayın ${stale.user.fullName}, ${stale.room.roomNumber} (${stale.room.name}) odası için oluşturduğunuz rezervasyon talebi, grup davetiyeleri 30 dakika içinde onaylanmadığı için otomatik olarak iptal edilmiştir.`,
-          priority: 2,
-          status: "PENDING",
-        },
+      await queueSafeEmail({
+        to: stale.user.email,
+        subject: "THKÜ Kütüphane - Rezervasyonunuz Onay Süresi Dolduğu İçin İptal Edildi",
+        body: `Sayın ${stale.user.fullName}, ${stale.room.roomNumber} (${stale.room.name}) odası için oluşturduğunuz rezervasyon talebi, grup davetiyeleri 30 dakika içinde onaylanmadığı için otomatik olarak iptal edilmiştir.`,
+        priority: 2,
       });
     }
 
-    //  Randevusuna Son 2 Saat Kala Öğrencilere Hatırlatma Maili Gönder
+    // 2. MADDE 5: Randevusuna Son 2 Saat Kala Öğrencilere Hatırlatma Maili Gönder
     const todayTrStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDateObj = new Date(`${todayTrStr}T00:00:00Z`);
 
@@ -97,7 +123,6 @@ export async function runReservationLifecycleChecks() {
       const startMins = startH * 60 + startM;
       const diffMins = startMins - nowMins;
 
-      // Başlamasına 0 ile 120 dakika (2 saat) arasındaysa ve daha önce hatırlatma atılmamışsa
       if (diffMins > 0 && diffMins <= 120) {
         const alreadySent = await prisma.notification.findFirst({
           where: {
@@ -123,14 +148,11 @@ export async function runReservationLifecycleChecks() {
               },
             });
 
-            await prisma.emailQueue.create({
-              data: {
-                to: member.email,
-                subject: `THKÜ Kütüphane - Randevunuza Son 2 Saat Kaldı (${res.room.roomNumber})`,
-                body: `Sayın ${member.fullName},\n\n${res.room.roomNumber} - ${res.room.name} çalışma odasındaki (${timeRangeStr}) randevunuzun başlamasına 2 saatten az süre kalmıştır.\n\nHatırlatma: Son 1 saat içinde iptal işlemi yapılamamaktadır. Odaya girişte kapıdaki QR kodu okutarak kişisel doğrulama kodunuzu girmeniz zorunludur.`,
-                priority: 1,
-                status: "PENDING",
-              },
+            await queueSafeEmail({
+              to: member.email,
+              subject: `THKÜ Kütüphane - Randevunuza Son 2 Saat Kaldı (${res.room.roomNumber})`,
+              body: `Sayın ${member.fullName},\n\n${res.room.roomNumber} - ${res.room.name} çalışma odasındaki (${timeRangeStr}) randevunuzun başlamasına 2 saatten az süre kalmıştır.\n\nHatırlatma: Son 1 saat içinde iptal işlemi yapılamamaktadır. Odaya girişte kapıdaki QR kodu okutarak kişisel doğrulama kodunuzu girmeniz zorunludur.`,
+              priority: 1,
             });
           }
         }
@@ -142,7 +164,8 @@ export async function runReservationLifecycleChecks() {
 }
 
 /**
- * Randevu CONFIRMED olduğunda hem Kütüphane Görevlisine hem de gruptaki öğrencilere mail gönderir.
+ * MADDE 4 & MADDE 5:
+ * Randevu CONFIRMED olduğunda Kütüphane Müdürüne (boraa-35@hotmail.com) ve öğrenciye (s250444902@stu.thk.edu.tr) mail gönderir.
  */
 export async function sendReservationConfirmedEmails(reservationId) {
   try {
@@ -168,34 +191,21 @@ export async function sendReservationConfirmedEmails(reservationId) {
       .map((m, idx) => `${idx + 1}. ${m.fullName} (${m.email})`)
       .join("\n");
 
-    // 1. Kütüphane Görevlilerine (LIBRARIAN & ADMIN) Bildirim Maili 
-    const staffUsers = await prisma.user.findMany({
-      where: { role: { in: ["LIBRARIAN", "ADMIN"] }, isActive: true },
-      select: { id: true, email: true, fullName: true },
+    // 1. SADECE Kütüphane Müdürüne (boraa-35@hotmail.com) Bildirim Maili
+    await queueSafeEmail({
+      to: ALLOWED_DIRECTOR_EMAIL,
+      subject: `[Kütüphane Müdürlüğü] Onaylanan Oda Randevusu: ${roomLabel} (${dateStr} | ${timeStr})`,
+      body: `Sayın Kütüphane Müdürü,\n\nAşağıdaki çalışma odası randevusu tüm katılımcı onaylarını tamamlayarak ONAYLANMIŞTIR (CONFIRMED):\n\n• Oda: ${roomLabel}\n• Tarih: ${dateStr}\n• Saat: ${timeStr}\n• Amaç: ${res.purpose || "Grup Çalışması"}\n\nKatılımcı Listesi (${allMembers.length} Kişi):\n${memberNamesList}`,
+      priority: 2,
     });
 
-    for (const staff of staffUsers) {
-      await prisma.emailQueue.create({
-        data: {
-          to: staff.email,
-          subject: `[Görevli Bilgi] Onaylanan Oda Randevusu: ${roomLabel} (${dateStr} | ${timeStr})`,
-          body: `Sayın ${staff.fullName},\n\nAşağıdaki çalışma odası randevusu tüm katılımcı onaylarını tamamlayarak ONAYLANMIŞTIR (CONFIRMED):\n\n• Oda: ${roomLabel}\n• Tarih: ${dateStr}\n• Saat: ${timeStr}\n• Amaç: ${res.purpose || "Grup Çalışması"}\n\nKatılımcı Listesi (${allMembers.length} Kişi):\n${memberNamesList}`,
-          priority: 2,
-          status: "PENDING",
-        },
-      });
-    }
-
-    // 2. Randevudaki Öğrencilere Onay Maili 
+    // 2. Öğrencilere Onay Maili (queueSafeEmail sayesinde sadece s250444902@stu.thk.edu.tr adresine gider)
     for (const member of allMembers) {
-      await prisma.emailQueue.create({
-        data: {
-          to: member.email,
-          subject: `THKÜ Kütüphane - Randevunuz Onaylandı (${roomLabel})`,
-          body: `Sayın ${member.fullName},\n\n${roomLabel} çalışma odası için ${dateStr} (${timeStr}) tarihli grup randevunuz onaylanmıştır.\n\nÖnemli Kurallar:\n• Randevu başlangıcına 1 saat kala iptal işlemi kapanmaktadır.\n• Randevu saatinde oda girişindeki QR kodu okutarak size özel üretilen kodu girmeniz zorunludur.`,
-          priority: 2,
-          status: "PENDING",
-        },
+      await queueSafeEmail({
+        to: member.email,
+        subject: `THKÜ Kütüphane - Randevunuz Onaylandı (${roomLabel})`,
+        body: `Sayın ${member.fullName},\n\n${roomLabel} çalışma odası için ${dateStr} (${timeStr}) tarihli grup randevunuz onaylanmıştır.\n\nÖnemli Kurallar:\n• Randevu başlangıcına 1 saat kala iptal işlemi kapanmaktadır.\n• Randevu saatinde oda girişindeki QR kodu okutarak size özel üretilen kodu girmeniz zorunludur.`,
+        priority: 2,
       });
     }
   } catch (error) {
@@ -204,7 +214,8 @@ export async function sendReservationConfirmedEmails(reservationId) {
 }
 
 /**
- * Randevu Kiosk onaylaması (Check-in) yapıldığında Kütüphane Görevlisine bilgi maili gönderir.
+ * MADDE 4:
+ * Randevu Kiosk onaylaması (Check-in) yapıldığında Kütüphane Müdürüne (boraa-35@hotmail.com) bilgi maili gönderir.
  */
 export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserEmail) {
   try {
@@ -230,28 +241,19 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserE
       .map((m, idx) => `${idx + 1}. ${m.fullName} (${m.email})`)
       .join("\n");
 
-    const staffUsers = await prisma.user.findMany({
-      where: { role: { in: ["LIBRARIAN", "ADMIN"] }, isActive: true },
-      select: { email: true, fullName: true },
+    await queueSafeEmail({
+      to: ALLOWED_DIRECTOR_EMAIL,
+      subject: `[Kiosk Girişi Başladı] ${roomLabel} Odası Aktif (${timeStr})`,
+      body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} odasındaki randevu için Kiosk QR doğrulaması (${checkedInUserEmail} tarafından) gerçekleştirilmiş ve oda kullanımı başlamıştır.\n\n• Oda: ${roomLabel}\n• Tarih & Saat: ${dateStr} | ${timeStr}\n\nRandevudaki Öğrenciler (${allMembers.length} Kişi):\n${memberNamesList}`,
+      priority: 1,
     });
-
-    for (const staff of staffUsers) {
-      await prisma.emailQueue.create({
-        data: {
-          to: staff.email,
-          subject: `[Kiosk Girişi Başladı] ${roomLabel} Odası Aktif (${timeStr})`,
-          body: `Sayın ${staff.fullName},\n\n${roomLabel} odasındaki randevu için Kiosk QR doğrulaması (${checkedInUserEmail} tarafından) gerçekleştirilmiş ve oda kullanımı başlamıştır.\n\n• Oda: ${roomLabel}\n• Tarih & Saat: ${dateStr} | ${timeStr}\n\nRandevudaki Öğrenciler (${allMembers.length} Kişi):\n${memberNamesList}`,
-          priority: 1,
-          status: "PENDING",
-        },
-      });
-    }
   } catch (error) {
     console.error("Staff check-in email error:", error);
   }
 }
 
 /**
+ * MADDE 5:
  * No-Show (Uyarı / Ban) yiyen öğrenciye kaçıncı uyarısını aldığını ve kalan hakkını bildiren mail gönderir.
  */
 export async function sendNoShowWarningEmail({
@@ -276,14 +278,11 @@ export async function sendNoShowWarningEmail({
       ? `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz (Kiosk doğrulaması yapmadığınız) tespit edilmiştir.\n\nBu ihlal ile birlikte dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız ${banUntilFormatted} tarihine kadar rezervasyonlara kapatılmıştır (banlanmıştır).`
       : `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gitmediğiniz (Kiosk doğrulaması yapmadığınız) tespit edilmiştir.\n\n• Mevcut Uyarı Sayınız: ${activeNoShowCount} / 3\n• Kalan Uyarı Hakkınız: ${remainingRights}\n\n3 uyarı sonunda hesabınız 30 gün / dönem boyunca çalışma odası rezervasyonlarına kapatılacaktır.`;
 
-    await prisma.emailQueue.create({
-      data: {
-        to: user.email,
-        subject,
-        body,
-        priority: 1,
-        status: "PENDING",
-      },
+    await queueSafeEmail({
+      to: user.email,
+      subject,
+      body,
+      priority: 1,
     });
 
     await prisma.notification.create({

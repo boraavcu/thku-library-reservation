@@ -17,7 +17,6 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 
-// 7/24 
 const LIBRARY_OPEN = 0;
 const LIBRARY_CLOSE = 24;
 
@@ -33,19 +32,15 @@ function StudyRooms() {
   const [error, setError] = useState(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
   const [selectedDate, setSelectedDate] = useState(today);
   const [duration, setDuration] = useState(1);
   const [timeRange, setTimeRange] = useState([LIBRARY_OPEN, LIBRARY_CLOSE]);
 
+  // Madde 3: İleri tarih varsayılan 1 gün
   const maxDate = useMemo(() => {
-    if (!rules) return today;
-    const now = new Date();
-    const currentHour = now.getHours();
-    const advanceDays = currentHour >= rules.dailyReleaseHour
-      ? rules.maxAdvanceDays
-      : rules.maxAdvanceDays - 1;
-    const max = new Date();
+    const advanceDays = rules?.maxAdvanceDays ?? 1;
+    const max = new Date(today + 'T12:00:00');
     max.setDate(max.getDate() + advanceDays);
     return max.toISOString().split('T')[0];
   }, [rules, today]);
@@ -107,7 +102,6 @@ function StudyRooms() {
 
   const filterContent = (
     <>
-      {/* Reservation Date */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary', mb: 1 }}>
           {t('srReservationDate')}
@@ -126,7 +120,6 @@ function StudyRooms() {
         </Typography>
       </Box>
 
-      {/* Duration */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary', mb: 1.5 }}>
           {t('srTimeDuration')}
@@ -154,7 +147,6 @@ function StudyRooms() {
         </Box>
       </Box>
 
-      {/* Time Range Slider */}
       <Box sx={{ mb: 3 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
           <Typography variant="body2" sx={{ fontWeight: 700, color: 'text.primary' }}>
@@ -186,7 +178,6 @@ function StudyRooms() {
         </Box>
       </Box>
 
-      {/* Rules Info */}
       <Box sx={{
         p: 2, mb: 3, borderRadius: 2,
         bgcolor: alpha(theme.palette.info.main, 0.06),
@@ -199,22 +190,17 @@ function StudyRooms() {
           </Typography>
         </Box>
         <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: '0.75rem', lineHeight: 1.6 }}>
-          {t('srRulesInfo', { maxHours: rules?.maxDurationHours ?? 3, maxCapacity: rules?.maxParticipants ?? 7 })}
+          {t('srRulesInfo', { maxHours: rules?.maxDurationHours ?? 3, maxCapacity: rules?.maxParticipants ?? 8 })}
         </Typography>
       </Box>
-
     </>
   );
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
-
       <Navbar />
 
-      {/* ===== MAIN LAYOUT ===== */}
       <Box sx={{ display: 'flex', flex: 1 }}>
-
-        {/* Desktop Filter Sidebar */}
         <Box
           sx={{
             display: { xs: 'none', md: 'flex' },
@@ -238,10 +224,7 @@ function StudyRooms() {
           {filterContent}
         </Box>
 
-        {/* Content Area */}
         <Box sx={{ flex: 1, p: { xs: 2, sm: 3, md: 4 } }}>
-
-          {/* Mobile Filter Toggle */}
           <Box sx={{ display: { xs: 'block', md: 'none' }, mb: 2 }}>
             <Button
               fullWidth
@@ -264,7 +247,6 @@ function StudyRooms() {
             </Collapse>
           </Box>
 
-          {/* Room List Header */}
           <Box sx={{ mb: 3 }}>
             <Box sx={{
               display: 'flex', flexDirection: { xs: 'column', sm: 'row' },
@@ -294,7 +276,6 @@ function StudyRooms() {
             </Box>
           </Box>
 
-          {/* Room Cards */}
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {filteredRooms.length === 0 ? (
               <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
@@ -354,7 +335,7 @@ function StudyRooms() {
           </Box>
         </Box>
       </Box>
-      
+
       <Footer />
     </Box>
   );
