@@ -5,7 +5,6 @@ import prisma from "@/lib/db";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
-
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -17,16 +16,8 @@ export async function GET() {
       where: {
         isActive: true,
         publishedAt: { lte: now },
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gt: now } },
-        ],
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
       },
-      orderBy: [
-        { isPinned: "desc" },
-        { publishedAt: "desc" },
-      ],
-      take: 3,
       select: {
         id: true,
         title: true,
@@ -35,11 +26,13 @@ export async function GET() {
         isPinned: true,
         publishedAt: true,
       },
+      orderBy: [{ publishedAt: "desc" }],
+      take: 30,
     });
 
     return NextResponse.json(announcements);
   } catch (error) {
-    console.error("Announcements fetch error:", error);
+    console.error("Announcements GET error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

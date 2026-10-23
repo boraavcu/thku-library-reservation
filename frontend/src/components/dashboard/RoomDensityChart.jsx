@@ -1,154 +1,212 @@
 import { useEffect, useState } from 'react';
-import { Box, Typography, Card, CircularProgress, Chip } from '@mui/material';
+import { Card, Box, Typography, CircularProgress, Tooltip } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import { useTranslation } from 'react-i18next';
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip,
-  CartesianGrid, Cell, ReferenceLine,
-} from 'recharts';
-import api from '../../api';
 import BarChartIcon from '@mui/icons-material/BarChart';
-
-const getBarColor = (pct, theme) => {
-  if (pct >= 75) return theme.palette.error.main;
-  if (pct >= 40) return theme.palette.warning.main;
-  return theme.palette.success.main;
-};
-
-const CustomTooltip = ({ active, payload, t }) => {
-  if (!active || !payload?.length) return null;
-  const d = payload[0].payload;
-  return (
-    <Box sx={{
-      bgcolor: 'background.paper', px: 2, py: 1.5, borderRadius: 2,
-      boxShadow: '0 4px 14px rgba(0,0,0,0.12)',
-      border: '1px solid', borderColor: 'divider',
-    }}>
-      <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', mb: 0.5 }}>
-        {d.name} ({d.roomNumber})
-      </Typography>
-      <Typography sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>
-        {t('rdBooked', { hours: d.bookedHours, total: d.totalHours })}
-      </Typography>
-      <Typography sx={{ fontSize: '0.85rem', fontWeight: 700, mt: 0.5 }}>
-        %{d.occupancyPercent}
-      </Typography>
-    </Box>
-  );
-};
+import { useTranslation } from 'react-i18next';
+import api from '../../api';
 
 export default function RoomDensityChart() {
   const theme = useTheme();
-  const { t } = useTranslation();
-  const [data, setData] = useState(null);
+  const { t, i18n } = useTranslation();
+  const isEn = i18n.language?.startsWith('en');
+
+  const [rooms, setRooms] = useState([]);
+  const [avgPct, setAvgPct] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api.get('/dashboard/room-density')
-      .then((res) => setData(res.data))
-      .catch(() => setData({ rooms: [], averageOccupancy: 0 }))
+      .then((res) => {
+        const rawList = Array.isArray(res.data) ? res.data : res.data?.rooms || [];
+        const normalized = rawList.map((r) => ({
+          ...r,
+          occupancyPercent: Number(
+            r.occupancyPercent ?? r.percentage ?? r.density ?? 0
+          ),
+          bookedHours: Number(r.bookedHours ?? 0),
+          totalHours: Number(r.totalHours ?? 24),
+        }));
+        setRooms(normalized);
+
+        if (
+          res.data?.averageOccupancy !== undefined ||
+          res.data?.averagePercentage !== undefined
+        ) {
+          setAvgPct(
+            Number(res.data.averageOccupancy ?? res.data.averagePercentage ?? 0)
+          );
+        } else if (normalized.length > 0) {
+          const sum = normalized.reduce((acc, cur) => acc + cur.occupancyPercent, 0);
+          setAvgPct(Math.round(sum / normalized.length));
+        }
+      })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) {
-    return (
-      <Card sx={{ p: 3, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 200 }}>
-        <CircularProgress size={24} />
-      </Card>
-    );
-  }
-
-  const rooms = data?.rooms || [];
-  const avg = data?.averageOccupancy || 0;
+  const getBarColor = (pct) => {
+    if (pct >= 75) return theme.palette.error.main;
+    if (pct >= 40) return theme.palette.warning.main;
+    return theme.palette.success.main;
+  };
 
   return (
-    <Card sx={{ p: 3, overflow: 'hidden' }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <BarChartIcon sx={{ color: 'primary.main', fontSize: 20 }} />
-          <Typography sx={{ fontSize: '0.95rem', fontWeight: 700 }}>
-            {t('rdTitle')}
+    <Card
+      sx={{
+        p: 2.5,
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        breakInside: 'avoid',
+        pageBreakInside: 'avoid',
+      }}
+    >
+      <Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <BarChartIcon color="primary" fontSize="small" />
+            <Typography variant="subtitle1" sx={{ fontWeight: 800 }}>
+              {isEn ? "Today's Room Occupancy" : t('todaysRoomDensity', 'Bugünkü Oda Yoğunluğu')}
+            </Typography>
+          </Box>
+          <Typography
+            variant="caption"
+            sx={{
+              fontWeight: 800,
+              px: 1,
+              py: 0.25,
+              borderRadius: 1,
+              bgcolor: alpha(getBarColor(avgPct), 0.12),
+              color: getBarColor(avgPct),
+            }}
+          >
+            {isEn ? `Avg: ${avgPct}%` : `Ort: %${avgPct}`}
           </Typography>
         </Box>
-        <Chip
-          label={t('rdAverage', { pct: avg })}
-          size="small"
-          sx={{
-            bgcolor: alpha(getBarColor(avg, theme), 0.1),
-            color: getBarColor(avg, theme),
-            fontWeight: 700, fontSize: '0.7rem', height: 24,
-          }}
-        />
+
+        {loading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 5 }}>
+            <CircularProgress size={24} />
+          </Box>
+        ) : (
+          <Box sx={{ display: 'flex', height: 170, gap: 1.5, pt: 1, pb: 1 }}>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                pr: 1,
+                color: 'text.disabled',
+                fontSize: '0.68rem',
+                fontWeight: 600,
+              }}
+            >
+              <span>100%</span>
+              <span>75%</span>
+              <span>50%</span>
+              <span>25%</span>
+              <span>0%</span>
+            </Box>
+
+            <Box
+              sx={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'flex-end',
+                justifyContent: 'space-around',
+                position: 'relative',
+                borderBottom: '1px solid',
+                borderColor: 'divider',
+                pb: 0.5,
+              }}
+            >
+              <Box
+                sx={{
+                  position: 'absolute',
+                  bottom: `${avgPct}%`,
+                  left: 0,
+                  right: 0,
+                  borderTop: '1.5px dashed',
+                  borderColor: alpha(theme.palette.text.secondary, 0.35),
+                  zIndex: 1,
+                  pointerEvents: 'none',
+                }}
+              />
+
+              {rooms.map((r) => {
+                const pctVal = Number(r.occupancyPercent || 0);
+                const barCol = getBarColor(pctVal);
+                return (
+                  <Tooltip
+                    key={r.roomNumber}
+                    title={
+                      isEn
+                        ? `${r.roomNumber} - ${r.name}: ${pctVal}% (${r.bookedHours}/${r.totalHours} hrs)`
+                        : `${r.roomNumber} - ${r.name}: %${pctVal} (${r.bookedHours}/${r.totalHours} saat dolu)`
+                    }
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        width: '18%',
+                        height: '100%',
+                        justifyContent: 'flex-end',
+                      }}
+                    >
+                      <Box
+                        sx={{
+                          width: '100%',
+                          maxWidth: 36,
+                          height: `${Math.max(6, pctVal)}%`,
+                          bgcolor: barCol,
+                          borderRadius: '6px 6px 2px 2px',
+                          transition: 'height 0.4s ease',
+                          '@media print': {
+                            WebkitPrintColorAdjust: 'exact',
+                            printColorAdjust: 'exact',
+                          },
+                        }}
+                      />
+                    </Box>
+                  </Tooltip>
+                );
+              })}
+            </Box>
+          </Box>
+        )}
+
+        <Box sx={{ display: 'flex', justifyContent: 'space-around', pl: 4, mt: 0.5 }}>
+          {rooms.map((r) => (
+            <Typography key={r.roomNumber} variant="caption" sx={{ fontWeight: 700, color: 'text.secondary' }}>
+              {r.roomNumber}
+            </Typography>
+          ))}
+        </Box>
       </Box>
 
-      {rooms.length === 0 ? (
-        <Typography variant="body2" sx={{ color: 'text.secondary', textAlign: 'center', py: 3 }}>
-          {t('rdNoData')}
-        </Typography>
-      ) : (
-        <Box sx={{ width: '100%', height: 200 }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={rooms}
-              margin={{ top: 5, right: 5, left: -20, bottom: 0 }}
-              barCategoryGap="25%"
-            >
-              <CartesianGrid
-                strokeDasharray="3 3"
-                vertical={false}
-                stroke={alpha(theme.palette.divider, 0.5)}
-              />
-              <XAxis
-                dataKey="roomNumber"
-                tick={{ fontSize: 11, fill: theme.palette.text.secondary, fontWeight: 500 }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                domain={[0, 100]}
-                tick={{ fontSize: 10, fill: theme.palette.text.disabled }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v) => `${v}%`}
-              />
-              <Tooltip
-                content={<CustomTooltip t={t} />}
-                cursor={{ fill: alpha(theme.palette.primary.main, 0.04) }}
-              />
-              {avg > 0 && (
-                <ReferenceLine
-                  y={avg}
-                  stroke={theme.palette.text.disabled}
-                  strokeDasharray="4 4"
-                  strokeWidth={1}
-                />
-              )}
-              <Bar
-                dataKey="occupancyPercent"
-                radius={[4, 4, 0, 0]}
-                maxBarSize={36}
-              >
-                {rooms.map((entry, idx) => (
-                  <Cell
-                    key={idx}
-                    fill={getBarColor(entry.occupancyPercent, theme)}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </Box>
-      )}
-
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2, pt: 1.5, borderTop: '1px solid', borderColor: 'divider' }}>
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 2,
+          mt: 2,
+          pt: 1.5,
+          borderTop: '1px solid',
+          borderColor: 'divider',
+          flexWrap: 'wrap',
+        }}
+      >
         {[
-          { color: theme.palette.success.main, label: t('rdLow') },
-          { color: theme.palette.warning.main, label: t('rdMedium') },
-          { color: theme.palette.error.main, label: t('rdHigh') },
+          { color: theme.palette.success.main, label: isEn ? 'Low (<40%)' : 'Düşük (<%40)' },
+          { color: theme.palette.warning.main, label: isEn ? 'Medium (40-75%)' : 'Orta (%40-75)' },
+          { color: theme.palette.error.main, label: isEn ? 'High (>75%)' : 'Yüksek (>%75)' },
         ].map((item) => (
-          <Box key={item.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <Box key={item.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
             <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: item.color }} />
-            <Typography sx={{ fontSize: '0.65rem', color: 'text.secondary', fontWeight: 500 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem', fontWeight: 600 }}>
               {item.label}
             </Typography>
           </Box>

@@ -7,10 +7,9 @@ import {
   runReservationLifecycleChecks,
   sendNoShowWarningEmail,
   sendKioskCheckInEmailToStaff,
-  queueSafeEmail,
   sendReservationCancelledEmails,
+  queueSafeEmail,
 } from "@/lib/lifecycle";
-
 
 const ALLOWED_ROLES = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"];
 
@@ -40,8 +39,18 @@ export async function GET() {
     return NextResponse.json({ error: "Yetkisiz erişim." }, { status: 403 });
   }
 
+  const canViewLogs = ["ADMIN", "SUPER_ADMIN"].includes(userRole);
+
   try {
     runReservationLifecycleChecks().catch(() => {});
+
+    // R103 hâlâ Uçantürk olarak kayıtlıysa otomatik Hürkuş olarak güncelle
+    await prisma.room
+      .updateMany({
+        where: { roomNumber: "R103", name: "Uçantürk" },
+        data: { name: "Hürkuş" },
+      })
+      .catch(() => {});
 
     const now = new Date();
     const days180Ago = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
@@ -66,13 +75,13 @@ export async function GET() {
     ] = await Promise.all([
       prisma.room.findMany({ orderBy: { roomNumber: "asc" } }),
       prisma.reservation.findMany({
-        take: 200,
+        take: 250,
         orderBy: [{ reservationDate: "desc" }, { startTime: "desc" }],
         include: {
           room: { select: { id: true, roomNumber: true, name: true, capacity: true } },
-          user: { select: { id: true, fullName: true, email: true, studentNumber: true, department: true } },
+          user: { select: { id: true, fullName: true, email: true, phone: true, studentNumber: true, department: true } },
           participants: {
-            include: { user: { select: { id: true, fullName: true, email: true, department: true } } },
+            include: { user: { select: { id: true, fullName: true, email: true, phone: true, department: true } } },
           },
         },
       }),
@@ -82,6 +91,7 @@ export async function GET() {
           id: true,
           fullName: true,
           email: true,
+          phone: true,
           studentNumber: true,
           department: true,
           role: true,
@@ -96,29 +106,29 @@ export async function GET() {
         select: { userId: true },
       }),
       prisma.reservationRule.findMany({ orderBy: { ruleName: "asc" } }),
-      prisma.announcement.findMany({ orderBy: { createdAt: "desc" }, take: 25 }),
-      userRole === "SUPER_ADMIN"
+      prisma.announcement.findMany({ orderBy: { createdAt: "desc" }, take: 30 }),
+      canViewLogs
         ? prisma.auditLog.findMany({
             where: { createdAt: { gte: days180Ago } },
-            take: 120,
+            take: 150,
             orderBy: { createdAt: "desc" },
             include: { user: { select: { fullName: true, email: true, role: true } } },
           })
         : Promise.resolve([]),
-      userRole === "SUPER_ADMIN"
+      canViewLogs
         ? prisma.adminAction.findMany({
             where: { createdAt: { gte: days180Ago } },
-            take: 120,
+            take: 150,
             orderBy: { createdAt: "desc" },
             include: { admin: { select: { fullName: true, email: true, role: true } } },
           })
         : Promise.resolve([]),
-      userRole === "SUPER_ADMIN"
+      canViewLogs
         ? prisma.auditLog.count({
             where: { createdAt: { gte: days365Ago, lt: days180Ago } },
           })
         : Promise.resolve(0),
-      userRole === "SUPER_ADMIN"
+      canViewLogs
         ? prisma.adminAction.count({
             where: { createdAt: { gte: days365Ago, lt: days180Ago } },
           })
@@ -147,9 +157,26 @@ export async function GET() {
     }));
 
     const deptCounts = {};
+    const roomUsageMap = {};
+    for (const rm of rooms) {
+      roomUsageMap[rm.id] = {
+        roomNumber: rm.roomNumber,
+        name: rm.name,
+        count: 0,
+        hoursBooked: 0,
+      };
+    }
+
     let activeNowRooms = 0;
     let upcomingHourReservations = 0;
     let upcomingHourStudents = 0;
+    let totalDurationHoursSum = 0;
+    let totalGroupMembersSum = 0;
+
+    const totalResCount = Math.max(1, reservations.length);
+    const completedCount = reservations.filter((r) => ["COMPLETED", "CHECKED_IN", "CONFIRMED"].includes(r.status)).length;
+    const cancelledCount = reservations.filter((r) => r.status === "CANCELLED").length;
+    const noShowCount = reservations.filter((r) => r.status === "NO_SHOW" || r.noShow).length;
 
     const validReservations = reservations.filter(
       (r) => !["CANCELLED", "NO_SHOW"].includes(r.status)
@@ -160,6 +187,16 @@ export async function GET() {
       const sM = new Date(r.startTime).getUTCMinutes();
       const endDt = new Date(r.endTime);
       const eH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+      const durationH = Math.max(1, eH - sH);
+
+      totalDurationHoursSum += durationH;
+      const acceptedMembersCount = 1 + (r.participants || []).filter((p) => p.status === "ACCEPTED").length;
+      totalGroupMembersSum += acceptedMembersCount;
+
+      if (r.room?.id && roomUsageMap[r.room.id]) {
+        roomUsageMap[r.room.id].count += 1;
+        roomUsageMap[r.room.id].hoursBooked += durationH;
+      }
 
       for (let h = sH; h < eH; h++) {
         if (h >= 0 && h < 24) {
@@ -183,8 +220,6 @@ export async function GET() {
       if (rDateStr === todayIsoStr) {
         const startMins = sH * 60 + sM;
         const endMins = eH * 60;
-        const confirmedGroupSize =
-          1 + (r.participants || []).filter((p) => p.status === "ACCEPTED").length;
 
         if (r.status === "CHECKED_IN" || (nowTotalMins >= startMins && nowTotalMins < endMins)) {
           activeNowRooms += 1;
@@ -193,7 +228,7 @@ export async function GET() {
         const diffToStart = startMins - nowTotalMins;
         if (diffToStart >= 0 && diffToStart <= 60 && ["CONFIRMED", "PENDING"].includes(r.status)) {
           upcomingHourReservations += 1;
-          upcomingHourStudents += confirmedGroupSize;
+          upcomingHourStudents += acceptedMembersCount;
         }
       }
     }
@@ -207,6 +242,12 @@ export async function GET() {
       }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 7);
+
+    const totalValidCount = Math.max(1, validReservations.length);
+    const roomBreakdown = Object.values(roomUsageMap).map((rm) => ({
+      ...rm,
+      percentage: Math.round((rm.count / totalValidCount) * 100),
+    }));
 
     const peakHourObj = [...hourlyHeatmap].sort((a, b) => b.count - a.count)[0] || {
       hour: "14:00",
@@ -229,10 +270,19 @@ export async function GET() {
       analytics: {
         hourlyHeatmap,
         departmentBreakdown,
+        roomBreakdown,
         peakHour: peakHourObj.hour,
         activeNowRooms,
         upcomingHourReservations,
         upcomingHourStudents,
+        avgDurationHours: (totalDurationHoursSum / totalValidCount).toFixed(1),
+        avgGroupSize: (totalGroupMembersSum / totalValidCount).toFixed(1),
+        completionRate: Math.round((completedCount / totalResCount) * 100),
+        cancellationRate: Math.round((cancelledCount / totalResCount) * 100),
+        noShowRate: Math.round((noShowCount / totalResCount) * 100),
+        completedCount,
+        cancelledCount,
+        noShowCount,
       },
     });
   } catch (error) {
@@ -254,6 +304,7 @@ export async function POST(request) {
     const body = await request.json();
     const { action, payload } = body;
 
+    // 1. ODA AÇMA / KAPATMA (MÜDÜR KARARI: Mevcut randevular otomatik iptal edilmez, sadece yeni randevuya kapanır)
     if (action === "TOGGLE_ROOM") {
       const { roomId, isActive } = payload;
       const room = await prisma.room.update({
@@ -261,28 +312,15 @@ export async function POST(request) {
         data: { isActive: Boolean(isActive) },
       });
 
-      // Oda bakıma alındıysa (kapatıldıysa) o odadaki bekleyen/onaylı randevuları cezasız iptal et
-      if (!isActive) {
-        await prisma.reservation.updateMany({
-          where: {
-            roomId,
-            status: { in: ["PENDING", "CONFIRMED"] },
-          },
-          data: {
-            status: "CANCELLED",
-            cancelledAt: new Date(),
-            cancellationReason: `${room.roomNumber} (${room.name}) odası teknik bakıma alındığı için cezasız iptal edildi.`,
-          },
-        });
-      }
-
       await prisma.adminAction.create({
         data: {
           adminId,
           actionType: isActive ? "ROOM_UPDATED" : "ROOM_DEACTIVATED",
           targetEntityType: "Room",
           targetEntityId: roomId,
-          description: `${room.roomNumber} (${room.name}) odası ${isActive ? "rezervasyona açıldı" : "bakıma alındı (kapatıldı)"}.`,
+          description: `${room.roomNumber} (${room.name}) odası ${
+            isActive ? "yeni rezervasyonlara açıldı" : "yeni rezervasyonlara kapatıldı (mevcut randevular korunuyor)"
+          }.`,
         },
       });
 
@@ -433,7 +471,7 @@ export async function POST(request) {
             description: `${target.room.roomNumber} odası erken boşaltıldı (COMPLETED) ve kalan süre boşa çıkarıldı.`,
           },
         });
-} else if (op === "CANCEL") {
+      } else if (op === "CANCEL") {
         const wasConfirmed = ["CONFIRMED", "CHECKED_IN"].includes(target.status);
         const cancelReasonText = `Kütüphane görevlisi (${session.user.email}) tarafından iptal edildi.`;
 
@@ -456,15 +494,13 @@ export async function POST(request) {
           },
         });
 
-        // Yönetim panelinden iptal edildiğinde de tüm gruba ve (onaylıysa) müdüre mail gönder
         sendReservationCancelledEmails({
           reservationId,
           cancelledByEmail: session.user.email,
           reason: cancelReasonText,
           wasConfirmed,
         }).catch((err) => console.error("Admin cancel email error:", err));
-      }
-       else if (op === "MARK_NO_SHOW") {
+      } else if (op === "MARK_NO_SHOW") {
         const checkedSetKey = `kiosk:checked_users:${reservationId}`;
         const checkedUserIds = await redis.smembers(checkedSetKey);
 
@@ -617,7 +653,6 @@ export async function POST(request) {
       return NextResponse.json({ success: true });
     }
 
-    // 7. KULLANICI MODERASYONU: Takvimden Tarih Seçmeli Ban / Kalıcı (Perma) Ban & Sıkı Rol Hiyerarşisi
     if (action === "USER_MODERATION") {
       if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
         return NextResponse.json({ error: "Bu işlem için İdare/Admin yetkisi gereklidir." }, { status: 403 });
@@ -675,11 +710,13 @@ export async function POST(request) {
           },
         });
 
-        await queueSafeEmail({
-          to: bannedUser.email,
-          subject: `THKÜ Kütüphane - Rezervasyon Yasağı (${durationLabel}) Bildirimi`,
-          body: `Sayın ${bannedUser.fullName},\n\nKütüphane çalışma odası rezervasyon yetkiniz (${durationLabel}) askıya alınmıştır.\n\nSebep: ${finalReason}`,
-          priority: 1,
+        await sendNoShowWarningEmail({
+          user: bannedUser,
+          activeNoShowCount: 3,
+          roomLabel: "Genel Kütüphane Disiplin Kararı",
+          dateStr: new Date().toLocaleDateString("tr-TR"),
+          isBanned: true,
+          banUntilDate,
         });
 
         await prisma.adminAction.create({

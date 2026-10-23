@@ -5,10 +5,12 @@ import prisma from "@/lib/db";
 
 const DEFAULTS = {
   MIN_PARTICIPANTS: 2,
-  MAX_PARTICIPANTS: 8, // Madde 2: Oda kapasitesi 8 kişi
-  MAX_DURATION_HOURS: 3, // Madde 9: Maksimum 3 saat
-  MAX_ADVANCE_DAYS: 1, // Madde 3: İleri tarih maksimum 1 gün (Yönetimden değiştirilebilir)
+  MAX_PARTICIPANTS: 8,
+  MAX_DURATION_HOURS: 3,
+  MAX_ADVANCE_DAYS: 1,
   DAILY_RELEASE_HOUR: 8,
+  CHECKIN_TOLERANCE_MINUTES: 15,
+  CANCEL_LOCK_MINUTES: 60,
 };
 
 const RULE_NAMES = Object.keys(DEFAULTS);
@@ -44,6 +46,8 @@ export async function GET() {
       maxDurationHours: val("MAX_DURATION_HOURS"),
       maxAdvanceDays: val("MAX_ADVANCE_DAYS"),
       dailyReleaseHour: val("DAILY_RELEASE_HOUR"),
+      checkinToleranceMinutes: val("CHECKIN_TOLERANCE_MINUTES"),
+      cancelLockMinutes: val("CANCEL_LOCK_MINUTES"),
     };
 
     return NextResponse.json({ rooms, rules });

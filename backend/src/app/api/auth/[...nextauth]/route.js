@@ -114,7 +114,6 @@ export const authOptions = {
         for (const demo of Object.values(DEMO_USERS)) {
           await prisma.user.upsert({
             where: { email: demo.email },
-            // ÖNEMLİ: update içinde 'role' EZİLMEZ! Böylece Admin Panelden atanan roller kalıcı olur.
             update: {
               fullName: demo.fullName,
               department: demo.department,
@@ -192,7 +191,7 @@ export const authOptions = {
       const lookupEmail = user?.email || token?.email;
 
       if (lookupEmail) {
-        const dbUser = await prisma.user.findUnique({
+        let dbUser = await prisma.user.findUnique({
           where: { email: lookupEmail },
           select: {
             id: true,
@@ -201,16 +200,57 @@ export const authOptions = {
             studentNumber: true,
             avatarUrl: true,
             acceptedAgreementVersion: true,
+            penaltyPoints: true,
+            isBanned: true,
+            banUntil: true,
+            banReason: true,
           },
         });
 
+        // Süreli banın tarihi dolduysa otomatik olarak banı aç
+        if (dbUser?.isBanned && dbUser.banUntil && new Date(dbUser.banUntil) <= new Date()) {
+          dbUser = await prisma.user.update({
+            where: { id: dbUser.id },
+            data: { isBanned: false, banUntil: null, banReason: null, penaltyPoints: 0 },
+            select: {
+              id: true,
+              fullName: true,
+              role: true,
+              studentNumber: true,
+              avatarUrl: true,
+              acceptedAgreementVersion: true,
+              penaltyPoints: true,
+              isBanned: true,
+              banUntil: true,
+              banReason: true,
+            },
+          });
+          await prisma.penaltyHistory.updateMany({
+            where: { userId: dbUser.id, isActive: true },
+            data: { isActive: false },
+          });
+        }
+
         if (dbUser) {
+          const activeNoShowCount = await prisma.penaltyHistory.count({
+            where: {
+              userId: dbUser.id,
+              penaltyType: "NO_SHOW",
+              isActive: true,
+            },
+          });
+
           token.userId = dbUser.id;
           token.name = dbUser.fullName;
           token.role = dbUser.role;
           token.studentNumber = dbUser.studentNumber;
           token.avatarUrl = dbUser.avatarUrl;
           token.acceptedAgreementVersion = dbUser.acceptedAgreementVersion;
+          token.penaltyPoints = dbUser.penaltyPoints;
+          token.noShowCount = activeNoShowCount;
+          token.isBanned = dbUser.isBanned;
+          token.banUntil = dbUser.banUntil ? dbUser.banUntil.toISOString() : null;
+          token.banReason = dbUser.banReason;
         }
 
         delete token.picture;
@@ -232,6 +272,11 @@ export const authOptions = {
         session.user.studentNumber = token.studentNumber;
         session.user.image = token.avatarUrl;
         session.user.acceptedAgreementVersion = token.acceptedAgreementVersion;
+        session.user.penaltyPoints = token.penaltyPoints ?? 0;
+        session.user.noShowCount = token.noShowCount ?? 0;
+        session.user.isBanned = Boolean(token.isBanned);
+        session.user.banUntil = token.banUntil || null;
+        session.user.banReason = token.banReason || null;
       }
       return session;
     },

@@ -16,6 +16,7 @@ import PhonelinkLockIcon from '@mui/icons-material/PhonelinkLock';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import WifiIcon from '@mui/icons-material/Wifi';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import api from '../api';
 
 const THKU_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png';
@@ -67,7 +68,6 @@ export default function KioskPage() {
       return;
     }
 
-    // Öğrenci ise tarayıcıdan GPS koordinatını iste ve sunucuya gönder
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -112,9 +112,9 @@ export default function KioskPage() {
 
   if (status === 'loading' || loading) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', bgcolor: '#0F172A', gap: 2 }}>
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', bgcolor: '#0F172A', gap: 2, p: 2 }}>
         <CircularProgress sx={{ color: '#38BDF8' }} />
-        <Typography variant="body2" sx={{ color: '#94A3B8' }}>
+        <Typography variant="body2" sx={{ color: '#94A3B8', textAlign: 'center' }}>
           Kapı QR, Kampüs Ağı ve GPS Konumu Doğrulanıyor...
         </Typography>
       </Box>
@@ -122,10 +122,10 @@ export default function KioskPage() {
   }
 
   // =========================================================================
-  // MOD 1: GÖREVLİ / MÜDÜR EKRANI -> 4 ODAYA ASILACAK TEKİL KAPI QR POSTERİ
+  // MOD 1: GÖREVLİ / MÜDÜR EKRANI -> 4 ODAYA ASILACAK RESMİ A4 KAPI QR POSTERİ
   // =========================================================================
   if (isStaff && kioskData?.mode === 'STAFF_POSTER') {
-    const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(kioskData.doorQrUrl)}`;
+    const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(kioskData.doorQrUrl)}`;
 
     return (
       <Box
@@ -137,23 +137,36 @@ export default function KioskPage() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          p: 3,
+          p: { xs: 2, sm: 3 },
+          '@media print': {
+            bgcolor: '#fff',
+            color: '#0F172A',
+            p: 0,
+          },
         }}
       >
         <Card
           sx={{
-            maxWidth: 580,
+            maxWidth: 640,
             width: '100%',
-            p: { xs: 3, sm: 4.5 },
+            p: { xs: 2.5, sm: 4.5 },
             borderRadius: 4,
             textAlign: 'center',
             bgcolor: '#1E293B',
             color: '#fff',
-            border: '1px solid rgba(255,255,255,0.12)',
+            border: '1px solid rgba(255,255,255,0.14)',
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)',
+            '@media print': {
+              bgcolor: '#fff',
+              color: '#0F172A',
+              boxShadow: 'none',
+              border: '3px solid #0F172A',
+              p: 4,
+            },
           }}
         >
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2, flexWrap: 'wrap', gap: 1, '@media print': { display: 'none' } }}>
+          {/* Sadece Ekranda Görünen Üst Kontrol Butonları */}
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2.5, flexWrap: 'wrap', gap: 1, '@media print': { display: 'none' } }}>
             <Button
               size="small"
               variant="outlined"
@@ -169,6 +182,7 @@ export default function KioskPage() {
               color="primary"
               startIcon={<PrintIcon />}
               onClick={() => window.print()}
+              sx={{ fontWeight: 700 }}
             >
               Kapı Posterini Yazdır (A4)
             </Button>
@@ -178,49 +192,90 @@ export default function KioskPage() {
             component="img"
             src={THKU_LOGO_URL}
             alt="THKÜ"
-            sx={{ width: 76, height: 76, objectFit: 'contain', mx: 'auto', mb: 1.5, bgcolor: '#fff', p: 1, borderRadius: '50%' }}
+            sx={{
+              width: 82,
+              height: 82,
+              objectFit: 'contain',
+              mx: 'auto',
+              mb: 1.5,
+              bgcolor: '#fff',
+              p: 1,
+              borderRadius: '50%',
+              border: '2px solid #38BDF8',
+            }}
           />
 
-          <Chip
-            icon={<QrCode2Icon sx={{ color: '#38BDF8 !important' }} />}
-            label="THKÜ KÜTÜPHANE • 4 ODA ORTAK GİRİŞ QR KODU"
-            sx={{ bgcolor: 'rgba(56, 189, 248, 0.15)', color: '#38BDF8', fontWeight: 700, mb: 1.5 }}
-          />
-
-          <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>
-            Grup Çalışma Odaları (R101 – R104) Kapı Doğrulama Noktası
-          </Typography>
-          <Typography variant="body2" sx={{ color: '#94A3B8', mb: 3 }}>
-            Randevu başlangıç saatinden <strong>±15 dakika içinde</strong> (Örn: 10:00 randevusu için 09:45 – 10:15 arası) her katılımcının kendi telefonundan bu QR kodu okutarak ekranda çıkan <strong>tek tıkla onay</strong> butonuna basması zorunludur.
+          <Typography variant="subtitle2" sx={{ fontWeight: 800, letterSpacing: '0.06em', color: '#38BDF8', mb: 0.5, '@media print': { color: '#C8102E' } }}>
+            TÜRK HAVA KURUMU ÜNİVERSİTESİ • KÜTÜPHANE MÜDÜRLÜĞÜ
           </Typography>
 
+          <Typography variant="h5" sx={{ fontWeight: 900, mb: 1, fontSize: { xs: '1.25rem', sm: '1.55rem' } }}>
+            Grup Çalışma Odaları (R101 – R104) Kapı Giriş Yoklama Noktası
+          </Typography>
+
+          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, flexWrap: 'wrap', mb: 2.5 }}>
+            <Chip label="R101 • Atatürk" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
+            <Chip label="R102 • Gökçen" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
+            <Chip label="R103 • Hürkuş" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
+            <Chip label="R104 • İstikbal" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
+          </Box>
+
+          {/* QR Kod Çerçevesi */}
           <Box
             sx={{
               bgcolor: '#fff',
               p: 2.5,
               borderRadius: 3,
               display: 'inline-block',
-              mb: 2.5,
+              mb: 3,
               border: '4px solid #38BDF8',
+              '@media print': { borderColor: '#0F172A' },
             }}
           >
             <Box
               component="img"
               src={qrImageSrc}
               alt="THKÜ Ortak Kapı QR Kodu"
-              sx={{ width: 240, height: 240, display: 'block' }}
+              sx={{ width: { xs: 210, sm: 250 }, height: { xs: 210, sm: 250 }, display: 'block' }}
             />
           </Box>
 
-          <Box sx={{ p: 2, borderRadius: 2, bgcolor: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.08)', textAlign: 'left' }}>
-            <Typography variant="caption" sx={{ color: '#38BDF8', fontWeight: 700, display: 'block', mb: 0.5 }}>
-              🛡️ AKTİF GÜVENLİK MİMARİSİ (KAPI QR + GPS + KAMPÜS WI-FI + CİHAZ KİLİDİ):
-            </Typography>
-            <Typography variant="caption" sx={{ color: '#CBD5E1', display: 'block', lineHeight: 1.6 }}>
-              • Öğrenci anasayfasında Kiosk butonu bulunmaz; yalnızca bu QR kod okutulduğunda ekran açılır.<br />
-              • Kampüs Wi-Fi (eduroam), Anti-VPN ve GPS konum doğrulaması sayesinde QR resmi dışarıdaki bir arkadaşa gönderilse bile uzaktan onay verilemez.<br />
-              • Öğrencinin elle kod yazmasına gerek yoktur; ±15 dk içindeyse tek tıkla onaylar.
-            </Typography>
+          {/* Öğrencilere Yönelik Net ve Kesin Oda Giriş Kuralları */}
+          <Box
+            sx={{
+              p: { xs: 2, sm: 2.5 },
+              borderRadius: 2.5,
+              bgcolor: 'rgba(15,23,42,0.8)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              textAlign: 'left',
+              '@media print': {
+                bgcolor: '#F8FAFC',
+                borderColor: '#0F172A',
+                color: '#0F172A',
+              },
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
+              <WarningAmberIcon sx={{ color: '#FBBF24', fontSize: 20, '@media print': { color: '#C8102E' } }} />
+              <Typography sx={{ color: '#FBBF24', fontWeight: 800, fontSize: '0.88rem', letterSpacing: '0.02em', '@media print': { color: '#C8102E' } }}>
+                ÖĞRENCİLERİMİZİN DİKKATİNE — ZORUNLU ODA GİRİŞ KURALLARI:
+              </Typography>
+            </Box>
+
+            <Box component="ol" sx={{ m: 0, pl: 2.5, color: '#E2E8F0', fontSize: '0.82rem', lineHeight: 1.75, '@media print': { color: '#0F172A' } }}>
+              <li>
+                <strong>Kampüs Wi-Fi ve Konum (GPS) Zorunluluğu:</strong> QR kodu okutmadan önce telefonunuzun <strong>THKÜ Kampüs Wi-Fi (eduroam / THKU-802.1x)</strong> ağına bağlı olduğundan ve tarayıcı <strong>Konum (GPS)</strong> izninin açık olduğundan emin olunuz. (Mobil veri veya VPN ile giriş yapılamaz).
+              </li>
+              <li>
+                <strong>±15 Dakika Yoklama Süresi:</strong> Oda giriş onayınızı, randevu başlangıç saatinizden <strong>15 dakika öncesi ile 15 dakika sonrası</strong> arasında (Örn: 10:00 randevusu için <strong>09:45 – 10:15</strong> saatleri arasında) yapmanız zorunludur.
+              </li>
+              <li>
+                <strong>En Az 2 Kişi ve Kendi Telefonundan Onay Şartı:</strong> Randevunun başlaması için gruptaki <strong>en az 2 öğrencinin kendi mobil cihazından</strong> bu QR kodu okutup <strong>&ldquo;Oda Girişimi Onayla&rdquo;</strong> butonuna basması zorunludur. Aynı telefondan başka bir öğrenci adına onay verilemez.
+              </li>
+              <li>
+                <strong>Gelmeme (No-Show) ve Ceza Kuralı:</strong> Zamanında kapı QR onayı yapılmayan randevular <strong>Gelmedi (No-Show)</strong> sayılır. Dönem içinde <strong>3 kez No-Show uyarısı</strong> alan öğrencilerin hesapları 30 gün / dönem boyunca rezervasyonlara kapatılır.
+              </li>
+            </Box>
           </Box>
         </Card>
       </Box>
@@ -240,14 +295,14 @@ export default function KioskPage() {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        p: 2.5,
+        p: { xs: 1.5, sm: 2.5 },
       }}
     >
       <Card
         sx={{
           maxWidth: 500,
           width: '100%',
-          p: { xs: 3, sm: 4 },
+          p: { xs: 2.5, sm: 4 },
           borderRadius: 4,
           bgcolor: '#1E293B',
           color: '#fff',
@@ -268,7 +323,7 @@ export default function KioskPage() {
           <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap' }}>
             <Chip
               icon={<WifiIcon sx={{ color: '#4ADE80 !important', fontSize: 15 }} />}
-              label="Kampüs Ağı / Anti-VPN"
+              label="Kampüs Wi-Fi"
               size="small"
               sx={{ bgcolor: 'rgba(74,222,128,0.12)', color: '#4ADE80', fontWeight: 700, fontSize: '0.68rem' }}
             />
@@ -288,10 +343,10 @@ export default function KioskPage() {
             alt="THKÜ"
             sx={{ width: 64, height: 64, objectFit: 'contain', mx: 'auto', mb: 1, bgcolor: '#fff', p: 0.75, borderRadius: '50%' }}
           />
-          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800, fontSize: { xs: '1.05rem', sm: '1.2rem' } }}>
             Kapı QR Yoklama & Oda Giriş Onayı
           </Typography>
-          <Typography variant="caption" sx={{ color: '#94A3B8' }}>
+          <Typography variant="caption" sx={{ color: '#94A3B8', wordBreak: 'break-all' }}>
             {session?.user?.name} ({session?.user?.email})
           </Typography>
         </Box>
@@ -306,10 +361,11 @@ export default function KioskPage() {
                 variant="outlined"
                 color="info"
                 size="small"
+                fullWidth
                 startIcon={<OpenInNewIcon />}
                 onClick={() => navigate('/kiosk?door=thku-study-room')}
               >
-                [Geliştirici Testi] Kapı QR Okutulmuş Gibi Aç (?door=thku-study-room)
+                [Geliştirici Testi] Kapı QR Okutulmuş Gibi Aç
               </Button>
             )}
           </Box>
@@ -331,7 +387,7 @@ export default function KioskPage() {
                 <Chip
                   label={`${kioskData.checkedCount} / ${kioskData.totalCount} Kişi Onayladı`}
                   size="small"
-                  color={kioskData.checkedCount === kioskData.totalCount ? 'success' : 'warning'}
+                  color={kioskData.checkedCount >= 2 ? 'success' : 'warning'}
                   sx={{ fontWeight: 700 }}
                 />
               </Box>
@@ -339,7 +395,7 @@ export default function KioskPage() {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mb: 1.5, color: '#FBBF24' }}>
                 <AccessTimeIcon sx={{ fontSize: 16 }} />
                 <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                  Geçerli Onay Penceresi (±15 Dk): {kioskData.windowLabel}
+                  Geçerli Onay Penceresi: {kioskData.windowLabel}
                 </Typography>
               </Box>
 
@@ -350,11 +406,11 @@ export default function KioskPage() {
               />
 
               <Typography variant="caption" sx={{ color: '#94A3B8', display: 'block', mb: 1 }}>
-                Grup Üyeleri Yoklama Durumu (Herkesin kendi telefonundan onaylaması zorunludur):
+                Grup Üyeleri Yoklama Durumu (En az 2 kişinin kendi telefonundan onaylaması zorunludur):
               </Typography>
               <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                 {kioskData.members?.map((m) => (
-                  <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Box key={m.id} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                     <Typography variant="body2" sx={{ color: '#E2E8F0', fontSize: '0.82rem' }}>
                       {m.fullName} ({m.role})
                     </Typography>
@@ -397,7 +453,7 @@ export default function KioskPage() {
                   }}
                 >
                   <Typography variant="body2" sx={{ color: '#E2E8F0', fontWeight: 600, mb: 2 }}>
-                    Kapı QR kodunuz ve ±15 dakikalık randevu zaman diliminiz doğrulandı. Oda kullanımınızı başlatmak için aşağıdaki butona tıklayınız:
+                    Kapı QR kodunuz, Kampüs Wi-Fi bağlantınız ve GPS konumunuz doğrulandı. Oda kullanımınızı başlatmak için aşağıdaki butona basınız:
                   </Typography>
 
                   <Button

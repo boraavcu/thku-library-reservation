@@ -110,11 +110,11 @@ async function main() {
     students.push(created);
   }
 
-  // 3. Çalışma Odaları (Madde 2: 4 Oda, Kapasite 8)
+  // 3. Çalışma Odaları (R103 -> Hürkuş olarak güncellendi)
   const roomList = [
     { roomNumber: "R101", name: "Atatürk", capacity: 8, isActive: true },
     { roomNumber: "R102", name: "Gökçen", capacity: 8, isActive: true },
-    { roomNumber: "R103", name: "Uçantürk", capacity: 8, isActive: true },
+    { roomNumber: "R103", name: "Hürkuş", capacity: 8, isActive: true },
     { roomNumber: "R104", name: "İstikbal", capacity: 8, isActive: true },
   ];
 
@@ -128,12 +128,12 @@ async function main() {
     rooms.push(rm);
   }
 
-  // 4. Aktif Sözleşme (v1.0) ve Güncel Kurallar
+  // 4. Aktif Sözleşme (v1.0) ve Dinamik Kurallar
   const agreementContent = `1. Maksimum Rezervasyon Süresi ve Günlük Hak
 Çalışma odaları günde yalnızca 1 (bir) defa ve en fazla 3 saat süreyle rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun veya üyelerin farklı isimlerle ardışık rezervasyon yapması yasaktır. Gece 21:00-24:00 saatleri arasına randevu alan kullanıcılar, ertesi gün 00:00-08:00 saatleri arasına randevu alamazlar.
 
-2. Kapı QR Kodu, Kişiye Özel Kod ve Gelmeme (No-Show)
-Oda girişlerinde bulunan QR kod okutularak her katılımcının kendisine özel üretilen doğrulama kodunu 15 dakika içinde girmesi zorunludur. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez. Randevusuna gelmeyen kullanıcılara e-posta ile uyarı gönderilir; 3 uyarı sonunda kullanıcı dönemsel/30 günlük rezervasyon yasağı (ban) alır.
+2. Kapı QR Kodu, Kişiye Özel Yoklama ve Gelmeme (No-Show)
+Oda girişlerinde bulunan QR kod okutularak randevu başlangıç saatinden ±15 dakika içinde en az 2 grup üyesinin kendi mobil cihazından onay vermesi zorunludur. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez. Randevusuna gelmeyen kullanıcılara e-posta ile uyarı gönderilir; 3 uyarı sonunda kullanıcı dönemsel/30 günlük rezervasyon yasağı (ban) alır.
 
 3. Sessizlik ve Kullanım Kuralları
 Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yüksek sesli konuşmalar, kulaklıksız müzik veya rahatsız edici davranışlara izin verilmez. Temizliği korumak için (kapalı şişedeki su hariç) yiyecek ve içecek tüketimi kesinlikle yasaktır.
@@ -145,7 +145,7 @@ Kullanıcılar rezervasyon süresince kütüphane mülküne, mobilyalara veya te
 Çalışma odaları grup çalışması (en az 2 kişi, en fazla 8 kişi) için tasarlanmıştır. Gönderilen grup davetiyeleri 30 dakika içinde onaylanmalıdır; aksi takdirde rezervasyon otomatik olarak iptal edilir.
 
 6. İleri Tarih Sınırı ve Erken Boşaltma
-Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken tamamlayan gruplar sistem üzerinden 'Odayı Erken Boşalt' işlemini yaparak odayı diğer öğrencilerin kullanımına açabilirler.`;
+Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken tamamlayan gruplar randevu süresi içinde sistem üzerinden 'Odayı Erken Boşalt' işlemini yaparak odayı diğer öğrencilerin kullanımına açabilirler.`;
 
   await prisma.agreement.updateMany({ data: { isActive: false } });
   await prisma.agreement.upsert({
@@ -160,6 +160,8 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     { ruleName: "MAX_DURATION_HOURS", ruleType: "INTEGER", ruleValue: { value: 3 } },
     { ruleName: "MAX_ADVANCE_DAYS", ruleType: "INTEGER", ruleValue: { value: 1 } },
     { ruleName: "DAILY_RELEASE_HOUR", ruleType: "INTEGER", ruleValue: { value: 8 } },
+    { ruleName: "CHECKIN_TOLERANCE_MINUTES", ruleType: "INTEGER", ruleValue: { value: 15 } },
+    { ruleName: "CANCEL_LOCK_MINUTES", ruleType: "INTEGER", ruleValue: { value: 60 } },
   ];
 
   for (const rule of rules) {
@@ -170,7 +172,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     });
   }
 
-  // 5. ZENGİN REZERVASYON VERİ SETİ (7/24 Isı Haritası, Oda Yoğunluğu ve Bölüm Dağılımını Doldurur)
+  // 5. ZENGİN REZERVASYON VERİ SETİ
   const trHourParts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Istanbul",
     hour: "2-digit",
@@ -183,7 +185,6 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
   const nextHour = Math.min(21, boraStartH + 1);
 
   const sampleReservations = [
-    // --- GEÇMİŞ 6 GÜN (24 Saatlik Isı Haritası ve Bölüm Dağılımını Dolduran Kayıtlar) ---
     { dayOffset: -6, roomIdx: 0, orgIdx: 1, partIdxs: [8, 14, 6], startH: 0, endH: 3, status: "COMPLETED", purpose: "Gece Aerodinamik Hesaplama Grubu" },
     { dayOffset: -6, roomIdx: 1, orgIdx: 2, partIdxs: [9, 16, 10], startH: 3, endH: 6, status: "COMPLETED", purpose: "Yazılım Mimarisi Gece Kampı" },
     { dayOffset: -6, roomIdx: 2, orgIdx: 6, partIdxs: [11, 5], startH: 6, endH: 9, status: "COMPLETED", purpose: "Sabah Meteoroloji ve Seyrüsefer" },
@@ -214,24 +215,20 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     { dayOffset: -1, roomIdx: 2, orgIdx: 5, partIdxs: [12, 11], startH: 16, endH: 19, status: "COMPLETED", purpose: "Mühendislik Ekonomisi Projesi" },
     { dayOffset: -1, roomIdx: 3, orgIdx: 6, partIdxs: [11, 8], startH: 20, endH: 23, status: "COMPLETED", purpose: "Gece Vize Çalışma Grubu" },
 
-    // =========================================================================
-    // BUGÜN (dayOffset: 0) -> 4 ODANIN TAMAMINDA YOĞUNLUK GRAFİĞİNİ DOLDURAN KAYITLAR
-    // =========================================================================
-    // R101 - Atatürk (Bugün 3 farklı grup -> Yüksek Doluluk!)
+    // BUGÜN
     { dayOffset: 0, roomIdx: 0, orgIdx: 9, partIdxs: [16], startH: 2, endH: 5, status: "COMPLETED", purpose: "Gece Kodlama Maratonu" },
     { dayOffset: 0, roomIdx: 0, orgIdx: 10, partIdxs: [7], startH: 5, endH: 8, status: "COMPLETED", purpose: "Sabah Veri Yapıları Tekrarı" },
     {
       dayOffset: 0,
       roomIdx: 0,
-      orgIdx: 0, // Bora Avcu (s250444902@stu.thk.edu.tr - Organizatör)
-      partIdxs: [2], 
-      startH: boraStartH+1,
+      orgIdx: 0,
+      partIdxs: [2],
+      startH: boraStartH,
       endH: boraEndH,
       status: "CONFIRMED",
-      purpose: "Bilgisayar Müh. Bitirme Projesi Grup Çalışması (Bora Organizatör)",
+      purpose: "Bilgisayar Müh. Bitirme Projesi Grup Çalışması",
     },
 
-    // R102 - Gökçen (Bugün 3 farklı grup)
     { dayOffset: 0, roomIdx: 1, orgIdx: 1, partIdxs: [14], startH: 6, endH: 9, status: "COMPLETED", purpose: "Sabah Aerodinamik Etüdü" },
     {
       dayOffset: 0,
@@ -245,20 +242,18 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     },
     { dayOffset: 0, roomIdx: 1, orgIdx: 3, partIdxs: [13], startH: 21, endH: 24, status: "CONFIRMED", purpose: "Gece Devre Analizi Grubu" },
 
-    // R103 - Uçantürk (Bugün 3 farklı grup + Caner Aydın No-Show Testi)
     { dayOffset: 0, roomIdx: 2, orgIdx: 5, partIdxs: [12], startH: 7, endH: 10, status: "COMPLETED", purpose: "Endüstri 4.0 Vaka Çalışması" },
     {
       dayOffset: 0,
       roomIdx: 2,
-      orgIdx: 4, // Caner Aydın (2/3 Uyarısı var)
+      orgIdx: 4,
       partIdxs: [15, 13],
       startH: nextHour,
       endH: Math.min(24, nextHour + 2),
       status: "CONFIRMED",
-      purpose: "Caner'in Randevusu (Yönetim Panelinde 3/3 No-Show Oto-Ban Testi)",
+      purpose: "Caner'in Randevusu (3/3 No-Show Oto-Ban Testi)",
     },
 
-    // R104 - İstikbal (Bugün 2 farklı grup + Gelecek 1 Saat Radarı)
     { dayOffset: 0, roomIdx: 3, orgIdx: 6, partIdxs: [11], startH: 4, endH: 7, status: "COMPLETED", purpose: "Sabah Uçuş Teorisi" },
     {
       dayOffset: 0,
@@ -268,15 +263,15 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
       startH: nextHour,
       endH: Math.min(24, nextHour + 2),
       status: "CONFIRMED",
-      purpose: "Uçuş Simülasyon ve Kontrol Grubu (Gelecek 1 Saat Radarı)",
+      purpose: "Uçuş Simülasyon ve Kontrol Grubu",
     },
 
-    // --- YARIN (dayOffset: 1): BORA AVCU'YA GELEN DAVET TESTİ İÇİN ---
+    // YARIN
     {
       dayOffset: 1,
       roomIdx: 1,
-      orgIdx: 1, // Ayşe Yılmaz davet gönderdi
-      partIdxs: [0], // 0 = Bora Avcu (PENDING olarak bekleyen davet!)
+      orgIdx: 1,
+      partIdxs: [0],
       startH: 10,
       endH: 13,
       status: "PENDING",
@@ -312,13 +307,13 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     });
   }
 
-  // 6. Ceza Kayıtları (Caner Aydın: 2/3 Uyarı, Hakan Yavuz: 3/3 Banlı)
+  // 6. Ceza Kayıtları (R103 - Hürkuş olarak güncellendi)
   const caner = students[4];
   const hakan = students[17];
 
   await prisma.penaltyHistory.createMany({
     data: [
-      { userId: caner.id, penaltyType: "NO_SHOW", penaltyPoints: 15, description: "R103 - Uçantürk odası rezervasyonuna gelinmedi (1. Uyarı).", isActive: true },
+      { userId: caner.id, penaltyType: "NO_SHOW", penaltyPoints: 15, description: "R103 - Hürkuş odası rezervasyonuna gelinmedi (1. Uyarı).", isActive: true },
       { userId: caner.id, penaltyType: "NO_SHOW", penaltyPoints: 15, description: "R104 - İstikbal odası rezervasyonuna gelinmedi (2. Uyarı - Sınırda!).", isActive: true },
       { userId: hakan.id, penaltyType: "NO_SHOW", penaltyPoints: 15, description: "1. No-Show Uyarısı", isActive: true },
       { userId: hakan.id, penaltyType: "NO_SHOW", penaltyPoints: 15, description: "2. No-Show Uyarısı", isActive: true },
@@ -326,43 +321,73 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     ],
   });
 
-  // 7. Duyurular
+  // 7. Duyurular (Farklı Öncelik Seviyelerinde 5 Örnek Duyuru - Sayfalama ve Filtreleme İçin)
   await prisma.announcement.createMany({
     data: [
       {
         title: {
-          tr: "7/24 Grup Çalışma Odaları ve Kişiye Özel Kapı QR Sistemi Aktif Edildi",
-          en: "24/7 Group Study Rooms and Personal Door QR System is Now Active",
+          tr: "7/24 Grup Çalışma Odaları ve Kapı QR Sistemi Aktif Edildi",
+          en: "24/7 Group Study Rooms and Door QR System is Now Active",
         },
         content: {
-          tr: "Kütüphanemiz 7/24 hizmet vermektedir. Oda girişlerindeki ortak QR kodu okutarak size özel üretilen 10 dakika geçerli doğrulama kodunuzu girmeniz zorunludur.",
-          en: "Our library is open 24/7. Please scan the door QR code to enter your personal 10-minute verification code.",
+          tr: "Kütüphanemiz 7/24 hizmet vermektedir. Oda girişlerindeki ortak QR kodu okutarak randevu başlangıcından ±15 dakika içinde onay vermeniz zorunludur.",
+          en: "Our library is open 24/7. Please scan the door QR code within ±15 minutes of your start time to confirm check-in.",
+        },
+        priority: "URGENT",
+        isPinned: true,
+        isActive: true,
+        createdBy: adminUser.id,
+        publishedAt: new Date(Date.now() - 1 * 60 * 60 * 1000),
+      },
+      {
+        title: {
+          tr: "R103 - Hürkuş Çalışma Odası Yenilendi",
+          en: "R103 - Hürkuş Study Room Renovated",
+        },
+        content: {
+          tr: "R103 numaralı çalışma odamız 'Hürkuş' adıyla 8 kişilik yeni masa düzeni ve güç üniteleriyle kullanıma açılmıştır.",
+          en: "Study room R103 has been reopened under the name 'Hürkuş' with an 8-person layout and power outlets.",
         },
         priority: "HIGH",
         isPinned: true,
         isActive: true,
         createdBy: adminUser.id,
-        publishedAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+        publishedAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
       },
       {
         title: {
-          tr: "Çalışma Odaları Yeni Kapasite (8 Kişi) ve İptal Kuralları",
-          en: "Study Rooms New Capacity (8 People) and Cancellation Rules",
+          tr: "Grup Davet Onay Süresi (30 Dakika) Hakkında",
+          en: "About Group Invitation Approval Window (30 Minutes)",
         },
         content: {
-          tr: "4 çalışma odamız en az 2, en fazla 8 kişilik gruplar için hizmet vermektedir. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez.",
-          en: "Our 4 study rooms serve groups of 2 to 8 students. Reservations cannot be cancelled within 1 hour of the start time.",
+          tr: "Oluşturulan oda taleplerinin kesinleşmesi için en az 1 davetlinin 30 dakika içinde daveti kabul etmesi gerekmektedir.",
+          en: "At least 1 invited participant must accept the invitation within 30 minutes for the reservation to be confirmed.",
         },
         priority: "MEDIUM",
         isPinned: false,
         isActive: true,
         createdBy: superAdmin.id,
-        publishedAt: new Date(Date.now() - 18 * 60 * 60 * 1000),
+        publishedAt: new Date(Date.now() - 8 * 60 * 60 * 1000),
+      },
+      {
+        title: {
+          tr: "Odayı Erken Boşaltma Özelliği Devrede",
+          en: "Early Check-Out Feature is Active",
+        },
+        content: {
+          tr: "Çalışmasını erken tamamlayan gruplar 'Rezervasyonlarım' sayfasından 'Odayı Erken Boşalt' butonuna basarak kalan süreyi diğer öğrencilere açabilirler.",
+          en: "Groups finishing early can click 'Early Check-Out' on the 'My Bookings' page to free up the room for other students.",
+        },
+        priority: "LOW",
+        isPinned: false,
+        isActive: true,
+        createdBy: adminUser.id,
+        publishedAt: new Date(Date.now() - 16 * 60 * 60 * 1000),
       },
     ],
   });
 
-  // 8. 15 Öğrenci Logu + 15 Yönetici Logu (180 Gün Gösterim & Sayfalama İçin)
+  // 8. 15 Öğrenci Logu + 15 Yönetici Logu
   for (let i = 0; i < 15; i++) {
     const st = students[i % students.length];
     const rm = rooms[i % rooms.length];
@@ -377,7 +402,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
           time: "10:00 - 13:00",
           organizer: st.email,
           invitedParticipants: [students[(i + 1) % students.length].email],
-          progress: "3/3",
+          progress: "2/2",
         },
       },
     });
@@ -399,7 +424,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     });
   }
 
-  console.log("✅ Zengin Analitik Seed Tamamlandı! Tüm grafikler, 7/24 ısı haritası ve bölüm analizleri dolduruldu.");
+  console.log("✅ Zengin Analitik Seed Tamamlandı! R103 Hürkuş, 4 farklı öncelikte duyuru ve analiz verileri yüklendi.");
 }
 
 main()
