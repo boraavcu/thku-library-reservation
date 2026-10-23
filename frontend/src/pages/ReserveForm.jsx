@@ -23,10 +23,27 @@ import CloseIcon from '@mui/icons-material/Close';
 import EventAvailableIcon from '@mui/icons-material/EventAvailable';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 
 const HOUR_START = 0;
 const HOUR_END = 24;
 const SLOT_HEIGHT = 56;
+
+const PURPOSE_PRESETS_TR = [
+  'Vize / Final Sınav Hazırlığı',
+  'Bitirme Projesi Çalışması',
+  'Grup Ödevi & Sunum Hazırlığı',
+  'Akademik Makale & Araştırma',
+  'Yazılım / Tasarım Geliştirme',
+];
+
+const PURPOSE_PRESETS_EN = [
+  'Midterm / Final Exam Prep',
+  'Capstone Project Study',
+  'Group Assignment & Presentation',
+  'Academic Research & Paper',
+  'Software / Design Development',
+];
 
 const toDateStr = (d) => {
   const yyyy = d.getFullYear();
@@ -45,7 +62,6 @@ function ReserveForm() {
 
   const [step, setStep] = useState(1);
   const [room, setRoom] = useState(null);
-  // Madde 2 & Madde 3 & Madde 9 varsayılanları: Min 2, Maks 8 Kişi, Maks 3 Saat, Maks 1 Gün
   const [rules, setRules] = useState({
     minParticipants: 2,
     maxParticipants: 8,
@@ -122,7 +138,6 @@ function ReserveForm() {
     });
   }, [today]);
 
-  // Madde 3: İleri tarih maksimum 1 gün (Yönetim panelinden değiştirilebilir)
   const maxSelectableDate = useMemo(() => {
     const advanceDays = rules.maxAdvanceDays ?? 1;
     const max = new Date(today + 'T12:00:00');
@@ -193,7 +208,6 @@ function ReserveForm() {
     updateForm({ endTime: potentialEndHour });
   };
 
-  // Madde 2: En az 2, En fazla 8 kişi
   const totalPeople = formData.participants.length + 1;
   const maxCapacity = room?.capacity || rules.maxParticipants || 8;
   const effectiveMax = Math.min(rules.maxParticipants || 8, maxCapacity);
@@ -223,7 +237,7 @@ function ReserveForm() {
         reservationDate: formData.date,
         startTime: `${String(formData.startTime).padStart(2, '0')}:00`,
         endTime: `${String(formData.endTime).padStart(2, '0')}:00`,
-        purpose: formData.purpose,
+        purpose: formData.purpose?.trim() || (currentLang === 'tr' ? 'Grup Çalışması' : 'Group Study'),
         participantEmails: formData.participants,
       });
       setSnackOpen(true);
@@ -250,6 +264,7 @@ function ReserveForm() {
   }
 
   const stripedBg = `repeating-linear-gradient(45deg, ${alpha('#e5e7eb', 0.4)}, ${alpha('#e5e7eb', 0.4)} 10px, ${alpha('#f3f4f6', 0.4)} 10px, ${alpha('#f3f4f6', 0.4)} 20px)`;
+  const purposePresets = currentLang === 'tr' ? PURPOSE_PRESETS_TR : PURPOSE_PRESETS_EN;
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
@@ -628,7 +643,7 @@ function ReserveForm() {
                   />
                 </Box>
                 <Chip
-                  label={t('rfStepIndicator', { current: 2, total: 3 })}
+                  label={t('rfStepIndicator', { current: 2, total: 2 })}
                   size="small"
                   variant="outlined"
                   sx={{
@@ -669,6 +684,48 @@ function ReserveForm() {
                   )}
                 </Alert>
               )}
+
+              {/* YENİ EKLENEN ALAN: ÇALIŞMA AMACI / KONUSU */}
+              <Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <DescriptionOutlinedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
+                  <Typography sx={{ fontWeight: 700, fontSize: '0.95rem' }}>
+                    {currentLang === 'tr' ? 'Çalışma Amacı / Konusu' : 'Study Purpose / Topic'}
+                  </Typography>
+                </Box>
+                <TextField
+                  value={formData.purpose}
+                  onChange={(e) => updateForm({ purpose: e.target.value })}
+                  placeholder={
+                    currentLang === 'tr'
+                      ? 'Örn: Bilgisayar Mühendisliği Bitirme Projesi / Aerodinamik Vize Çalışması...'
+                      : 'E.g., Senior Capstone Project / Aerodynamics Midterm Study...'
+                  }
+                  size="small"
+                  fullWidth
+                  inputProps={{ maxLength: 120 }}
+                  sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
+                />
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, flexWrap: 'wrap', mt: 1.25 }}>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, mr: 0.5 }}>
+                    {currentLang === 'tr' ? 'Hızlı Seçim:' : 'Quick Select:'}
+                  </Typography>
+                  {purposePresets.map((preset) => {
+                    const isSelected = formData.purpose === preset;
+                    return (
+                      <Chip
+                        key={preset}
+                        label={preset}
+                        size="small"
+                        variant={isSelected ? 'filled' : 'outlined'}
+                        color={isSelected ? 'primary' : 'default'}
+                        onClick={() => updateForm({ purpose: preset })}
+                        sx={{ cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600 }}
+                      />
+                    );
+                  })}
+                </Box>
+              </Box>
 
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 1.5 }}>
