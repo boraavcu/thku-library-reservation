@@ -2,235 +2,101 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
-import {
-  runReservationLifecycleChecks,
-  handleParticipantAcceptedEmails,
-} from "@/lib/lifecycle";
+import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 
-const DEFAULT_MIN = 2;
-const INVITATION_TIMEOUT_MS = 30 * 60 * 1000;
+function getIstanbulNow() {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+  const timeParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
 
-export async function POST(request) {
+  const hour = Number(timeParts.find((p) => p.type === "hour").value);
+  const minute = Number(timeParts.find((p) => p.type === "minute").value);
+  return { dateStr, hour, minute };
+}
+
+export async function GET() {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    // Arka planda çalıştır (Kullanıcının davet kabul isteğini bekletmez)
+    // 30 dakikası dolan davetleri arka planda temizle
     runReservationLifecycleChecks().catch(() => {});
 
-    const { participantId, action } = await request.json();
-
-    if (!participantId || !["ACCEPT", "REJECT"].includes(action)) {
-      return NextResponse.json({ error: "Geçersiz istek." }, { status: 400 });
-    }
-
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
-      select: { id: true, email: true, isBanned: true },
+      where: { email: session.user.email.trim().toLowerCase() },
+      select: { id: true },
     });
 
-    if (user?.isBanned && action === "ACCEPT") {
-      return NextResponse.json(
-        { error: "Hesabınız banlı olduğu için grup davetlerini kabul edemezsiniz." },
-        { status: 403 }
-      );
+    if (!user) {
+      return NextResponse.json([]);
     }
 
-    const participant = await prisma.reservationParticipant.findUnique({
-      where: { id: participantId },
+    const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
+    const todayDateObj = new Date(`${todayTrStr}T00:00:00Z`);
+    const nowTotalMins = curH * 60 + curM;
+
+    const invitations = await prisma.reservationParticipant.findMany({
+      where: {
+        userId: user.id,
+        status: "PENDING",
+        reservation: {
+          status: { in: ["PENDING", "CONFIRMED"] },
+          reservationDate: { gte: todayDateObj },
+        },
+      },
       include: {
         reservation: {
-          include: { room: { select: { roomNumber: true, name: true } } },
+          select: {
+            id: true,
+            reservationDate: true,
+            startTime: true,
+            endTime: true,
+            status: true,
+            purpose: true,
+            createdAt: true,
+            room: {
+              select: { id: true, roomNumber: true, name: true },
+            },
+            user: {
+              select: { id: true, fullName: true, email: true },
+            },
+          },
+        },
+      },
+      orderBy: {
+        reservation: {
+          reservationDate: "asc",
         },
       },
     });
 
-    if (!participant || participant.userId !== user.id) {
-      return NextResponse.json({ error: "Davet bulunamadı." }, { status: 404 });
-    }
+    // UTC saatine göre (21:00-24:00 kayması olmadan) bitiş saati geçmemiş olanları filtrele
+    const validInvitations = invitations.filter((inv) => {
+      const resDateStr = new Date(inv.reservation.reservationDate).toISOString().split("T")[0];
+      if (resDateStr > todayTrStr) return true;
+      if (resDateStr < todayTrStr) return false;
 
-    if (participant.reservation.status === "CANCELLED") {
-      return NextResponse.json(
-        { error: "Bu rezervasyon (30 dakikalık onay süresi dolduğu veya iptal edildiği için) artık geçerli değil." },
-        { status: 400 }
-      );
-    }
-
-    const elapsedMs = Date.now() - new Date(participant.reservation.createdAt).getTime();
-    if (participant.reservation.status === "PENDING" && elapsedMs > INVITATION_TIMEOUT_MS) {
-      await prisma.reservation.update({
-        where: { id: participant.reservationId },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          cancellationReason: "Gönderilen davetiyeler 30 dakika içinde onaylanmadığı için otomatik iptal edildi.",
-        },
-      });
-      return NextResponse.json(
-        { error: "30 dakikalık davet onay süresi dolduğu için bu randevu otomatik olarak iptal edilmiştir." },
-        { status: 400 }
-      );
-    }
-
-    if (participant.status !== "PENDING") {
-      return NextResponse.json({ error: "Bu davete zaten yanıt verilmiş." }, { status: 400 });
-    }
-
-    if (action === "ACCEPT") {
-      const targetDate = participant.reservation.reservationDate;
-
-      const existingBookingOnDate = await prisma.reservation.findFirst({
-        where: {
-          id: { not: participant.reservationId },
-          reservationDate: targetDate,
-          status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-          OR: [
-            { userId: user.id },
-            {
-              participants: {
-                some: { userId: user.id, status: "ACCEPTED" },
-              },
-            },
-          ],
-        },
-        select: { id: true },
-      });
-
-      if (existingBookingOnDate) {
-        return NextResponse.json(
-          { error: "Bu tarihte zaten aktif bir rezervasyonunuz bulunduğu için ikinci bir gruba katılamazsınız (Günlük 1 Rezervasyon Kuralı)." },
-          { status: 400 }
-        );
-      }
-
-      const resStartH = new Date(participant.reservation.startTime).getUTCHours();
-      const resEndDt = new Date(participant.reservation.endTime);
-      const resEndH =
-        resEndDt.getUTCHours() === 23 && resEndDt.getUTCMinutes() >= 59
+      const endDt = new Date(inv.reservation.endTime);
+      const endH =
+        endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59
           ? 24
-          : resEndDt.getUTCHours();
+          : endDt.getUTCHours();
+      const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
+      const endTotalMins = endH * 60 + endM;
 
-      if (resStartH < 8) {
-        const prevDayObj = new Date(new Date(targetDate).getTime() - 24 * 60 * 60 * 1000);
-        const prevNight = await prisma.reservation.findFirst({
-          where: {
-            reservationDate: prevDayObj,
-            status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-            endTime: { gt: new Date("1970-01-01T21:00:00Z") },
-            OR: [
-              { userId: user.id },
-              { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
-            ],
-          },
-          select: { id: true },
-        });
-
-        if (prevNight) {
-          return NextResponse.json(
-            {
-              error:
-                "Bir önceki gece 21:00 - 24:00 saatleri arasında randevunuz bulunduğu için ertesi gün 00:00 - 08:00 arasındaki bir gruba katılamazsınız.",
-            },
-            { status: 400 }
-          );
-        }
-      }
-
-      if (resEndH > 21) {
-        const nextDayObj = new Date(new Date(targetDate).getTime() + 24 * 60 * 60 * 1000);
-        const nextMorning = await prisma.reservation.findFirst({
-          where: {
-            reservationDate: nextDayObj,
-            status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-            startTime: { lt: new Date("1970-01-01T08:00:00Z") },
-            OR: [
-              { userId: user.id },
-              { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
-            ],
-          },
-          select: { id: true },
-        });
-
-        if (nextMorning) {
-          return NextResponse.json(
-            {
-              error:
-                "Ertesi gün 00:00 - 08:00 saatleri arasında randevunuz bulunduğu için bir önceki gece 21:00 - 24:00 arasındaki gruba katılamazsınız.",
-            },
-            { status: 400 }
-          );
-        }
-      }
-    }
-
-    const newStatus = action === "ACCEPT" ? "ACCEPTED" : "REJECTED";
-
-    await prisma.reservationParticipant.update({
-      where: { id: participantId },
-      data: {
-        status: newStatus,
-        joinedAt: new Date(),
-      },
+      return endTotalMins > nowTotalMins;
     });
 
-    if (action === "ACCEPT") {
-      const acceptedCount = await prisma.reservationParticipant.count({
-        where: {
-          reservationId: participant.reservationId,
-          status: "ACCEPTED",
-        },
-      });
-
-      const minRule = await prisma.reservationRule.findFirst({
-        where: { ruleName: "MIN_PARTICIPANTS", isActive: true },
-        select: { ruleValue: true },
-      });
-      const minP = minRule?.ruleValue?.value ?? DEFAULT_MIN;
-
-      const totalConfirmed = 1 + acceptedCount;
-
-      if (totalConfirmed >= minP) {
-        const transitionResult = await prisma.reservation.updateMany({
-          where: {
-            id: participant.reservationId,
-            status: "PENDING",
-          },
-          data: { status: "CONFIRMED" },
-        });
-
-        const isInitialConfirmation = transitionResult.count === 1;
-
-        // E-posta kuyruğa alma ve gönderimi arka planda tetiklenir
-        handleParticipantAcceptedEmails({
-          reservationId: participant.reservationId,
-          acceptingUserId: user.id,
-          isInitialConfirmation,
-        }).catch((err) => console.error("Background email error:", err));
-      }
-    }
-
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        action: action === "ACCEPT" ? "INVITATION_ACCEPTED" : "INVITATION_REJECTED",
-        entityType: "Reservation",
-        entityId: participant.reservationId,
-        newData: {
-          participantEmail: user.email,
-          room: participant.reservation.room?.roomNumber,
-          response: newStatus,
-        },
-      },
-    });
-
-    return NextResponse.json({
-      success: true,
-      message: action === "ACCEPT" ? "Davet kabul edildi." : "Davet reddedildi.",
-    });
+    return NextResponse.json(validInvitations);
   } catch (error) {
-    console.error("Invitation respond error:", error);
-    return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 });
+    console.error("Invitations GET error:", error);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

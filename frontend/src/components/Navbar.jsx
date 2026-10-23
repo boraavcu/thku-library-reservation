@@ -45,6 +45,7 @@ export default function Navbar() {
   const [readIds, setReadIds] = useState([]);
   const [selectedNotif, setSelectedNotif] = useState(null);
 
+  const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role);
   const storageKey = session?.user?.email ? `thku_read_notifs_${session.user.email}` : 'thku_read_notifs';
 
   useEffect(() => {
@@ -127,7 +128,7 @@ export default function Navbar() {
 
             {/* Sol - THKÜ Logo */}
             <Box
-              onClick={() => navigate(['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) ? '/admin' : '/dashboard')}
+              onClick={() => navigate(isStaff && location.pathname === '/admin' ? '/admin' : isStaff ? '/dashboard?studentView=true' : '/dashboard')}
               sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: 'pointer' }}
             >
               <Avatar
@@ -151,15 +152,15 @@ export default function Navbar() {
               </Box>
             </Box>
 
-{/* Orta - Rol Bazlı Menü Bağlantıları */}
+            {/* Orta - Rol Bazlı Menü Bağlantıları */}
             <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
-              {['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) ? (
+              {isStaff && location.pathname === '/admin' ? (
                 <>
                   <Button
                     onClick={() => navigate('/admin')}
                     sx={{
-                      color: location.pathname === '/admin' ? 'primary.main' : 'text.primary',
-                      bgcolor: location.pathname === '/admin' ? 'action.hover' : 'transparent',
+                      color: 'primary.main',
+                      bgcolor: 'action.hover',
                       fontWeight: 700,
                       fontSize: '0.875rem',
                       px: 2,
@@ -169,7 +170,7 @@ export default function Navbar() {
                     {isEn ? 'Management & Analytics Center' : 'Yönetim & Analiz Merkezi'}
                   </Button>
                   <Button
-                    onClick={() => window.open('/kiosk', '_blank')}
+                    onClick={() => navigate('/kiosk')}
                     sx={{
                       color: 'text.secondary',
                       fontWeight: 600,
@@ -182,21 +183,33 @@ export default function Navbar() {
                   </Button>
                 </>
               ) : (
-                NAV_LINKS.map(item => (
-                  <Button
-                    key={item.path}
-                    onClick={() => navigate(item.path)}
-                    sx={{
-                      color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
-                      bgcolor: location.pathname === item.path ? 'action.hover' : 'transparent',
-                      fontWeight: location.pathname === item.path ? 700 : 500,
-                      fontSize: '0.875rem', px: 2,
-                      '&:hover': { bgcolor: 'action.hover' },
-                    }}
-                  >
-                    {t(item.labelKey)}
-                  </Button>
-                ))
+                <>
+                  {NAV_LINKS.map(item => (
+                    <Button
+                      key={item.path}
+                      onClick={() => navigate(item.path === '/dashboard' && isStaff ? '/dashboard?studentView=true' : item.path)}
+                      sx={{
+                        color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
+                        bgcolor: location.pathname === item.path ? 'action.hover' : 'transparent',
+                        fontWeight: location.pathname === item.path ? 700 : 500,
+                        fontSize: '0.875rem', px: 2,
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      {t(item.labelKey)}
+                    </Button>
+                  ))}
+                  {isStaff && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      onClick={() => navigate('/admin')}
+                      sx={{ ml: 1, fontWeight: 700, fontSize: '0.78rem', borderRadius: 2 }}
+                    >
+                      {isEn ? 'Back to Admin' : 'Yönetim Merkezine Dön'}
+                    </Button>
+                  )}
+                </>
               )}
             </Box>
 
@@ -383,12 +396,10 @@ export default function Navbar() {
                   <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('profile')}</Typography>
                 </MenuItem>
 
-                {!['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) && (
-                  <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
-                    <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
-                  </MenuItem>
-                )}
+                <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                  <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                  <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
+                </MenuItem>
 
                 <MenuItem onClick={() => navigate('/rules?view=true')} sx={{ py: 1, px: 2, gap: 1.25 }}>
                   <GavelIcon sx={{ fontSize: 18, color: 'text.secondary' }} />

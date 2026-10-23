@@ -208,7 +208,18 @@ function ReserveForm() {
     updateForm({ endTime: potentialEndHour });
   };
 
-  const totalPeople = formData.participants.length + 1;
+  // Kullanıcı e-postayı kutuya yazıp "Ekle" butonuna basmayı unutsa bile otomatik dahil edilir
+  const pendingTypedEmail = emailInput.trim().toLowerCase();
+  const hasValidTypedEmail =
+    pendingTypedEmail.includes('@') &&
+    pendingTypedEmail !== session?.user?.email?.toLowerCase() &&
+    !formData.participants.includes(pendingTypedEmail);
+
+  const effectiveParticipants = hasValidTypedEmail
+    ? [...formData.participants, pendingTypedEmail]
+    : formData.participants;
+
+  const totalPeople = effectiveParticipants.length + 1;
   const maxCapacity = room?.capacity || rules.maxParticipants || 8;
   const effectiveMax = Math.min(rules.maxParticipants || 8, maxCapacity);
   const isCountValid = totalPeople >= (rules.minParticipants || 2) && totalPeople <= effectiveMax;
@@ -218,7 +229,7 @@ function ReserveForm() {
     if (!email || !email.includes('@')) return;
     if (email === session?.user?.email?.toLowerCase()) return;
     if (formData.participants.includes(email)) return;
-    if (totalPeople >= effectiveMax) return;
+    if (formData.participants.length + 1 >= effectiveMax) return;
     updateForm({ participants: [...formData.participants, email] });
     setEmailInput('');
   };
@@ -238,7 +249,7 @@ function ReserveForm() {
         startTime: `${String(formData.startTime).padStart(2, '0')}:00`,
         endTime: `${String(formData.endTime).padStart(2, '0')}:00`,
         purpose: formData.purpose?.trim() || (currentLang === 'tr' ? 'Grup Çalışması' : 'Group Study'),
-        participantEmails: formData.participants,
+        participantEmails: effectiveParticipants,
       });
       setSnackOpen(true);
       setTimeout(() => navigate('/dashboard'), 1500);
@@ -685,7 +696,7 @@ function ReserveForm() {
                 </Alert>
               )}
 
-              {/* YENİ EKLENEN ALAN: ÇALIŞMA AMACI / KONUSU */}
+              {/* ÇALIŞMA AMACI / KONUSU */}
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                   <DescriptionOutlinedIcon sx={{ fontSize: 20, color: 'primary.main' }} />

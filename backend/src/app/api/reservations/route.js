@@ -1,4 +1,7 @@
-import { runReservationLifecycleChecks } from "@/lib/lifecycle";
+import {
+  runReservationLifecycleChecks,
+  sendReservationCancelledEmails,
+} from "@/lib/lifecycle";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
@@ -6,12 +9,11 @@ import prisma from "@/lib/db";
 import { checkRulesAcceptance } from "@/middleware/checkRulesAcceptance";
 
 const DEFAULT_MIN = 2;
-const DEFAULT_MAX = 8; 
-const DEFAULT_MAX_HOURS = 3; 
-const DEFAULT_MAX_ADVANCE_DAYS = 1; 
+const DEFAULT_MAX = 8;
+const DEFAULT_MAX_HOURS = 3;
+const DEFAULT_MAX_ADVANCE_DAYS = 1;
 const EXCLUDED_STATUSES = ["CANCELLED", "NO_SHOW"];
 
-// Türkiye saatini (Europe/Istanbul) parçalı olarak döner
 function getIstanbulNow() {
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
@@ -45,7 +47,7 @@ export async function POST(request) {
     }
 
     const creator = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { email: session.user.email.trim().toLowerCase() },
       select: { id: true, email: true, fullName: true, isBanned: true, banUntil: true, banReason: true },
     });
 
@@ -54,7 +56,7 @@ export async function POST(request) {
     }
 
     if (creator.isBanned) {
-      const banDateStr = creator.banUntil ? new Date(creator.banUntil).toLocaleDateString("tr-TR") : "Dönem Sonu";
+      const banDateStr = creator.banUntil ? new Date(creator.banUntil).toLocaleDateString("tr-TR") : "Kalıcı (Süresiz)";
       return NextResponse.json(
         { error: `Hesabınız (${banDateStr} tarihine kadar) askıya alınmıştır. Sebep: ${creator.banReason || "Kural ihlali"}` },
         { status: 403 }
@@ -88,7 +90,7 @@ export async function POST(request) {
       select: { ruleName: true, ruleValue: true },
     });
     const rulesMap = Object.fromEntries(rulesRows.map((r) => [r.ruleName, r.ruleValue]));
-    const minP = rulesMap.MIN_PARTICIPANTS?.value ?? DEFAULT_MIN;
+    const minP = Math.max(2, rulesMap.MIN_PARTICIPANTS?.value ?? DEFAULT_MIN);
     const maxP = Math.min(roomRecord.capacity || DEFAULT_MAX, rulesMap.MAX_PARTICIPANTS?.value ?? DEFAULT_MAX);
     const maxDurationHours = rulesMap.MAX_DURATION_HOURS?.value ?? DEFAULT_MAX_HOURS;
     const maxAdvanceDays = rulesMap.MAX_ADVANCE_DAYS?.value ?? DEFAULT_MAX_ADVANCE_DAYS;
@@ -103,7 +105,6 @@ export async function POST(request) {
 
     const dateObj = new Date(reservationDate + "T00:00:00Z");
 
-    // --- MADDE 3: İleri Tarih Sınırı Kontrolü (Varsayılan Maksimum 1 Gün) ---
     const { dateStr: todayTrStr } = getIstanbulNow();
     const todayUtcObj = new Date(todayTrStr + "T00:00:00Z");
     const diffDays = Math.round((dateObj.getTime() - todayUtcObj.getTime()) / (24 * 60 * 60 * 1000));
@@ -135,7 +136,6 @@ export async function POST(request) {
       );
     }
 
-    // --- Katılımcı E-posta ve Ban Doğrulama ---
     let participantUsers = [];
     if (cleanedEmails.length > 0) {
       const foundUsers = await prisma.user.findMany({
@@ -166,7 +166,6 @@ export async function POST(request) {
 
     const allGroupUserIds = [creator.id, ...participantUsers.map((u) => u.id)];
 
-    // --- Günlük 1 Rezervasyon Limiti (Organizatör ve Onaylı Katılımcılar Dahil) ---
     const existingGroupBookingToday = await prisma.reservation.findFirst({
       where: {
         reservationDate: dateObj,
@@ -214,9 +213,6 @@ export async function POST(request) {
       );
     }
 
-    // Gece 21:00-24:00 Alanların Ertesi Gün 00:00-08:00 Arası Randevu Alamaması 
-    // Senaryo A: Yeni alınan randevu sabah 00:00 - 08:00 arasına değiyorsa (startHourNum < 8),
-    // bir önceki gün 21:00 - 24:00 arasına değen (endTime > 21:00) randevusu var mı kontrol et.
     if (startHourNum < 8) {
       const prevDayObj = new Date(dateObj.getTime() - 24 * 60 * 60 * 1000);
       const nightThreshold = new Date("1970-01-01T21:00:00Z");
@@ -245,8 +241,6 @@ export async function POST(request) {
       }
     }
 
-    // Senaryo B: Yeni alınan randevu gece 21:00 - 24:00 arasına değiyorsa (endHourNum > 21),
-    // ertesi gün 00:00 - 08:00 arasında halihazırda alınmış randevusu var mı kontrol et.
     if (endHourNum > 21) {
       const nextDayObj = new Date(dateObj.getTime() + 24 * 60 * 60 * 1000);
       const morningThreshold = new Date("1970-01-01T08:00:00Z");
@@ -275,7 +269,6 @@ export async function POST(request) {
       }
     }
 
-    // --- Oda Saat Çakışma Kontrolü ---
     const overlapping = await prisma.reservation.findFirst({
       where: {
         roomId,
@@ -293,7 +286,6 @@ export async function POST(request) {
       );
     }
 
-    // P2002 Koruması: Aynı saatte daha önce CANCELLED olan kayıt varsa temizle
     await prisma.reservation.deleteMany({
       where: {
         userId: creator.id,
@@ -303,7 +295,8 @@ export async function POST(request) {
       },
     });
 
-    const initialStatus = minP <= 1 ? "CONFIRMED" : "PENDING";
+    // Rezervasyon her zaman PENDING başlar; en az 2. kişi kabul ettiğinde CONFIRMED olur
+    const initialStatus = "PENDING";
 
     const reservation = await prisma.reservation.create({
       data: {
@@ -312,7 +305,7 @@ export async function POST(request) {
         reservationDate: dateObj,
         startTime: startObj,
         endTime: endObj,
-        purpose: purpose || null,
+        purpose: purpose || "Grup Çalışması",
         status: initialStatus,
         ...(participantUsers.length > 0 && {
           participants: {
@@ -359,7 +352,7 @@ export async function POST(request) {
 }
 
 export async function GET() {
-  await runReservationLifecycleChecks();
+  runReservationLifecycleChecks().catch(() => {});
   const rulesCheck = await checkRulesAcceptance();
   if (rulesCheck) return rulesCheck;
 
@@ -370,7 +363,7 @@ export async function GET() {
 
   try {
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { email: session.user.email.trim().toLowerCase() },
       select: { id: true },
     });
 
@@ -400,7 +393,8 @@ export async function GET() {
 
 /**
  * PATCH /api/reservations ->
- * Yalnızca EARLY_CHECKOUT (Odayı Erken Boşaltma - Madde 13) işlemini yapar.
+ * Yalnızca EARLY_CHECKOUT (Odayı Erken Boşaltma) işlemini yapar.
+ * KURAL: Yalnızca randevu günü ve randevu saat aralığı başladıktan sonra (randevu sırasında) yapılabilir!
  */
 export async function PATCH(request) {
   const session = await getServerSession(authOptions);
@@ -418,7 +412,7 @@ export async function PATCH(request) {
     }
 
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { email: session.user.email.trim().toLowerCase() },
       select: { id: true, email: true, fullName: true, role: true },
     });
 
@@ -439,9 +433,28 @@ export async function PATCH(request) {
       );
     }
 
-    const { hour: curH, minute: curM } = getIstanbulNow();
+    const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
+    const resDateStr = new Date(reservation.reservationDate).toISOString().split("T")[0];
     const origStartH = new Date(reservation.startTime).getUTCHours();
-    const origEndH = new Date(reservation.endTime).getUTCHours();
+    const origStartM = new Date(reservation.startTime).getUTCMinutes();
+    const endDt = new Date(reservation.endTime);
+    const origEndH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+    const origEndM = origEndH === 24 ? 0 : endDt.getUTCMinutes();
+
+    const nowTotalMins = curH * 60 + curM;
+    const startTotalMins = origStartH * 60 + origStartM;
+    const endTotalMins = origEndH * 60 + origEndM;
+
+    const isHappeningNow =
+      reservation.status === "CHECKED_IN" ||
+      (resDateStr === todayTrStr && nowTotalMins >= startTotalMins && nowTotalMins < endTotalMins);
+
+    if (!isStaff && !isHappeningNow) {
+      return NextResponse.json(
+        { error: "Odayı erken boşaltma işlemi yalnızca randevu saatiniz başladıktan sonra (randevu sırasında) yapılabilir." },
+        { status: 400 }
+      );
+    }
 
     let newEndObj = reservation.endTime;
     if (curH >= origStartH && curH < origEndH) {
@@ -486,6 +499,7 @@ export async function PATCH(request) {
 /**
  * DELETE /api/reservations ->
  * Randevu başlangıcına 1 saatten (60 dk) az kaldıysa öğrenci iptal edemez!
+ * İptal edildiğinde tüm grubun rezervasyonu iptal olur; herkese ve (onaylıysa) Kütüphane Müdürüne iptal maili gider.
  */
 export async function DELETE(request) {
   const session = await getServerSession(authOptions);
@@ -502,7 +516,7 @@ export async function DELETE(request) {
     }
 
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { email: session.user.email.trim().toLowerCase() },
       select: { id: true, email: true, role: true },
     });
 
@@ -530,7 +544,6 @@ export async function DELETE(request) {
       );
     }
 
-    // --- MADDE 5: Son 1 Saat (60 Dakika) İptal Kilidi ---
     if (!isStaff) {
       const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
       const resDateStr = new Date(reservation.reservationDate).toISOString().split("T")[0];
@@ -548,16 +561,17 @@ export async function DELETE(request) {
         return NextResponse.json(
           {
             error:
-              "Rezervasyon başlangıç saatine 1 saatten (60 dk) az kaldığı için iptal edilemez. Ceza/uyarı almamak için odaya gelip Kiosk kodunuzu girmeniz gerekmektedir.",
+              "Rezervasyon başlangıç saatine 1 saatten (60 dk) az kaldığı için iptal edilemez. Ceza/uyarı almamak için odaya gelip kapı QR onayınızı vermeniz gerekmektedir.",
           },
           { status: 400 }
         );
       }
     }
 
+    const wasConfirmed = ["CONFIRMED", "CHECKED_IN"].includes(reservation.status);
     const reasonText = isStaff
-      ? "Kütüphane görevlisi tarafından iptal edildi"
-      : "Organizatör tarafından başlangıçtan en az 1 saat önce iptal edildi";
+      ? `Kütüphane yetkilisi (${user.email}) tarafından iptal edildi`
+      : `Organizatör (${user.email}) tarafından başlangıçtan en az 1 saat önce iptal edildi`;
 
     await prisma.reservation.update({
       where: { id: reservationId },
@@ -578,6 +592,14 @@ export async function DELETE(request) {
         newData: { status: "CANCELLED", cancelledBy: user.email, reason: reasonText },
       },
     });
+
+    // Tüm grup üyelerine ve (onaylıysa) Kütüphane Müdürüne kurumsal iptal e-postası gönder
+    sendReservationCancelledEmails({
+      reservationId,
+      cancelledByEmail: user.email,
+      reason: reasonText,
+      wasConfirmed,
+    }).catch((err) => console.error("Cancel email error:", err));
 
     return NextResponse.json({ success: true });
   } catch (error) {

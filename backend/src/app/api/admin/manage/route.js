@@ -8,7 +8,9 @@ import {
   sendNoShowWarningEmail,
   sendKioskCheckInEmailToStaff,
   queueSafeEmail,
+  sendReservationCancelledEmails,
 } from "@/lib/lifecycle";
+
 
 const ALLOWED_ROLES = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"];
 
@@ -39,7 +41,7 @@ export async function GET() {
   }
 
   try {
-    await runReservationLifecycleChecks();
+    runReservationLifecycleChecks().catch(() => {});
 
     const now = new Date();
     const days180Ago = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
@@ -259,6 +261,21 @@ export async function POST(request) {
         data: { isActive: Boolean(isActive) },
       });
 
+      // Oda bakıma alındıysa (kapatıldıysa) o odadaki bekleyen/onaylı randevuları cezasız iptal et
+      if (!isActive) {
+        await prisma.reservation.updateMany({
+          where: {
+            roomId,
+            status: { in: ["PENDING", "CONFIRMED"] },
+          },
+          data: {
+            status: "CANCELLED",
+            cancelledAt: new Date(),
+            cancellationReason: `${room.roomNumber} (${room.name}) odası teknik bakıma alındığı için cezasız iptal edildi.`,
+          },
+        });
+      }
+
       await prisma.adminAction.create({
         data: {
           adminId,
@@ -379,7 +396,11 @@ export async function POST(request) {
           where: { id: reservationId },
           data: { status: "CHECKED_IN", checkedInAt: new Date(), checkedInById: adminId },
         });
-        await sendKioskCheckInEmailToStaff(reservationId, session.user.email);
+        const allMemberIds = [
+          target.user.id,
+          ...target.participants.map((p) => p.user.id),
+        ];
+        sendKioskCheckInEmailToStaff(reservationId, allMemberIds).catch(() => {});
         await prisma.adminAction.create({
           data: {
             adminId,
@@ -412,15 +433,19 @@ export async function POST(request) {
             description: `${target.room.roomNumber} odası erken boşaltıldı (COMPLETED) ve kalan süre boşa çıkarıldı.`,
           },
         });
-      } else if (op === "CANCEL") {
+} else if (op === "CANCEL") {
+        const wasConfirmed = ["CONFIRMED", "CHECKED_IN"].includes(target.status);
+        const cancelReasonText = `Kütüphane görevlisi (${session.user.email}) tarafından iptal edildi.`;
+
         await prisma.reservation.update({
           where: { id: reservationId },
           data: {
             status: "CANCELLED",
             cancelledAt: new Date(),
-            cancellationReason: `Kütüphane görevlisi (${session.user.email}) tarafından iptal edildi.`,
+            cancellationReason: cancelReasonText,
           },
         });
+
         await prisma.adminAction.create({
           data: {
             adminId,
@@ -430,7 +455,16 @@ export async function POST(request) {
             description: `${target.room.roomNumber} rezervasyonu görevli tarafından iptal edildi.`,
           },
         });
-      } else if (op === "MARK_NO_SHOW") {
+
+        // Yönetim panelinden iptal edildiğinde de tüm gruba ve (onaylıysa) müdüre mail gönder
+        sendReservationCancelledEmails({
+          reservationId,
+          cancelledByEmail: session.user.email,
+          reason: cancelReasonText,
+          wasConfirmed,
+        }).catch((err) => console.error("Admin cancel email error:", err));
+      }
+       else if (op === "MARK_NO_SHOW") {
         const checkedSetKey = `kiosk:checked_users:${reservationId}`;
         const checkedUserIds = await redis.smembers(checkedSetKey);
 
@@ -697,8 +731,6 @@ export async function POST(request) {
           },
         });
       } else if (modType === "CHANGE_ROLE") {
-        // SIKI ROL HİYERARŞİSİ KURALI:
-        // 1) ADMIN, mevcut bir ADMIN veya SUPER_ADMIN'in rolünü değiştiremez!
         if (currentRole === "ADMIN" && ["ADMIN", "SUPER_ADMIN"].includes(targetUser.role)) {
           return NextResponse.json(
             { error: "Yetki Kuralı: Kütüphane Müdürü (ADMIN), başka bir Admin veya Super Admin'in yetkisini değiştiremez." },
@@ -706,7 +738,6 @@ export async function POST(request) {
           );
         }
 
-        // 2) ADMIN, kimseye ADMIN veya SUPER_ADMIN rolü atayamaz! Sadece LIBRARIAN (veya STUDENT) atayabilir.
         if (currentRole === "ADMIN" && !["STUDENT", "LIBRARIAN"].includes(role)) {
           return NextResponse.json(
             { error: "Yetki Kuralı: Admin sadece Görevli (LIBRARIAN) atayabilir. Admin ve Super Admin atama yetkisi yalnızca BİM (SUPER_ADMIN) rolündedir." },

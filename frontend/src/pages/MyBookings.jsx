@@ -59,7 +59,9 @@ export default function MyBookings() {
       await api.delete(`/reservations?id=${id}`);
       setSnack({
         open: true,
-        message: isEn ? 'Reservation cancelled.' : 'Rezervasyon başarıyla iptal edildi ve oda boşa çıkarıldı.',
+        message: isEn
+          ? 'Reservation cancelled and notification emails sent.'
+          : 'Rezervasyon tüm grup için iptal edildi ve bilgilendirme mailleri gönderildi.',
         severity: 'info',
       });
       fetchAllData();
@@ -115,7 +117,8 @@ export default function MyBookings() {
     });
   };
 
-  const isWithinOneHourOfStart = (res) => {
+  // Randevunun zaman durumunu hesaplar (Başlamasına 1 saatten az mı kaldı, yoksa şu an randevu sırasında mıyız?)
+  const getReservationTimingState = (res) => {
     const now = new Date();
     const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
     const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
@@ -127,12 +130,30 @@ export default function MyBookings() {
 
     const startH = new Date(res.startTime).getUTCHours();
     const startM = new Date(res.startTime).getUTCMinutes();
+    const endDt = new Date(res.endTime);
+    const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+    const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
+
     const resStartEpochMins =
       Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
       startH * 60 +
       startM;
 
-    return resStartEpochMins - nowEpochMins < 60;
+    const resEndEpochMins =
+      Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
+      endH * 60 +
+      endM;
+
+    const isHappeningNow =
+      res.status === 'CHECKED_IN' ||
+      ( ['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
+        nowEpochMins >= resStartEpochMins &&
+        nowEpochMins < resEndEpochMins );
+
+    const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
+    const cancelLocked = resStartEpochMins - nowEpochMins < 60;
+
+    return { isHappeningNow, hasStarted, cancelLocked };
   };
 
   const activeList = reservations.filter(r => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status));
@@ -199,7 +220,8 @@ export default function MyBookings() {
                     const acceptedParticipants = (res.participants || []).filter(p => p.status === 'ACCEPTED');
                     const totalConfirmedPeople = 1 + acceptedParticipants.length;
                     const roomCapacity = res.room?.capacity || 8;
-                    const cancelLocked = isWithinOneHourOfStart(res);
+
+                    const { isHappeningNow, hasStarted, cancelLocked } = getReservationTimingTiming(res);
                     const showOrganizerActions = tab === 0 && isOrganizer && ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(res.status);
 
                     return (
@@ -263,7 +285,8 @@ export default function MyBookings() {
                           <>
                             <Divider />
                             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                              {['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
+                              {/* Odayı Erken Boşalt YALNIZCA randevu saatleri başladıktan sonra (randevu sırasında) görünür */}
+                              {isHappeningNow && (
                                 <Button
                                   variant="contained"
                                   color="info"
@@ -275,12 +298,13 @@ export default function MyBookings() {
                                 </Button>
                               )}
 
-                              {['PENDING', 'CONFIRMED'].includes(res.status) && (
+                              {/* İptal Et butonu randevu saati başlamadan önce görünür (Son 1 saat kala kilitlenir) */}
+                              {!hasStarted && ['PENDING', 'CONFIRMED'].includes(res.status) && (
                                 <Tooltip
                                   title={
                                     cancelLocked
                                       ? 'Randevu başlangıcına 1 saatten az kaldığı için iptal edilemez.'
-                                      : 'Randevuyu iptal et'
+                                      : 'Randevuyu tüm grup için iptal et'
                                   }
                                 >
                                   <span>
@@ -349,4 +373,42 @@ export default function MyBookings() {
       </Snackbar>
     </Box>
   );
+}
+
+function getReservationTimingTiming(res) {
+  const now = new Date();
+  const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+  const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
+
+  const nowEpochMins =
+    Math.floor(new Date(todayIso + 'T00:00:00Z').getTime() / 60000) +
+    now.getHours() * 60 +
+    now.getMinutes();
+
+  const startH = new Date(res.startTime).getUTCHours();
+  const startM = new Date(res.startTime).getUTCMinutes();
+  const endDt = new Date(res.endTime);
+  const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+  const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
+
+  const resStartEpochMins =
+    Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
+    startH * 60 +
+    startM;
+
+  const resEndEpochMins =
+    Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
+    endH * 60 +
+    endM;
+
+  const isHappeningNow =
+    res.status === 'CHECKED_IN' ||
+    (['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
+      nowEpochMins >= resStartEpochMins &&
+      nowEpochMins < resEndEpochMins);
+
+  const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
+  const cancelLocked = resStartEpochMins - nowEpochMins < 60;
+
+  return { isHappeningNow, hasStarted, cancelLocked };
 }

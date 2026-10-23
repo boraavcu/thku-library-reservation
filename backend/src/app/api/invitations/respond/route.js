@@ -17,7 +17,7 @@ export async function POST(request) {
   }
 
   try {
-    await runReservationLifecycleChecks();
+    runReservationLifecycleChecks().catch(() => {});
 
     const { participantId, action } = await request.json();
 
@@ -26,7 +26,7 @@ export async function POST(request) {
     }
 
     const user = await prisma.user.findUnique({
-      where: { email: session.user.email },
+      where: { email: session.user.email.trim().toLowerCase() },
       select: { id: true, email: true, isBanned: true },
     });
 
@@ -186,13 +186,12 @@ export async function POST(request) {
         where: { ruleName: "MIN_PARTICIPANTS", isActive: true },
         select: { ruleValue: true },
       });
-      const minP = minRule?.ruleValue?.value ?? DEFAULT_MIN;
+      const minP = Math.max(2, minRule?.ruleValue?.value ?? DEFAULT_MIN);
 
+      // Organizatör (1) + Kabul Eden Davetliler (acceptedCount)
       const totalConfirmed = 1 + acceptedCount;
 
       if (totalConfirmed >= minP) {
-        // Sadece 2. kişi kabul ettiğinde status "PENDING" -> "CONFIRMED" olur ve transitionResult.count = 1 döner.
-        // 3., 4., 5. kişi kabul ettiğinde randevu zaten "CONFIRMED" olduğu için count = 0 döner.
         const transitionResult = await prisma.reservation.updateMany({
           where: {
             id: participant.reservationId,
@@ -201,13 +200,17 @@ export async function POST(request) {
           data: { status: "CONFIRMED" },
         });
 
-        const isInitialConfirmation = transitionResult.count === 1;
+        // Tam 2. kişi onayladığında (totalConfirmed === minP) veya PENDING -> CONFIRMED geçişi olduğunda
+        // Kütüphane Müdürüne (boraa-35@hotmail.com) ve organizatöre mail gönderilir.
+        // 3., 4., 5. kişi onayladığında (totalConfirmed > minP) müdüre tekrar mail gitmez!
+        const isInitialConfirmation =
+          transitionResult.count === 1 || totalConfirmed === minP;
 
-        await handleParticipantAcceptedEmails({
+        handleParticipantAcceptedEmails({
           reservationId: participant.reservationId,
           acceptingUserId: user.id,
           isInitialConfirmation,
-        });
+        }).catch((err) => console.error("Background email error:", err));
       }
     }
 

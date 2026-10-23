@@ -1,10 +1,11 @@
-import { Box, Container, Typography, Avatar, Chip, Stack, Divider } from '@mui/material';
+import { Box, Container, Typography, Avatar, Chip, Stack, Divider, Tooltip } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
-import CodeIcon from '@mui/icons-material/Code';
+import LinkedInIcon from '@mui/icons-material/LinkedIn';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
 const THKU_LOGO = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
+const DEVELOPER_LINKEDIN = "https://www.linkedin.com/in/bora-avcu-b75a26204/";
 
 export default function Footer() {
   const theme = useTheme();
@@ -88,21 +89,36 @@ export default function Footer() {
             </Typography>
           </Stack>
 
-          {/* Sağ: Developer İmza Rozeti */}
-          <Chip
-            label="Developed By: Bora Avcu"
-            size="small"
-            sx={{
-              bgcolor: alpha(theme.palette.primary.main, 0.08),
-              color: 'text.primary',
-              fontWeight: 700,
-              fontSize: '0.75rem',
-              px: 0.75,
-              height: 28,
-              border: '1px solid',
-              borderColor: alpha(theme.palette.primary.main, 0.2),
-            }}
-          />
+          {/* Sağ: Developer İmza Rozeti (LinkedIn Profil Yönlendirmeli) */}
+          <Tooltip title={isEn ? 'View Bora Avcu on LinkedIn' : 'Bora Avcu LinkedIn Profilini Görüntüle'}>
+            <Chip
+              component="a"
+              href={DEVELOPER_LINKEDIN}
+              target="_blank"
+              rel="noopener noreferrer"
+              clickable
+              icon={<LinkedInIcon sx={{ fontSize: '16px !important', color: '#0A66C2 !important' }} />}
+              label="Developed By: Bora Avcu"
+              size="small"
+              sx={{
+                bgcolor: alpha(theme.palette.primary.main, 0.08),
+                color: 'text.primary',
+                fontWeight: 700,
+                fontSize: '0.75rem',
+                px: 0.75,
+                height: 28,
+                border: '1px solid',
+                borderColor: alpha(theme.palette.primary.main, 0.2),
+                textDecoration: 'none',
+                transition: 'all 0.2s ease',
+                '&:hover': {
+                  bgcolor: alpha('#0A66C2', 0.14),
+                  borderColor: '#0A66C2',
+                  transform: 'translateY(-1px)',
+                },
+              }}
+            />
+          </Tooltip>
         </Stack>
       </Container>
     </Box>

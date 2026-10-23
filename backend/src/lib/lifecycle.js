@@ -11,11 +11,7 @@ const SAFE_EMAIL_WHITELIST = new Set([
   ALLOWED_DIRECTOR_EMAIL.toLowerCase(),
 ]);
 
-let cachedTransporter = null;
-
-function getSmtpTransporter() {
-  if (cachedTransporter) return cachedTransporter;
-
+function createFreshTransporter() {
   const smtpHost = process.env.SMTP_HOST?.trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const smtpUser = process.env.SMTP_USER?.trim();
@@ -26,10 +22,7 @@ function getSmtpTransporter() {
   const createTransportFn =
     nodemailer.createTransport || nodemailer.default?.createTransport;
 
-  cachedTransporter = createTransportFn.call(nodemailer, {
-    pool: true,
-    maxConnections: 3,
-    maxMessages: 50,
+  return createTransportFn.call(nodemailer, {
     host: smtpHost,
     port: smtpPort,
     secure: smtpPort === 465,
@@ -41,8 +34,6 @@ function getSmtpTransporter() {
       rejectUnauthorized: false,
     },
   });
-
-  return cachedTransporter;
 }
 
 /**
@@ -200,6 +191,7 @@ export async function queueSafeEmail({ to, subject, body, htmlBody = null, prior
   if (!to) return;
   const normalizedTo = to.trim().toLowerCase();
 
+  // Demo sırasında yalnızca s250444902@stu.thk.edu.tr ve boraa-35@hotmail.com adreslerine gerçek mail gönderilir
   if (!SAFE_EMAIL_WHITELIST.has(normalizedTo)) {
     return;
   }
@@ -215,7 +207,7 @@ export async function queueSafeEmail({ to, subject, body, htmlBody = null, prior
     },
   });
 
-  const transporter = getSmtpTransporter();
+  const transporter = createFreshTransporter();
   const smtpUser = process.env.SMTP_USER?.trim();
 
   if (!transporter || !smtpUser) {
@@ -223,38 +215,38 @@ export async function queueSafeEmail({ to, subject, body, htmlBody = null, prior
     return;
   }
 
-  Promise.resolve().then(async () => {
-    try {
-      await transporter.sendMail({
-        from: process.env.SMTP_FROM || `"THKÜ Kütüphane Sistemi" <${smtpUser}>`,
-        to: normalizedTo,
-        subject,
-        text: body,
-        ...(htmlBody && { html: htmlBody }),
-      });
+  console.log(`📧 [E-POSTA GÖNDERİLİYOR] Alıcı: ${normalizedTo} | Konu: ${subject}`);
 
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || `"THKÜ Kütüphane Sistemi" <${smtpUser}>`,
+      to: normalizedTo,
+      subject,
+      text: body,
+      ...(htmlBody && { html: htmlBody }),
+    });
+
+    await prisma.emailQueue.update({
+      where: { id: queued.id },
+      data: { status: "SENT", sentAt: new Date() },
+    });
+    console.log(`✅ [KURUMSAL E-POSTA İLETİLDİ] -> ${normalizedTo} | Konu: ${subject}`);
+  } catch (smtpErr) {
+    console.error(`❌ [SMTP GÖNDERİM HATASI] (${normalizedTo}):`, smtpErr.message);
+    try {
       await prisma.emailQueue.update({
         where: { id: queued.id },
-        data: { status: "SENT", sentAt: new Date() },
+        data: {
+          status: "FAILED",
+          failedAt: new Date(),
+          errorMessage: smtpErr.message,
+          attempts: { increment: 1 },
+        },
       });
-      console.log(`✅ [KURUMSAL E-POSTA İLETİLDİ] -> ${normalizedTo} | Konu: ${subject}`);
-    } catch (smtpErr) {
-      console.error(`❌ [SMTP GÖNDERİM HATASI] (${normalizedTo}):`, smtpErr.message);
-      try {
-        await prisma.emailQueue.update({
-          where: { id: queued.id },
-          data: {
-            status: "FAILED",
-            failedAt: new Date(),
-            errorMessage: smtpErr.message,
-            attempts: { increment: 1 },
-          },
-        });
-      } catch (dbErr) {
-        console.error("EmailQueue update error:", dbErr.message);
-      }
+    } catch (dbErr) {
+      console.error("EmailQueue update error:", dbErr.message);
     }
-  });
+  }
 }
 
 function fmtTimeUTC(dt) {
@@ -422,6 +414,13 @@ export async function runReservationLifecycleChecks() {
   }
 }
 
+/**
+ * 2. Kişi Kabul Ettiğinde (isInitialConfirmation === true):
+ * - Kütüphane Müdürüne (boraa-35@hotmail.com) Oda Ayrıldı maili 1 kez gider.
+ * - Organizatöre ve 2. kişiye onay maili gider.
+ * 3., 4., 5. Kişi Kabul Ettiğinde (isInitialConfirmation === false):
+ * - Yalnızca kabul eden o kişiye mail gider, müdüre tekrar gitmez.
+ */
 export async function handleParticipantAcceptedEmails({
   reservationId,
   acceptingUserId,
@@ -463,7 +462,7 @@ export async function handleParticipantAcceptedEmails({
     );
 
     if (isInitialConfirmation) {
-      // 1) Kütüphane Müdürüne Kurumsal HTML Bildirim Maili
+      // 1) Kütüphane Müdürüne (boraa-35@hotmail.com) Kurumsal HTML Bildirim Maili
       const directorHtml = buildCorporateEmailHtml({
         badgeText: "ODA AYRILDI (CONFIRMED)",
         badgeColor: "#15803D",
@@ -584,6 +583,116 @@ export async function handleParticipantAcceptedEmails({
     }
   } catch (error) {
     console.error("Participant accepted email dispatch error:", error);
+  }
+}
+
+/**
+ * RANDEVU İPTAL EDİLDİĞİNDE ÇALIŞIR:
+ * 1) Gruptaki tüm öğrencilere (Organizatör + Davetliler) "Rezervasyonunuz İptal Edilmiştir" maili gönderir.
+ * 2) Eğer randevu daha önceden onaylanmış (CONFIRMED) ise Kütüphane Müdürüne (boraa-35@hotmail.com)
+ *    "Onaylanan Rezervasyon İptal Edildi ve Oda Boşa Çıktı" maili gönderir.
+ */
+export async function sendReservationCancelledEmails({
+  reservationId,
+  cancelledByEmail,
+  reason,
+  wasConfirmed,
+}) {
+  try {
+    const res = await prisma.reservation.findUnique({
+      where: { id: reservationId },
+      include: {
+        room: true,
+        user: true,
+        participants: {
+          where: { status: { not: "REJECTED" } },
+          include: { user: true },
+        },
+      },
+    });
+
+    if (!res) return;
+
+    const dateStr = fmtDateUTC(res.reservationDate);
+    const timeStr = `${fmtTimeUTC(res.startTime)} - ${fmtTimeUTC(res.endTime)}`;
+    const roomLabel = `${res.room.roomNumber} - ${res.room.name}`;
+
+    const allMembers = [
+      res.user,
+      ...res.participants.map((p) => p.user),
+    ];
+
+    const formattedParticipants = allMembers.map(
+      (m) => `<strong>${m.fullName}</strong> (${m.email})`
+    );
+
+    // 1) Eğer randevu CONFIRMED (Onaylı) durumdayken iptal edildiyse Kütüphane Müdürüne (boraa-35@hotmail.com) haber ver
+    if (wasConfirmed) {
+      const directorCancelHtml = buildCorporateEmailHtml({
+        badgeText: "ONAYLI RANDEVU İPTAL EDİLDİ",
+        badgeColor: "#B91C1C",
+        badgeBg: "#FEE2E2",
+        title: `${roomLabel} Onaylı Oda Randevusu İptal Edildi`,
+        greeting: "Sayın Kütüphane Müdürü,",
+        leadText: `Daha önce onaylanmış (CONFIRMED) olan aşağıdaki çalışma odası randevusu iptal edilmiş olup, oda ilgili saat dilimi için tekrar boşa çıkarılmıştır.`,
+        details: [
+          { label: "Çalışma Odası", value: roomLabel },
+          { label: "Tarih", value: dateStr },
+          { label: "Saat Aralığı", value: timeStr },
+          { label: "İptal Eden", value: cancelledByEmail },
+          { label: "İptal Sebebi", value: reason || "Kullanıcı / Görevli İptali" },
+        ],
+        participantsTitle: "İptal Edilen Grup Üyeleri",
+        participantsList: formattedParticipants,
+      });
+
+      await queueSafeEmail({
+        to: ALLOWED_DIRECTOR_EMAIL,
+        subject: `[Kütüphane Müdürlüğü] Onaylı Randevu İptal Edildi: ${roomLabel} (${dateStr} | ${timeStr})`,
+        body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} odasının ${dateStr} (${timeStr}) tarihli onaylı randevusu (${cancelledByEmail} tarafından) iptal edilmiştir.`,
+        htmlBody: directorCancelHtml,
+        priority: 1,
+      });
+    }
+
+    // 2) Gruptaki tüm öğrencilere "Rezervasyonunuz İptal Edilmiştir" bildirimi ve kurumsal maili gönder
+    for (const member of allMembers) {
+      await prisma.notification.create({
+        data: {
+          userId: member.id,
+          title: `Rezervasyon İptal Edildi (${roomLabel})`,
+          message: `${dateStr} (${timeStr}) tarihli ${roomLabel} çalışma odası rezervasyonunuz iptal edilmiştir.`,
+          type: "CANCELLATION",
+          relatedEntityType: "Reservation",
+          relatedEntityId: res.id,
+        },
+      });
+
+      const studentCancelHtml = buildCorporateEmailHtml({
+        badgeText: "REZERVASYON İPTAL EDİLDİ",
+        badgeColor: "#B91C1C",
+        badgeBg: "#FEE2E2",
+        title: "Çalışma Odası Rezervasyonunuz İptal Edilmiştir",
+        greeting: `Sayın ${member.fullName},`,
+        leadText: `Aşağıda bilgileri yer alan grup çalışma odası rezervasyonunuz iptal edilmiş olup, günlük rezervasyon kotanız tekrar serbest bırakılmıştır.`,
+        details: [
+          { label: "Çalışma Odası", value: roomLabel },
+          { label: "Tarih", value: dateStr },
+          { label: "Saat Aralığı", value: timeStr },
+          { label: "İptal Sebebi", value: reason || "Organizatör / Görevli İptali" },
+        ],
+      });
+
+      await queueSafeEmail({
+        to: member.email,
+        subject: `THKÜ Kütüphane - Rezervasyonunuz İptal Edilmiştir (${roomLabel})`,
+        body: `Sayın ${member.fullName},\n\n${dateStr} (${timeStr}) tarihli ${roomLabel} çalışma odası rezervasyonunuz iptal edilmiştir.`,
+        htmlBody: studentCancelHtml,
+        priority: 1,
+      });
+    }
+  } catch (error) {
+    console.error("Cancel email dispatch error:", error);
   }
 }
 
