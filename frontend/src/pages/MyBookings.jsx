@@ -2,8 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Container, Typography, Card, Chip, Button, Tabs, Tab,
-  CircularProgress, Alert, Snackbar, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Tooltip
+  CircularProgress, Alert, Snackbar, Tooltip, Divider
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
@@ -20,8 +19,7 @@ import EventNoteIcon from '@mui/icons-material/EventNote';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
-import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
-import PersonRemoveIcon from '@mui/icons-material/PersonRemove';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 
 export default function MyBookings() {
   const navigate = useNavigate();
@@ -36,11 +34,6 @@ export default function MyBookings() {
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState(0);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
-
-  // Madde 14: Sonradan Üye Ekleme Modal State
-  const [addMemberDialog, setAddMemberDialog] = useState({ open: false, reservationId: null, roomName: '' });
-  const [newMemberEmail, setNewMemberEmail] = useState('');
-  const [addingMember, setAddingMember] = useState(false);
 
   const fetchAllData = useCallback(() => {
     setLoading(true);
@@ -89,41 +82,6 @@ export default function MyBookings() {
     }
   };
 
-  // Sonradan Üye Ekleme
-  const handleAddParticipantSubmit = async () => {
-    if (!newMemberEmail.trim()) return;
-    setAddingMember(true);
-    try {
-      const res = await api.patch('/reservations', {
-        reservationId: addMemberDialog.reservationId,
-        action: 'ADD_PARTICIPANT',
-        participantEmail: newMemberEmail.trim(),
-      });
-      setSnack({ open: true, message: res.data?.message || 'Yeni üye eklendi.', severity: 'success' });
-      setAddMemberDialog({ open: false, reservationId: null, roomName: '' });
-      setNewMemberEmail('');
-      fetchAllData();
-    } catch (err) {
-      setSnack({ open: true, message: err.response?.data?.error || 'Üye eklenemedi.', severity: 'error' });
-    } finally {
-      setAddingMember(false);
-    }
-  };
-
-  // Katılımcının Gruptan Çıkması (En Az 2 Kişi Kalana Kadar)
-  const handleLeaveReservation = async (id) => {
-    try {
-      const res = await api.patch('/reservations', {
-        reservationId: id,
-        action: 'LEAVE_RESERVATION',
-      });
-      setSnack({ open: true, message: res.data?.message || 'Gruptan ayrıldınız.', severity: 'info' });
-      fetchAllData();
-    } catch (err) {
-      setSnack({ open: true, message: err.response?.data?.error || 'Gruptan çıkılamadı.', severity: 'error' });
-    }
-  };
-
   const handleInvitationRespond = async (participantId, action) => {
     try {
       await api.post('/invitations/respond', { participantId, action });
@@ -157,7 +115,6 @@ export default function MyBookings() {
     });
   };
 
-  //  Randevu başlangıcına 60 dakikadan az kaldı mı kontrolü
   const isWithinOneHourOfStart = (res) => {
     const now = new Date();
     const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
@@ -203,8 +160,8 @@ export default function MyBookings() {
               <Typography variant="h4" sx={{ fontWeight: 700 }}>{t('navMyBookings')}</Typography>
               <Typography variant="body2" color="text.secondary">
                 {isEn
-                  ? 'Manage your active sessions, add/leave group members, or free the room early.'
-                  : 'Aktif randevularınızı yönetin, oda kapasitesine göre üye ekleyin/çıkın veya odayı erken boşaltın.'}
+                  ? 'View your active reservations, respond to group invitations, or check out early.'
+                  : 'Aktif randevularınızı görüntüleyin, grup davetlerini yanıtlayın veya odayı erken boşaltın.'}
               </Typography>
             </Box>
           </Box>
@@ -239,106 +196,74 @@ export default function MyBookings() {
                     const isConfirmed = res.status === 'CONFIRMED' || res.status === 'CHECKED_IN';
                     const statusColor = isCancelled ? 'error' : isConfirmed ? 'success' : 'warning';
 
-                    const activeParticipants = (res.participants || []).filter(p => p.status !== 'REJECTED');
                     const acceptedParticipants = (res.participants || []).filter(p => p.status === 'ACCEPTED');
-                    const totalActiveOrPending = 1 + activeParticipants.length;
                     const totalConfirmedPeople = 1 + acceptedParticipants.length;
                     const roomCapacity = res.room?.capacity || 8;
-
-                   
-                    // 1) Organizatör ise ve oda kapasitesi (8) dolmamışsa üye ekleyebilir
-                    const canAddMember = isOrganizer && ['PENDING', 'CONFIRMED'].includes(res.status) && totalActiveOrPending < roomCapacity;
-                    // 2) Katılımcı ise ve içeride en az 3 onaylı kişi varsa (kendisi çıkınca >= 2 kalacaksa) gruptan çıkabilir
-                    const canLeaveGroup = !isOrganizer && ['PENDING', 'CONFIRMED'].includes(res.status) && totalConfirmedPeople > 2;
-                    // Madde 5: Başlangıca 1 saatten az kaldıysa iptal kilitlenir
                     const cancelLocked = isWithinOneHourOfStart(res);
+                    const showOrganizerActions = tab === 0 && isOrganizer && ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(res.status);
 
                     return (
-                      <Card key={res.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette[statusColor].main}` }}>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
-                          <Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
-                              <Typography variant="h6" sx={{ fontSize: '1.05rem', fontWeight: 700 }}>
-                                {res.room?.roomNumber} - {res.room?.name}
-                              </Typography>
-                              <Chip
-                                label={res.status}
-                                size="small"
-                                sx={{ bgcolor: alpha(theme.palette[statusColor].main, 0.12), color: `${statusColor}.main`, fontWeight: 700, height: 22 }}
-                              />
-                              <Chip
-                                label={isOrganizer ? t('youCreated') : t('youJoined')}
-                                size="small"
-                                variant="outlined"
-                                sx={{ height: 22, fontSize: '0.7rem' }}
-                              />
-                            </Box>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.secondary', mt: 1, flexWrap: 'wrap' }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <ScheduleIcon sx={{ fontSize: 16 }} />
-                                <Typography variant="body2">{fmtDate(res.reservationDate)} | {fmtTime(res.startTime)} - {fmtTime(res.endTime)}</Typography>
-                              </Box>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <GroupIcon sx={{ fontSize: 16 }} />
-                                <Typography variant="body2">
-                                  {totalConfirmedPeople} Onaylı / Maks {roomCapacity} Kişi
-                                </Typography>
-                              </Box>
-                            </Box>
+                      <Card key={res.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette[statusColor].main}`, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                        <Box>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 0.5, flexWrap: 'wrap' }}>
+                            <Typography variant="h6" sx={{ fontSize: '1.05rem', fontWeight: 700 }}>
+                              {res.room?.roomNumber} - {res.room?.name}
+                            </Typography>
+                            <Chip
+                              label={res.status}
+                              size="small"
+                              sx={{ bgcolor: alpha(theme.palette[statusColor].main, 0.12), color: `${statusColor}.main`, fontWeight: 700, height: 22 }}
+                            />
+                            <Chip
+                              label={isOrganizer ? t('youCreated') : t('youJoined')}
+                              size="small"
+                              variant="outlined"
+                              sx={{ height: 22, fontSize: '0.7rem' }}
+                            />
+                          </Box>
 
-                            {res.participants?.length > 0 && (
-                              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
-                                {res.participants.map((p, i) => (
-                                  <Chip
-                                    key={i}
-                                    label={`${p.user?.fullName || p.user?.email} (${p.status})`}
-                                    size="small"
-                                    variant="outlined"
-                                    color={p.status === 'ACCEPTED' ? 'success' : p.status === 'REJECTED' ? 'error' : 'warning'}
-                                    sx={{ fontSize: '0.68rem', height: 22 }}
-                                  />
-                                ))}
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'text.secondary', mt: 1, flexWrap: 'wrap' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <ScheduleIcon sx={{ fontSize: 16 }} />
+                              <Typography variant="body2">{fmtDate(res.reservationDate)} | {fmtTime(res.startTime)} - {fmtTime(res.endTime)}</Typography>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <GroupIcon sx={{ fontSize: 16 }} />
+                              <Typography variant="body2">
+                                {totalConfirmedPeople} Onaylı / Maks {roomCapacity} Kişi
+                              </Typography>
+                            </Box>
+                            {res.purpose && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                <DescriptionOutlinedIcon sx={{ fontSize: 16 }} />
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                  {res.purpose}
+                                </Typography>
                               </Box>
                             )}
                           </Box>
 
-                          {/* Aksiyon Butonları*/}
-                          {tab === 0 && (
+                          {res.participants?.length > 0 && (
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mt: 1.5 }}>
+                              {res.participants.map((p, i) => (
+                                <Chip
+                                  key={i}
+                                  label={`${p.user?.fullName || p.user?.email} (${p.status})`}
+                                  size="small"
+                                  variant="outlined"
+                                  color={p.status === 'ACCEPTED' ? 'success' : p.status === 'REJECTED' ? 'error' : 'warning'}
+                                  sx={{ fontSize: '0.68rem', height: 22 }}
+                                />
+                              ))}
+                            </Box>
+                          )}
+                        </Box>
+
+                        {showOrganizerActions && (
+                          <>
+                            <Divider />
                             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                              {/* Organizatör İçin Sonradan Üye Ekleme Butonu (Kapasite < 8 ise görünür) */}
-                              {canAddMember && (
-                                <Button
-                                  variant="outlined"
-                                  color="primary"
-                                  size="small"
-                                  startIcon={<PersonAddAlt1Icon />}
-                                  onClick={() =>
-                                    setAddMemberDialog({
-                                      open: true,
-                                      reservationId: res.id,
-                                      roomName: `${res.room?.roomNumber} - ${res.room?.name}`,
-                                    })
-                                  }
-                                >
-                                  + Üye Ekle ({roomCapacity - totalActiveOrPending} Boş)
-                                </Button>
-                              )}
-
-                              {/* Katılımcı İçin Gruptan Çık Butonu (En az 2 kişi kalacaksa görünür) */}
-                              {canLeaveGroup && (
-                                <Button
-                                  variant="outlined"
-                                  color="warning"
-                                  size="small"
-                                  startIcon={<PersonRemoveIcon />}
-                                  onClick={() => handleLeaveReservation(res.id)}
-                                >
-                                  Gruptan Çık
-                                </Button>
-                              )}
-
-                              {/*Odayı Erken Boşaltma */}
-                              {isOrganizer && ['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
+                              {['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
                                 <Button
                                   variant="contained"
                                   color="info"
@@ -350,8 +275,7 @@ export default function MyBookings() {
                                 </Button>
                               )}
 
-                              {/*Son 1 Saat Kala İptal Kilidi */}
-                              {isOrganizer && ['PENDING', 'CONFIRMED'].includes(res.status) && (
+                              {['PENDING', 'CONFIRMED'].includes(res.status) && (
                                 <Tooltip
                                   title={
                                     cancelLocked
@@ -374,8 +298,8 @@ export default function MyBookings() {
                                 </Tooltip>
                               )}
                             </Box>
-                          )}
-                        </Box>
+                          </>
+                        )}
                       </Card>
                     );
                   })}
@@ -391,7 +315,7 @@ export default function MyBookings() {
               ) : (
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {invitations.map((inv) => (
-                    <Card key={inv.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette.warning.main}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+                    <Card key={inv.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette.warning.main}`, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
                       <Box>
                         <Typography sx={{ fontWeight: 700 }}>
                           {t('invitedYouTo', { name: inv.reservation?.user?.fullName, room: `${inv.reservation?.room?.roomNumber} - ${inv.reservation?.room?.name}` })}
@@ -400,6 +324,7 @@ export default function MyBookings() {
                           {fmtDate(inv.reservation?.reservationDate)} | {fmtTime(inv.reservation?.startTime)} - {fmtTime(inv.reservation?.endTime)} • (30 dk içinde onaylanmalıdır)
                         </Typography>
                       </Box>
+                      <Divider />
                       <Box sx={{ display: 'flex', gap: 1 }}>
                         <Button size="small" variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />} onClick={() => handleInvitationRespond(inv.id, 'ACCEPT')}>
                           {t('accept')}
@@ -418,39 +343,6 @@ export default function MyBookings() {
       </Container>
 
       <Footer />
-
-      {/* Sonradan Üye Ekleme Pop-up Dialog */}
-      <Dialog
-        open={addMemberDialog.open}
-        onClose={() => setAddMemberDialog({ open: false, reservationId: null, roomName: '' })}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle sx={{ fontWeight: 700 }}>
-          Gruba Yeni Üye Ekle ({addMemberDialog.roomName})
-        </DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Oda kapasitesini (maks. 8 kişi) aşmayacak şekilde davet etmek istediğiniz öğrencinin kurumsal e-posta adresini giriniz:
-          </Typography>
-          <TextField
-            autoFocus
-            fullWidth
-            size="small"
-            placeholder="sXXXXXXXXX@stu.thk.edu.tr"
-            value={newMemberEmail}
-            onChange={(e) => setNewMemberEmail(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setAddMemberDialog({ open: false, reservationId: null, roomName: '' })} color="inherit">
-            Vazgeç
-          </Button>
-          <Button variant="contained" onClick={handleAddParticipantSubmit} disabled={addingMember || !newMemberEmail.trim()}>
-            {addingMember ? <CircularProgress size={18} color="inherit" /> : 'Davet Gönder'}
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Snackbar open={snack.open} autoHideDuration={3500} onClose={() => setSnack(s => ({ ...s, open: false }))}>
         <Alert severity={snack.severity} variant="filled">{snack.message}</Alert>
