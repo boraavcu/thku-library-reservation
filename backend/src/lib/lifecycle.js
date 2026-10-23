@@ -1,8 +1,8 @@
 import prisma from "@/lib/db";
+import nodemailer from "nodemailer";
 
 const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
 
-// KESİN E-POSTA KİLİDİ: Sadece bu 2 adrese mail gönderilebilir!
 export const ALLOWED_STUDENT_EMAIL = "s250444902@stu.thk.edu.tr";
 export const ALLOWED_DIRECTOR_EMAIL = "boraa-35@hotmail.com";
 const SAFE_EMAIL_WHITELIST = new Set([
@@ -12,22 +12,94 @@ const SAFE_EMAIL_WHITELIST = new Set([
 
 export async function queueSafeEmail({ to, subject, body, priority = 2 }) {
   if (!to) return;
-  const normalizedTo = to.trim().toLowerCase();
+  let normalizedTo = to.trim().toLowerCase();
+  let finalSubject = subject;
 
-  // Sadece s250444902@stu.thk.edu.tr ve boraa-35@hotmail.com adreslerine izin ver!
+  // Demo testi sırasında @demo.local hesaplarına (2., 3., 4. kişi) giden mailleri de
+  // test edebilmen için senin öğrenci mailine (s250444902@stu.thk.edu.tr) yönlendiriyoruz.
+  if (normalizedTo.endsWith("@demo.local")) {
+    finalSubject = `[Demo Alıcı: ${normalizedTo}] ${subject}`;
+    normalizedTo = ALLOWED_STUDENT_EMAIL.toLowerCase();
+  }
+
   if (!SAFE_EMAIL_WHITELIST.has(normalizedTo)) {
     return;
   }
 
-  await prisma.emailQueue.create({
+  const queued = await prisma.emailQueue.create({
     data: {
       to: normalizedTo,
-      subject,
+      subject: finalSubject,
       body,
       priority,
       status: "PENDING",
     },
   });
+
+  console.log(`\n📧 [E-POSTA KUYRUĞA ALINDI] Alıcı: ${normalizedTo} | Konu: ${finalSubject}`);
+
+  const smtpHost = process.env.SMTP_HOST?.trim();
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = process.env.SMTP_USER?.trim();
+  const smtpPass = process.env.SMTP_PASS?.replace(/\s+/g, ""); // 16 haneli şifrede boşluk varsa otomatik temizler
+
+  if (smtpHost && smtpUser && smtpPass) {
+    try {
+      const createTransportFn =
+        nodemailer.createTransport || nodemailer.default?.createTransport;
+
+      const transporter = createTransportFn.call(nodemailer, {
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+        tls: {
+          rejectUnauthorized: false,
+        },
+      });
+
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM || `"THKÜ Kütüphane Sistemi" <${smtpUser}>`,
+        to: normalizedTo,
+        subject: finalSubject,
+        text: body,
+      });
+
+      await prisma.emailQueue.update({
+        where: { id: queued.id },
+        data: { status: "SENT", sentAt: new Date() },
+      });
+      console.log(`✅ [GERÇEK E-POSTA BAŞARIYLA İLETİLDİ] -> ${normalizedTo}`);
+    } catch (smtpErr) {
+      console.error(`❌ [SMTP GÖNDERİM HATASI] (${normalizedTo}):`, smtpErr.message);
+      if (smtpErr.message?.includes("535")) {
+        console.error(
+          `💡 ÇÖZÜM: Gmail normal hesap şifresini kabul etmez. https://myaccount.google.com/apppasswords adresinden 16 harfli 'Uygulama Şifresi' alıp backend/.env içindeki SMTP_PASS satırına yazınız.`
+        );
+      }
+
+      try {
+        await prisma.emailQueue.update({
+          where: { id: queued.id },
+          data: {
+            status: "FAILED",
+            failedAt: new Date(),
+            errorMessage: smtpErr.message,
+            attempts: { increment: 1 },
+          },
+        });
+      } catch (dbErr) {
+        console.error("EmailQueue update error:", dbErr.message);
+      }
+    }
+  } else {
+    console.warn(
+      `⚠️ [SMTP EKSİK] backend/.env içinde SMTP_HOST, SMTP_USER veya SMTP_PASS tanımlı değil!`
+    );
+  }
 }
 
 function fmtTimeUTC(dt) {
@@ -47,17 +119,11 @@ function fmtDateUTC(dt) {
   });
 }
 
-/**
- * MADDE 10 & MADDE 5:
- * 1) Oluşturulmasının üzerinden 30 dakika geçtiği halde onaylanmamış (PENDING) randevuları otomatik iptal eder.
- * 2) Başlamasına 2 saat (120 dk) veya daha az kalmış onaylı randevular için öğrencilere "Son 2 Saat" hatırlatma maili atar.
- */
 export async function runReservationLifecycleChecks() {
   try {
     const now = new Date();
     const thirtyMinsAgo = new Date(now.getTime() - INVITATION_TIMEOUT_MS);
 
-    // 1. MADDE 10: 30 Dakikada Onaylanmayan PENDING Randevuları İptal Et
     const stalePendings = await prisma.reservation.findMany({
       where: {
         status: "PENDING",
@@ -87,7 +153,6 @@ export async function runReservationLifecycleChecks() {
       });
     }
 
-    // 2. MADDE 5: Randevusuna Son 2 Saat Kala Öğrencilere Hatırlatma Maili Gönder
     const todayTrStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDateObj = new Date(`${todayTrStr}T00:00:00Z`);
 
@@ -151,7 +216,7 @@ export async function runReservationLifecycleChecks() {
             await queueSafeEmail({
               to: member.email,
               subject: `THKÜ Kütüphane - Randevunuza Son 2 Saat Kaldı (${res.room.roomNumber})`,
-              body: `Sayın ${member.fullName},\n\n${res.room.roomNumber} - ${res.room.name} çalışma odasındaki (${timeRangeStr}) randevunuzun başlamasına 2 saatten az süre kalmıştır.\n\nHatırlatma: Son 1 saat içinde iptal işlemi yapılamamaktadır. Odaya girişte kapıdaki QR kodu okutarak kişisel doğrulama kodunuzu girmeniz zorunludur.`,
+              body: `Sayın ${member.fullName},\n\n${res.room.roomNumber} - ${res.room.name} çalışma odasındaki (${timeRangeStr}) randevunuzun başlamasına 2 saatten az süre kalmıştır.\n\nHatırlatma: Son 1 saat içinde iptal işlemi yapılamamaktadır.`,
               priority: 1,
             });
           }
@@ -164,10 +229,19 @@ export async function runReservationLifecycleChecks() {
 }
 
 /**
- * MADDE 4 & MADDE 5:
- * Randevu CONFIRMED olduğunda Kütüphane Müdürüne (boraa-35@hotmail.com) ve öğrenciye (s250444902@stu.thk.edu.tr) mail gönderir.
+ * YENİ MAİL MANTIĞI:
+ * - isInitialConfirmation === true (2. Kişi Kabul Ettiğinde):
+ *   1) Organizatöre + 2. Kişiye onay maili gider.
+ *   2) Kütüphane Müdürüne (boraa-35@hotmail.com) hangi odanın kaç kişiyle kimler tarafından ayrıldığı maili gider.
+ * - isInitialConfirmation === false (3., 4., 5. ... Kişi Kabul Ettiğinde):
+ *   1) SADECE o kabul eden kişiye (3. ise 3.'ye, 4. ise 4.'ye) mail gider.
+ *   2) Organizatöre ve Kütüphane Müdürüne tekrar mail GİTMEZ!
  */
-export async function sendReservationConfirmedEmails(reservationId) {
+export async function handleParticipantAcceptedEmails({
+  reservationId,
+  acceptingUserId,
+  isInitialConfirmation,
+}) {
   try {
     const res = await prisma.reservation.findUnique({
       where: { id: reservationId },
@@ -175,7 +249,7 @@ export async function sendReservationConfirmedEmails(reservationId) {
         room: true,
         user: true,
         participants: {
-          where: { status: "ACCEPTED" },
+          where: { status: { not: "REJECTED" } },
           include: { user: true },
         },
       },
@@ -186,37 +260,86 @@ export async function sendReservationConfirmedEmails(reservationId) {
     const dateStr = fmtDateUTC(res.reservationDate);
     const timeStr = `${fmtTimeUTC(res.startTime)} - ${fmtTimeUTC(res.endTime)}`;
     const roomLabel = `${res.room.roomNumber} - ${res.room.name}`;
-    const allMembers = [res.user, ...res.participants.map((p) => p.user)];
-    const memberNamesList = allMembers
-      .map((m, idx) => `${idx + 1}. ${m.fullName} (${m.email})`)
-      .join("\n");
 
-    // 1. SADECE Kütüphane Müdürüne (boraa-35@hotmail.com) Bildirim Maili
-    await queueSafeEmail({
-      to: ALLOWED_DIRECTOR_EMAIL,
-      subject: `[Kütüphane Müdürlüğü] Onaylanan Oda Randevusu: ${roomLabel} (${dateStr} | ${timeStr})`,
-      body: `Sayın Kütüphane Müdürü,\n\nAşağıdaki çalışma odası randevusu tüm katılımcı onaylarını tamamlayarak ONAYLANMIŞTIR (CONFIRMED):\n\n• Oda: ${roomLabel}\n• Tarih: ${dateStr}\n• Saat: ${timeStr}\n• Amaç: ${res.purpose || "Grup Çalışması"}\n\nKatılımcı Listesi (${allMembers.length} Kişi):\n${memberNamesList}`,
-      priority: 2,
-    });
+    const acceptedParticipants = res.participants.filter((p) => p.status === "ACCEPTED");
+    const acceptingParticipant = acceptedParticipants.find((p) => p.userId === acceptingUserId)?.user;
 
-    // 2. Öğrencilere Onay Maili (queueSafeEmail sayesinde sadece s250444902@stu.thk.edu.tr adresine gider)
-    for (const member of allMembers) {
+    // SENARYO 1: 2. KİŞİ KABUL ETTİ -> ODA AYRILDI (CONFIRMED)
+    if (isInitialConfirmation) {
+      const allGroupPeople = [
+        { fullName: res.user.fullName, email: res.user.email, statusLabel: "Organizatör (Onaylı)" },
+        ...res.participants.map((p) => ({
+          fullName: p.user.fullName,
+          email: p.user.email,
+          statusLabel: p.status === "ACCEPTED" ? "Katılımcı (Onayladı)" : "Katılımcı (Davet Bekliyor)",
+        })),
+      ];
+
+      const groupListText = allGroupPeople
+        .map((m, idx) => `${idx + 1}. ${m.fullName} (${m.email}) - [${m.statusLabel}]`)
+        .join("\n");
+
+      // A) Kütüphane Müdürüne (boraa-35@hotmail.com) Oda Ayrıldı Bilgisi (Sadece 1 kez gider)
       await queueSafeEmail({
-        to: member.email,
-        subject: `THKÜ Kütüphane - Randevunuz Onaylandı (${roomLabel})`,
-        body: `Sayın ${member.fullName},\n\n${roomLabel} çalışma odası için ${dateStr} (${timeStr}) tarihli grup randevunuz onaylanmıştır.\n\nÖnemli Kurallar:\n• Randevu başlangıcına 1 saat kala iptal işlemi kapanmaktadır.\n• Randevu saatinde oda girişindeki QR kodu okutarak size özel üretilen kodu girmeniz zorunludur.`,
-        priority: 2,
+        to: ALLOWED_DIRECTOR_EMAIL,
+        subject: `[Kütüphane Müdürlüğü] Oda Ayrıldı: ${roomLabel} (${dateStr} | ${timeStr})`,
+        body: `Sayın Kütüphane Müdürü,\n\nAşağıdaki çalışma odası en az 2 kişi onay şartını tamamlayarak resmen AYRILMIŞTIR (CONFIRMED):\n\n• Ayrılan Oda: ${roomLabel}\n• Tarih: ${dateStr}\n• Saat Aralığı: ${timeStr}\n• Toplam Grup Sayısı: ${allGroupPeople.length} Kişi (${1 + acceptedParticipants.length} Onaylı)\n• Çalışma Amacı: ${res.purpose || "Grup Çalışması"}\n\nOdayı Ayıran Kişiler:\n${groupListText}`,
+        priority: 1,
+      });
+
+      // B) Organizatöre ve Onaylayan 2. Kişiye Mail Gönder
+      const recipientsForInitial = [res.user];
+      if (acceptingParticipant && acceptingParticipant.id !== res.user.id) {
+        recipientsForInitial.push(acceptingParticipant);
+      }
+
+      for (const member of recipientsForInitial) {
+        await prisma.notification.create({
+          data: {
+            userId: member.id,
+            title: `Randevunuz Onaylandı (${roomLabel})`,
+            message: `${dateStr} (${timeStr}) tarihli çalışma odası randevunuz onaylanmıştır.`,
+            type: "SYSTEM",
+            relatedEntityType: "Reservation",
+            relatedEntityId: res.id,
+          },
+        });
+
+        await queueSafeEmail({
+          to: member.email,
+          subject: `THKÜ Kütüphane - Randevunuz Onaylandı (${roomLabel})`,
+          body: `Sayın ${member.fullName},\n\n${roomLabel} çalışma odası için ${dateStr} (${timeStr}) tarihli grup randevunuz onaylanmıştır.\n\nÖnemli Kurallar:\n• Randevu başlangıcına 1 saat kala iptal işlemi kapanmaktadır.\n• Randevu saatinde oda girişindeki QR kodu okutarak onay vermeniz zorunludur.`,
+          priority: 1,
+        });
+      }
+      return;
+    }
+
+    // SENARYO 2: 3., 4., 5., ... KİŞİ KABUL ETTİ (Sadece kabul eden o kişiye mail gider!)
+    if (acceptingParticipant) {
+      await prisma.notification.create({
+        data: {
+          userId: acceptingParticipant.id,
+          title: `Gruba Katılımınız Onaylandı (${roomLabel})`,
+          message: `${dateStr} (${timeStr}) tarihli ${roomLabel} çalışma odası randevusuna katılımınız onaylanmıştır.`,
+          type: "SYSTEM",
+          relatedEntityType: "Reservation",
+          relatedEntityId: res.id,
+        },
+      });
+
+      await queueSafeEmail({
+        to: acceptingParticipant.email,
+        subject: `THKÜ Kütüphane - Randevu Katılımınız Onaylandı (${roomLabel})`,
+        body: `Sayın ${acceptingParticipant.fullName},\n\n${roomLabel} çalışma odasındaki ${dateStr} (${timeStr}) tarihli onaylı grup randevusuna katılımınız kaydedilmiştir.\n\nÖnemli Kurallar:\n• Randevu saatinde oda girişindeki QR kodu kendi telefonunuzla okutarak onay vermeniz zorunludur.`,
+        priority: 1,
       });
     }
   } catch (error) {
-    console.error("Confirmed email dispatch error:", error);
+    console.error("Participant accepted email dispatch error:", error);
   }
 }
 
-/**
- * MADDE 4:
- * Randevu Kiosk onaylaması (Check-in) yapıldığında Kütüphane Müdürüne (boraa-35@hotmail.com) bilgi maili gönderir.
- */
 export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserEmail) {
   try {
     const res = await prisma.reservation.findUnique({
@@ -244,7 +367,7 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserE
     await queueSafeEmail({
       to: ALLOWED_DIRECTOR_EMAIL,
       subject: `[Kiosk Girişi Başladı] ${roomLabel} Odası Aktif (${timeStr})`,
-      body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} odasındaki randevu için Kiosk QR doğrulaması (${checkedInUserEmail} tarafından) gerçekleştirilmiş ve oda kullanımı başlamıştır.\n\n• Oda: ${roomLabel}\n• Tarih & Saat: ${dateStr} | ${timeStr}\n\nRandevudaki Öğrenciler (${allMembers.length} Kişi):\n${memberNamesList}`,
+      body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} odasındaki randevu için Kapı QR doğrulaması (${checkedInUserEmail} tarafından) gerçekleştirilmiş ve oda kullanımı başlamıştır.\n\n• Oda: ${roomLabel}\n• Tarih & Saat: ${dateStr} | ${timeStr}\n\nRandevudaki Öğrenciler (${allMembers.length} Kişi):\n${memberNamesList}`,
       priority: 1,
     });
   } catch (error) {
@@ -252,10 +375,6 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserE
   }
 }
 
-/**
- * MADDE 5:
- * No-Show (Uyarı / Ban) yiyen öğrenciye kaçıncı uyarısını aldığını ve kalan hakkını bildiren mail gönderir.
- */
 export async function sendNoShowWarningEmail({
   user,
   activeNoShowCount,
@@ -268,15 +387,15 @@ export async function sendNoShowWarningEmail({
     const remainingRights = Math.max(0, 3 - activeNoShowCount);
     const banUntilFormatted = banUntilDate
       ? new Date(banUntilDate).toLocaleDateString("tr-TR")
-      : "Dönem Sonu";
+      : "Kalıcı (Süresiz)";
 
     const subject = isBanned
       ? `THKÜ Kütüphane - 3/3 Uyarı Sonucu Rezervasyon Yasağı (Ban) Bildirimi`
       : `THKÜ Kütüphane - Rezervasyon Gelmeme (No-Show) Uyarısı (${activeNoShowCount}/3)`;
 
     const body = isBanned
-      ? `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz (Kiosk doğrulaması yapmadığınız) tespit edilmiştir.\n\nBu ihlal ile birlikte dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız ${banUntilFormatted} tarihine kadar rezervasyonlara kapatılmıştır (banlanmıştır).`
-      : `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gitmediğiniz (Kiosk doğrulaması yapmadığınız) tespit edilmiştir.\n\n• Mevcut Uyarı Sayınız: ${activeNoShowCount} / 3\n• Kalan Uyarı Hakkınız: ${remainingRights}\n\n3 uyarı sonunda hesabınız 30 gün / dönem boyunca çalışma odası rezervasyonlarına kapatılacaktır.`;
+      ? `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir.\n\nBu ihlal ile birlikte dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız ${banUntilFormatted} tarihine kadar rezervasyonlara kapatılmıştır.`
+      : `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gitmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir.\n\n• Mevcut Uyarı Sayınız: ${activeNoShowCount} / 3\n• Kalan Uyarı Hakkınız: ${remainingRights}\n\n3 uyarı sonunda hesabınız 30 gün / dönem boyunca çalışma odası rezervasyonlarına kapatılacaktır.`;
 
     await queueSafeEmail({
       to: user.email,

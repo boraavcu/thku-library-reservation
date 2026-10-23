@@ -4,14 +4,19 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import crypto from "crypto";
+import os from "os";
 
-const PERSONAL_OTP_TTL = 600; // Kişiye özel oturum anahtarı 10 dakika geçerli
-const TOLERANCE_MINUTES = 15; // Başlangıç saatine ±15 dakika kuralı (Örn: 10:00 -> 09:45 - 10:15)
+const PERSONAL_OTP_TTL = 600;
+const TOLERANCE_MINUTES = 60;
 
-// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (Etimesgut / Ankara)
-const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9482);
-const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.6881);
-const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 250);
+// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları
+const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
+const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.69035341292343);
+const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 1000);
+
+// THKÜ eduroam & THKU-802.1x Resmi IP Blokları
+const THKU_PUBLIC_PREFIXES = ["212.154.67.", "95.183.206.", "193.255."];
+const THKU_LOCAL_WIFI_PREFIX = "10.2."; // 10.2.8.x (eduroam & THKU-802.1x yerel IPv4)
 
 function getClientIp(request) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -19,7 +24,126 @@ function getClientIp(request) {
   return request.headers.get("x-real-ip") || "127.0.0.1";
 }
 
-// Haversine formülü ile öğrenci GPS koordinatı ve kütüphane arasındaki mesafeyi (metre) hesaplar
+// Bilgisayarın/Sunucunun bağlı olduğu Wi-Fi adaptöründe 10.2.x.x (eduroam / THKU-802.1x) IP'si var mı kontrol eder
+function hasCampusLocalWifiInterface() {
+  try {
+    const nets = os.networkInterfaces();
+    for (const name of Object.keys(nets)) {
+      for (const net of nets[name] || []) {
+        if (net.family === "IPv4" && !net.internal && net.address.startsWith(THKU_LOCAL_WIFI_PREFIX)) {
+          return true;
+        }
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function getCrossIncognitoSignature(request) {
+  const ip = getClientIp(request);
+  const ua = request.headers.get("user-agent") || "no-ua";
+  const hwFp = request.headers.get("x-hardware-fp") || "no-hw";
+  const netType = request.headers.get("x-net-type") || "unknown";
+  const headerDeviceId = request.headers.get("x-device-id") || "no-dev-id";
+
+  const ipUaHash = crypto.createHash("sha256").update(`${ip}|${ua}`).digest("hex").substring(0, 20);
+  const hwLockHash = crypto.createHash("sha256").update(`${ip}|${hwFp}|${ua}`).digest("hex").substring(0, 20);
+
+  return { ip, hwLockHash, ipUaHash, headerDeviceId, netType };
+}
+
+async function verifyCampusNetworkAndVpn(ip, netType) {
+  if (netType === "cellular") {
+    return {
+      allowed: false,
+      reason: "Mobil Veri (Hücresel Ağ) bağlantısı tespit edildi. Oda giriş onayı yalnızca THKÜ Kampüs Wi-Fi (eduroam / THKU-802.1x) ağı üzerinden yapılabilir.",
+    };
+  }
+
+  const vpnPrefix = process.env.CAMPUS_VPN_PREFIX || "10.254.";
+  if (ip.startsWith(vpnPrefix)) {
+    return {
+      allowed: false,
+      reason: "Güvenlik İhlali: Kampüs VPN bağlantısı üzerinden uzaktan kapı QR doğrulaması yapılamaz.",
+    };
+  }
+
+  if (process.env.ENFORCE_CAMPUS_WIFI === "true") {
+    const customPrefix = process.env.CAMPUS_IP_PREFIX;
+    const validPublicPrefixes = customPrefix
+      ? [customPrefix, ...THKU_PUBLIC_PREFIXES]
+      : THKU_PUBLIC_PREFIXES;
+
+    // 1. İstek doğrudan 10.2.x.x (THKÜ Wi-Fi) veya 212.154.67.x IP'sinden geliyorsa
+    if (
+      ip.startsWith(THKU_LOCAL_WIFI_PREFIX) ||
+      validPublicPrefixes.some((pref) => ip.startsWith(pref))
+    ) {
+      return { allowed: true };
+    }
+
+    // 2. Dış IP ve Mobil Veri / VPN kontrolü
+    try {
+      const targetQueryIp =
+        ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.")
+          ? ""
+          : ip;
+
+      const res = await fetch(
+        `http://ip-api.com/json/${targetQueryIp}?fields=status,query,isp,org,mobile,proxy,hosting`,
+        { signal: AbortSignal.timeout(3000) }
+      );
+      const netInfo = await res.json();
+
+      if (netInfo?.status === "success") {
+        if (netInfo.mobile) {
+          return {
+            allowed: false,
+            reason: `Mobil Veri / Kişisel Erişim Noktası (${netInfo.isp}) tespit edildi! Lütfen mobil verinizi kapatıp THKÜ Kampüs Wi-Fi (eduroam / THKU-802.1x) ağına bağlanınız.`,
+          };
+        }
+
+        if (netInfo.proxy || netInfo.hosting) {
+          return {
+            allowed: false,
+            reason: `Güvenlik İhlali: VPN veya Proxy bağlantısı (${netInfo.isp}) tespit edildi. Kütüphane dışından onay verilemez.`,
+          };
+        }
+
+        const publicIpMatches = validPublicPrefixes.some(
+          (pref) => netInfo.query && netInfo.query.startsWith(pref)
+        );
+        const orgMatches = /ulaknet|thk|türk hava kurumu|eduroam/i.test(
+          `${netInfo.isp} ${netInfo.org}`
+        );
+        const localWifiMatches = hasCampusLocalWifiInterface();
+
+        if (!publicIpMatches && !orgMatches && !localWifiMatches) {
+          return {
+            allowed: false,
+            reason: `Kampüs Wi-Fi (eduroam / THKU-802.1x) ağında değilsiniz (Dış IP: ${netInfo.query} - İSS: ${netInfo.isp}). Yalnızca THKÜ kampüs ağından onay verilebilir.`,
+          };
+        }
+
+        return { allowed: true };
+      }
+    } catch {
+      // Dış IP servisi zaman aşımına uğrarsa yerel 10.2.x.x Wi-Fi arayüzüne bak
+      if (hasCampusLocalWifiInterface()) {
+        return { allowed: true };
+      }
+      return {
+        allowed: false,
+        reason: "Kampüs Wi-Fi (eduroam / THKU-802.1x) ağı doğrulanamadı.",
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -50,7 +174,6 @@ export async function GET(request) {
   const isStaff = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"].includes(userRole);
 
   try {
-    // 1. GÖREVLİ / MÜDÜR / BİM İSE: 4 Odaya Asılacak Tekil Sabit QR Bilgilerini Dön
     if (isStaff) {
       const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
       const singleDoorQrUrl = `${frontendUrl}/kiosk?door=thku-study-room`;
@@ -63,7 +186,6 @@ export async function GET(request) {
       });
     }
 
-    // 2. ÖĞRENCİ İSE: Kapıdaki QR Kodun Okutulup Okutulmadığını Kontrol Et (?door=thku-study-room)
     const { searchParams } = new URL(request.url);
     const doorParam = searchParams.get("door");
 
@@ -75,35 +197,21 @@ export async function GET(request) {
       });
     }
 
-    // 3. KAMPÜS WI-FI & ANTI-VPN KONTROLÜ
-    const ip = getClientIp(request);
-    const enforceCampusNetwork = process.env.ENFORCE_CAMPUS_WIFI === "true";
-    const allowedPrefix = process.env.CAMPUS_IP_PREFIX || "193.255.";
-    const vpnPrefix = process.env.CAMPUS_VPN_PREFIX || "10.254."; // BİM VPN IP bloğu
+    const { ip, hwLockHash, ipUaHash, headerDeviceId, netType } = getCrossIncognitoSignature(request);
 
-    if (ip.startsWith(vpnPrefix)) {
+    // KAMPÜS WI-FI (212.154.67.142 / 10.2.x.x), MOBİL VERİ VE ANTI-VPN DENETİMİ
+    const networkCheck = await verifyCampusNetworkAndVpn(ip, netType);
+    if (!networkCheck.allowed) {
       return NextResponse.json({
         mode: "LOCATION_BLOCKED",
-        error:
-          "Güvenlik İhlali: Kampüs VPN bağlantısı üzerinden uzaktan kapı QR doğrulaması yapılamaz. Lütfen kütüphanede fiziksel olarak bulununuz.",
+        error: networkCheck.reason,
       });
     }
 
-    if (enforceCampusNetwork) {
-      const isLocal = ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.");
-      if (!ip.startsWith(allowedPrefix) && !isLocal) {
-        return NextResponse.json({
-          mode: "LOCATION_BLOCKED",
-          error:
-            "Kampüs Wi-Fi (eduroam) ağına bağlı olmadığınız tespit edildi. Evden veya mobil veri üzerinden kapı QR kodu açılamaz.",
-        });
-      }
-    }
-
-    // 4. GPS FİZİKSEL KONUM DOĞRULAMASI (VPN veya WhatsApp Fotoğraf Paylaşımını Engeller)
+    // GPS FİZİKSEL KONUM DOĞRULAMASI
     const latParam = searchParams.get("lat");
     const lngParam = searchParams.get("lng");
-    const enforceGps = process.env.ENFORCE_CAMPUS_GPS === "true";
+    const enforceGps = process.env.ENFORCE_CAMPUS_GPS !== "false";
 
     let distanceMeters = null;
     if (latParam !== null && lngParam !== null) {
@@ -114,7 +222,7 @@ export async function GET(request) {
         if (enforceGps && distanceMeters > MAX_DISTANCE_METERS) {
           return NextResponse.json({
             mode: "LOCATION_BLOCKED",
-            error: `Fiziksel Konum Hatası: Kütüphane binasına ${distanceMeters} metre uzaklıktasınız (Maksimum sınır: ${MAX_DISTANCE_METERS}m). VPN açık olsa dahi kütüphane dışından onay verilemez.`,
+            error: `Fiziksel Konum Hatası: Kütüphane binasına ${distanceMeters} metre uzaklıktasınız (Maksimum sınır: ${MAX_DISTANCE_METERS}m). Kütüphane dışından onay verilemez.`,
           });
         }
       }
@@ -125,7 +233,6 @@ export async function GET(request) {
       });
     }
 
-    // 5. ÖĞRENCİNİN BUGÜNKÜ RANDEVUSUNU VE ±15 DAKİKA PENCERESİNİ KONTROL ET
     const now = new Date();
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDate = new Date(`${todayStr}T00:00:00Z`);
@@ -168,7 +275,6 @@ export async function GET(request) {
       });
     }
 
-    // Başlangıç saatine ±15 dakika içinde olan (Örn: 10:00 randevusu için 09:45 - 10:15 arası) randevuyu bul
     let matchedReservation = null;
     let windowInfoError = null;
 
@@ -185,7 +291,7 @@ export async function GET(request) {
       } else {
         windowInfoError = `${r.room.roomNumber} - ${r.room.name} odasındaki ${fmtMinsToTime(
           startTotalMins
-        )} randevunuz için kapı QR onayı yalnızca ±15 dakika içinde (${fmtMinsToTime(
+        )} randevunuz için kapı QR onayı yalnızca ±${TOLERANCE_MINUTES} dakika içinde (${fmtMinsToTime(
           minAllowed
         )} – ${fmtMinsToTime(maxAllowed)} saatleri arasında) yapılabilir. Şu anki saat: ${fmtMinsToTime(nowMins)}`;
       }
@@ -196,7 +302,23 @@ export async function GET(request) {
         mode: "OUTSIDE_TIME_WINDOW",
         error:
           windowInfoError ||
-          "Şu anki saat, randevunuzun ±15 dakikalık başlangıç onay penceresi dışındadır.",
+          `Şu anki saat, randevunuzun ±${TOLERANCE_MINUTES} dakikalık başlangıç onay penceresi dışındadır.`,
+      });
+    }
+
+    // GİZLİ SEKME (INCOGNITO) VE AYNI CİHAZ KONTROLÜ
+    const cookieName = `thku_checkin_lock_${matchedReservation.id}`;
+    const cookieOwner = request.cookies.get(cookieName)?.value;
+    const devOwner = await redis.get(`kiosk:device_lock:${matchedReservation.id}:${headerDeviceId}`);
+    const hwOwner = await redis.get(`kiosk:hw_lock:${matchedReservation.id}:${hwLockHash}`);
+    const ipUaOwner = await redis.get(`kiosk:ipua_lock:${matchedReservation.id}:${ipUaHash}`);
+
+    const existingOwner = cookieOwner || devOwner || hwOwner || ipUaOwner;
+    if (existingOwner && existingOwner !== userId) {
+      return NextResponse.json({
+        mode: "LOCATION_BLOCKED",
+        error:
+          "⛔ Güvenlik İhlali (Gizli Sekme / Aynı Cihaz Algılandı): Bu fiziksel cihazdan bu randevu için zaten başka bir öğrenci onay vermiştir. Her katılımcı kendi mobil cihazından QR okutmak zorundadır!",
       });
     }
 
@@ -211,7 +333,6 @@ export async function GET(request) {
     const checkedUserIds = await redis.smembers(checkedSetKey);
     const alreadyCheckedIn = checkedUserIds.includes(userId);
 
-    // Arka planda bu öğrenciye özel kriptografik tek kullanımlık onay anahtarı üret (ekranda elle yazılmaz)
     const otpKey = `kiosk:personal_otp:${matchedReservation.id}:${userId}`;
     let personalSessionToken = await redis.get(otpKey);
 

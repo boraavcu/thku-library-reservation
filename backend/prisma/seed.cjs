@@ -224,7 +224,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
       dayOffset: 0,
       roomIdx: 0,
       orgIdx: 0, // Bora Avcu (s250444902@stu.thk.edu.tr - Organizatör)
-      partIdxs: [2, 7], // Mehmet Demir & Selin Arslan (3 kişi -> +Üye Ekle ve Gruptan Çık test edilebilir!)
+      partIdxs: [2], 
       startH: boraStartH+1,
       endH: boraEndH,
       status: "CONFIRMED",
@@ -276,7 +276,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
       dayOffset: 1,
       roomIdx: 1,
       orgIdx: 1, // Ayşe Yılmaz davet gönderdi
-      partIdxs: [0, 2], // 0 = Bora Avcu (PENDING olarak bekleyen davet!)
+      partIdxs: [0], // 0 = Bora Avcu (PENDING olarak bekleyen davet!)
       startH: 10,
       endH: 13,
       status: "PENDING",

@@ -4,11 +4,11 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import {
   runReservationLifecycleChecks,
-  sendReservationConfirmedEmails,
+  handleParticipantAcceptedEmails,
 } from "@/lib/lifecycle";
 
 const DEFAULT_MIN = 2;
-const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
+const INVITATION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -57,7 +57,6 @@ export async function POST(request) {
       );
     }
 
-    // 30 Dakikalık Davet Onay Süresi Kontrolü
     const elapsedMs = Date.now() - new Date(participant.reservation.createdAt).getTime();
     if (participant.reservation.status === "PENDING" && elapsedMs > INVITATION_TIMEOUT_MS) {
       await prisma.reservation.update({
@@ -78,11 +77,9 @@ export async function POST(request) {
       return NextResponse.json({ error: "Bu davete zaten yanıt verilmiş." }, { status: 400 });
     }
 
-    // SADECE KABUL ET (ACCEPT) DURUMUNDA ÇALIŞACAK KONTROLLER
     if (action === "ACCEPT") {
       const targetDate = participant.reservation.reservationDate;
 
-      // 1. Günlük 1 Rezervasyon Limiti Kontrolü
       const existingBookingOnDate = await prisma.reservation.findFirst({
         where: {
           id: { not: participant.reservationId },
@@ -107,7 +104,6 @@ export async function POST(request) {
         );
       }
 
-      // Gece 21:00-24:00 <-> Ertesi Gün 00:00-08:00 Davet Kabul Kontrolü
       const resStartH = new Date(participant.reservation.startTime).getUTCHours();
       const resEndDt = new Date(participant.reservation.endTime);
       const resEndH =
@@ -194,14 +190,24 @@ export async function POST(request) {
 
       const totalConfirmed = 1 + acceptedCount;
 
-      if (totalConfirmed >= minP && participant.reservation.status === "PENDING") {
-        await prisma.reservation.update({
-          where: { id: participant.reservationId },
+      if (totalConfirmed >= minP) {
+        // Sadece 2. kişi kabul ettiğinde status "PENDING" -> "CONFIRMED" olur ve transitionResult.count = 1 döner.
+        // 3., 4., 5. kişi kabul ettiğinde randevu zaten "CONFIRMED" olduğu için count = 0 döner.
+        const transitionResult = await prisma.reservation.updateMany({
+          where: {
+            id: participant.reservationId,
+            status: "PENDING",
+          },
           data: { status: "CONFIRMED" },
         });
 
-        // Randevu CONFIRMED olduğu anda Görevliye ve Öğrencilere Mail Gönder!
-        await sendReservationConfirmedEmails(participant.reservationId);
+        const isInitialConfirmation = transitionResult.count === 1;
+
+        await handleParticipantAcceptedEmails({
+          reservationId: participant.reservationId,
+          acceptingUserId: user.id,
+          isInitialConfirmation,
+        });
       }
     }
 

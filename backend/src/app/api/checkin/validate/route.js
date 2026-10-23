@@ -6,12 +6,13 @@ import redis from "@/lib/redis";
 import crypto from "crypto";
 import { sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
 
-const TOLERANCE_MINUTES = 15; // Başlangıç saatine ±15 dk kuralı (Örn: 10:00 -> 09:45 - 10:15)
-const DEVICE_LOCK_TTL = 14400; // 4 saat boyunca aynı cihazdan başka öğrenci onay veremez
+const TOLERANCE_MINUTES = 60;
+const DEVICE_LOCK_TTL = 14400; // 4 saat boyunca aynı cihazdan (gizli sekme dahil) başka öğrenci onay veremez
 
-const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9482);
-const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.6881);
-const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 250);
+// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları
+const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
+const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.69035341292343);
+const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 1000);
 
 function getClientIp(request) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -19,13 +20,17 @@ function getClientIp(request) {
   return request.headers.get("x-real-ip") || "127.0.0.1";
 }
 
-function getDeviceSignature(request) {
-  const headerDeviceId = request.headers.get("x-device-id") || "no-dev-id";
-  const userAgent = request.headers.get("user-agent") || "no-ua";
+function getCrossIncognitoSignature(request) {
   const ip = getClientIp(request);
-  const rawFingerprint = `${ip}|${userAgent}`;
-  const uaHash = crypto.createHash("sha256").update(rawFingerprint).digest("hex").substring(0, 16);
-  return { headerDeviceId, uaHash, ip };
+  const ua = request.headers.get("user-agent") || "no-ua";
+  const hwFp = request.headers.get("x-hardware-fp") || "no-hw";
+  const netType = request.headers.get("x-net-type") || "unknown";
+  const headerDeviceId = request.headers.get("x-device-id") || "no-dev-id";
+
+  const ipUaHash = crypto.createHash("sha256").update(`${ip}|${ua}`).digest("hex").substring(0, 20);
+  const hwLockHash = crypto.createHash("sha256").update(`${ip}|${hwFp}|${ua}`).digest("hex").substring(0, 20);
+
+  return { ip, hwLockHash, ipUaHash, headerDeviceId, netType };
 }
 
 function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
@@ -49,11 +54,17 @@ export async function POST(request) {
   const currentUserId = session.user.id;
 
   try {
-    const { headerDeviceId, uaHash, ip } = getDeviceSignature(request);
+    const { ip, hwLockHash, ipUaHash, headerDeviceId, netType } = getCrossIncognitoSignature(request);
     const body = await request.json();
     const { personalSessionToken, lat, lng } = body;
 
-    // 1. KAMPÜS WI-FI & ANTI-VPN KONTROLÜ
+    if (netType === "cellular") {
+      return NextResponse.json(
+        { error: "Mobil Veri bağlantısı tespit edildi. Yalnızca Kampüs Wi-Fi (eduroam / THKU-802.1x) üzerinden onay verilebilir." },
+        { status: 403 }
+      );
+    }
+
     const vpnPrefix = process.env.CAMPUS_VPN_PREFIX || "10.254.";
     if (ip.startsWith(vpnPrefix)) {
       return NextResponse.json(
@@ -62,19 +73,7 @@ export async function POST(request) {
       );
     }
 
-    if (process.env.ENFORCE_CAMPUS_WIFI === "true") {
-      const allowedPrefix = process.env.CAMPUS_IP_PREFIX || "193.255.";
-      const isLocal = ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.");
-      if (!ip.startsWith(allowedPrefix) && !isLocal) {
-        return NextResponse.json(
-          { error: "Güvenlik Kuralı: Oda giriş onayı yalnızca THKÜ Kampüs Wi-Fi (eduroam) ağı üzerinden yapılabilir." },
-          { status: 403 }
-        );
-      }
-    }
-
-    // 2. GPS KONUM KONTROLÜ
-    if (process.env.ENFORCE_CAMPUS_GPS === "true") {
+    if (process.env.ENFORCE_CAMPUS_GPS !== "false") {
       if (typeof lat !== "number" || typeof lng !== "number") {
         return NextResponse.json(
           { error: "Fiziksel konum doğrulaması için tarayıcı GPS izni gereklidir." },
@@ -90,7 +89,6 @@ export async function POST(request) {
       }
     }
 
-    // 3. BUGÜNKÜ RANDEVUYU VE ±15 DAKİKA BAŞLANGIÇ PENCERESİNİ BUL
     const now = new Date();
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDate = new Date(`${todayStr}T00:00:00Z`);
@@ -142,28 +140,35 @@ export async function POST(request) {
 
     if (!reservation) {
       return NextResponse.json(
-        { error: "Şu anki saat diliminde (±15 dk başlangıç penceresi içinde) onaylanabilecek bir randevunuz bulunamadı." },
+        { error: `Şu anki saat diliminde (±${TOLERANCE_MINUTES} dk başlangıç penceresi içinde) onaylanabilecek bir randevunuz bulunamadı.` },
         { status: 400 }
       );
     }
 
-    // 4. CİHAZ KİLİDİ KONTROLÜ (Aynı Telefondan Başka Hesaba Girip Onay Vermeyi Önler)
+    // 4 KATMANLI GİZLİ SEKME (INCOGNITO) VE CİHAZ KİLİDİ KONTROLÜ
     const cookieName = `thku_checkin_lock_${reservation.id}`;
     const cookieOwner = request.cookies.get(cookieName)?.value;
     const deviceKey = `kiosk:device_lock:${reservation.id}:${headerDeviceId}`;
-    const deviceOwner = await redis.get(deviceKey);
+    const hwKey = `kiosk:hw_lock:${reservation.id}:${hwLockHash}`;
+    const ipUaKey = `kiosk:ipua_lock:${reservation.id}:${ipUaHash}`;
 
-    if ((cookieOwner && cookieOwner !== currentUserId) || (deviceOwner && deviceOwner !== currentUserId)) {
+    const [deviceOwner, hwOwner, ipUaOwner] = await Promise.all([
+      redis.get(deviceKey),
+      redis.get(hwKey),
+      redis.get(ipUaKey),
+    ]);
+
+    const lockedOwner = cookieOwner || deviceOwner || hwOwner || ipUaOwner;
+    if (lockedOwner && lockedOwner !== currentUserId) {
       return NextResponse.json(
         {
           error:
-            "Güvenlik İhlali: Bu mobil cihazdan bu randevu için zaten başka bir öğrenci onay vermiştir. Her katılımcı kendi cihazından QR okutmak zorundadır!",
+            "⛔ Güvenlik İhlali (Gizli Sekme / Aynı Cihaz Algılandı): Bu fiziksel cihazdan bu randevu için zaten başka bir öğrenci onay vermiştir. Her katılımcı kendi cihazından QR okutmak zorundadır!",
         },
         { status: 403 }
       );
     }
 
-    // 5. ARKA PLAN KİŞİSEL OTURUM ANAHTARI DOĞRULAMASI
     const personalOtpKey = `kiosk:personal_otp:${reservation.id}:${currentUserId}`;
     const expectedToken = await redis.get(personalOtpKey);
 
@@ -176,8 +181,11 @@ export async function POST(request) {
 
     await redis.del(personalOtpKey);
 
-    // 6. CİHAZI MÜHÜRLE VE ÖĞRENCİYİ YOKLAMA LİSTESİNE EKLE
-    await redis.set(deviceKey, currentUserId, "EX", DEVICE_LOCK_TTL);
+    await Promise.all([
+      redis.set(deviceKey, currentUserId, "EX", DEVICE_LOCK_TTL),
+      redis.set(hwKey, currentUserId, "EX", DEVICE_LOCK_TTL),
+      redis.set(ipUaKey, currentUserId, "EX", DEVICE_LOCK_TTL),
+    ]);
 
     const checkedSetKey = `kiosk:checked_users:${reservation.id}`;
     await redis.sadd(checkedSetKey, currentUserId);
@@ -196,7 +204,7 @@ export async function POST(request) {
         newData: {
           room: roomTitle,
           checkedInBy: session.user.email,
-          deviceSignature: uaHash,
+          deviceSignature: hwLockHash,
           progress: `${checkedUserIds.length}/${totalGroupMembers}`,
         },
       },
