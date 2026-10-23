@@ -53,7 +53,8 @@ function Dashboard() {
       navigate('/rules');
       return;
     }
-    if (['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role)) {
+    const isStudentView = new URLSearchParams(window.location.search).get('studentView') === 'true';
+    if (['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role) && !isStudentView) {
       navigate('/admin', { replace: true });
     }
   }, [session, status, navigate]);

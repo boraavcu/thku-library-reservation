@@ -399,6 +399,16 @@ export default function AdminPanel() {
             </Button>
 
             <Button
+             variant="outlined"
+             color="info"
+             startIcon={<SchoolIcon />}
+             onClick={() => navigate('/dashboard?studentView=true')}
+             sx={{ borderRadius: 2, fontWeight: 700 }}
+            >
+             Öğrenci Ekranı (Rezervasyon Yap)
+            </Button>
+
+            <Button
               variant="contained"
               color="secondary"
               startIcon={<QrCodeScannerIcon />}
