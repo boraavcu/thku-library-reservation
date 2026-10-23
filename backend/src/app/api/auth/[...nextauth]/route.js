@@ -114,10 +114,10 @@ export const authOptions = {
         for (const demo of Object.values(DEMO_USERS)) {
           await prisma.user.upsert({
             where: { email: demo.email },
+            // ÖNEMLİ: update içinde 'role' EZİLMEZ! Böylece Admin Panelden atanan roller kalıcı olur.
             update: {
               fullName: demo.fullName,
               department: demo.department,
-              role: demo.role,
               isActive: true,
             },
             create: {
@@ -189,9 +189,11 @@ export const authOptions = {
     },
 
     async jwt({ token, user, trigger, session }) {
-      if (user?.email) {
+      const lookupEmail = user?.email || token?.email;
+
+      if (lookupEmail) {
         const dbUser = await prisma.user.findUnique({
-          where: { email: user.email },
+          where: { email: lookupEmail },
           select: {
             id: true,
             fullName: true,
