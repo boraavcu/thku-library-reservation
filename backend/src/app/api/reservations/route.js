@@ -400,9 +400,7 @@ export async function GET() {
 
 /**
  * PATCH /api/reservations ->
- * 1) EARLY_CHECKOUT: Odayı Erken Boşaltma 
- * 2) ADD_PARTICIPANT: Onaylanan/Bekleyen Randevuya Oda Sınırını (8) Aşmayacak Şekilde Sonradan Üye Ekleme 
- * 3) LEAVE_RESERVATION: Dahil Olan Üyenin En Az 2 Kişi Kalana Kadar Randevudan Çıkabilmesi 
+ * Yalnızca EARLY_CHECKOUT (Odayı Erken Boşaltma - Madde 13) işlemini yapar.
  */
 export async function PATCH(request) {
   const session = await getServerSession(authOptions);
@@ -411,9 +409,12 @@ export async function PATCH(request) {
   }
 
   try {
-    const { reservationId, action, participantEmail } = await request.json();
-    if (!reservationId || !["EARLY_CHECKOUT", "ADD_PARTICIPANT", "LEAVE_RESERVATION"].includes(action)) {
-      return NextResponse.json({ error: "Geçersiz işlem." }, { status: 400 });
+    const { reservationId, action } = await request.json();
+    if (!reservationId || action !== "EARLY_CHECKOUT") {
+      return NextResponse.json(
+        { error: "Yalnızca odayı erken boşaltma işlemi yapılabilir." },
+        { status: 400 }
+      );
     }
 
     const user = await prisma.user.findUnique({
@@ -423,181 +424,13 @@ export async function PATCH(request) {
 
     const reservation = await prisma.reservation.findUnique({
       where: { id: reservationId },
-      include: {
-        room: true,
-        participants: {
-          include: { user: { select: { id: true, email: true, fullName: true } } },
-        },
-      },
+      include: { room: true },
     });
 
     if (!reservation) {
       return NextResponse.json({ error: "Rezervasyon bulunamadı." }, { status: 404 });
     }
 
-    // ONAYLANAN RANDEVUYA SONRADAN ÜYE EKLEME (Maksimum 8 Kişi) ---
-    if (action === "ADD_PARTICIPANT") {
-      if (reservation.userId !== user.id) {
-        return NextResponse.json(
-          { error: "Yalnızca rezervasyon organizatörü gruba yeni üye ekleyebilir." },
-          { status: 403 }
-        );
-      }
-
-      if (!["PENDING", "CONFIRMED"].includes(reservation.status)) {
-        return NextResponse.json(
-          { error: "Yalnızca aktif (onaylı veya bekleyen) randevulara üye eklenebilir." },
-          { status: 400 }
-        );
-      }
-
-      const targetEmail = participantEmail?.trim().toLowerCase();
-      if (!targetEmail || !targetEmail.includes("@")) {
-        return NextResponse.json({ error: "Geçerli bir kurumsal e-posta giriniz." }, { status: 400 });
-      }
-
-      if (targetEmail === user.email.toLowerCase()) {
-        return NextResponse.json({ error: "Kendinizi tekrar ekleyemezsiniz." }, { status: 400 });
-      }
-
-      const activeParticipants = reservation.participants.filter((p) => p.status !== "REJECTED");
-      const currentTotalPeople = 1 + activeParticipants.length;
-      const roomMaxCapacity = reservation.room.capacity || 8;
-
-      if (currentTotalPeople >= roomMaxCapacity) {
-        return NextResponse.json(
-          { error: `Oda kapasitesi (${roomMaxCapacity} kişi) dolu olduğu için yeni üye eklenemez.` },
-          { status: 400 }
-        );
-      }
-
-      const targetUser = await prisma.user.findUnique({
-        where: { email: targetEmail },
-        select: { id: true, email: true, fullName: true, isBanned: true },
-      });
-
-      if (!targetUser) {
-        return NextResponse.json(
-          { error: `${targetEmail} adresi sistemde kayıtlı değil.` },
-          { status: 404 }
-        );
-      }
-
-      if (targetUser.isBanned) {
-        return NextResponse.json(
-          { error: `${targetEmail} kullanıcısının rezervasyon yasağı (ban) bulunmaktadır.` },
-          { status: 400 }
-        );
-      }
-
-      // Kullanıcının o gün başka aktif randevusu var mı?
-      const busyToday = await prisma.reservation.findFirst({
-        where: {
-          id: { not: reservationId },
-          reservationDate: reservation.reservationDate,
-          status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-          OR: [
-            { userId: targetUser.id },
-            { participants: { some: { userId: targetUser.id, status: "ACCEPTED" } } },
-          ],
-        },
-        select: { id: true },
-      });
-
-      if (busyToday) {
-        return NextResponse.json(
-          { error: `${targetEmail} öğrencisinin bu tarihte zaten başka bir rezervasyonu bulunmaktadır.` },
-          { status: 400 }
-        );
-      }
-
-      await prisma.reservationParticipant.upsert({
-        where: {
-          reservationId_userId: {
-            reservationId,
-            userId: targetUser.id,
-          },
-        },
-        update: { status: "PENDING", joinedAt: null },
-        create: {
-          reservationId,
-          userId: targetUser.id,
-          status: "PENDING",
-        },
-      });
-
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          action: "PARTICIPANT_ADDED",
-          entityType: "Reservation",
-          entityId: reservationId,
-          newData: {
-            room: reservation.room.roomNumber,
-            addedEmail: targetUser.email,
-            byOrganizer: user.email,
-          },
-        },
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: `${targetUser.fullName} (${targetUser.email}) gruba davet edildi.`,
-      });
-    }
-
-    // --- SENARYO B: MADDE 14 - DAHİL OLAN ÜYENİN GRUPTAN ÇIKMASI (En Az 2 Kişi Kalana Kadar) ---
-    if (action === "LEAVE_RESERVATION") {
-      if (reservation.userId === user.id) {
-        return NextResponse.json(
-          { error: "Organizatör gruptan ayrılamaz; randevuyu iptal edebilir veya erken boşaltabilir." },
-          { status: 400 }
-        );
-      }
-
-      const myRecord = reservation.participants.find(
-        (p) => p.userId === user.id && p.status === "ACCEPTED"
-      );
-
-      if (!myRecord) {
-        return NextResponse.json({ error: "Bu randevuda onaylı katılımcı değilsiniz." }, { status: 400 });
-      }
-
-      const acceptedMembers = reservation.participants.filter((p) => p.status === "ACCEPTED");
-      const currentConfirmedTotal = 1 + acceptedMembers.length; // 1 Organizatör + Onaylılar
-
-      if (currentConfirmedTotal <= 2) {
-        return NextResponse.json(
-          { error: "Odada en az 2 kişi kalması zorunludur. Şu an toplam 2 kişi olduğunuz için gruptan çıkamazsınız." },
-          { status: 400 }
-        );
-      }
-
-      await prisma.reservationParticipant.delete({
-        where: { id: myRecord.id },
-      });
-
-      await prisma.auditLog.create({
-        data: {
-          userId: user.id,
-          action: "PARTICIPANT_LEFT",
-          entityType: "Reservation",
-          entityId: reservationId,
-          newData: {
-            room: reservation.room.roomNumber,
-            leftUser: user.email,
-            remainingCount: currentConfirmedTotal - 1,
-          },
-        },
-      });
-
-      return NextResponse.json({
-        success: true,
-        message: "Randevu grubundan başarıyla ayrıldınız.",
-      });
-    }
-
-    // --- SENARYO C: MADDE 13 - ODAYI ERKEN BOŞALTMA (EARLY_CHECKOUT) ---
     const isStaff = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"].includes(user.role);
     if (reservation.userId !== user.id && !isStaff) {
       return NextResponse.json(
