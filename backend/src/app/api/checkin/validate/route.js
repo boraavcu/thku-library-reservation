@@ -8,8 +8,9 @@ import { sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
 
 const TOLERANCE_MINUTES = 60;
 const DEVICE_LOCK_TTL = 14400; // 4 saat boyunca aynı cihazdan (gizli sekme dahil) başka öğrenci onay veremez
+const MIN_CHECKIN_PARTICIPANTS = 2; // En az 2 kişi Kiosk onayı verdiğinde randevu başlar ve müdüre mail gider
 
-// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları
+// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (1 KM Sabit Yarıçap)
 const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
 const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.69035341292343);
 const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 1000);
@@ -210,9 +211,14 @@ export async function POST(request) {
       },
     });
 
-    if (reservation.status !== "CHECKED_IN") {
-      await prisma.reservation.update({
-        where: { id: reservation.id },
+    // KURAL: Sadece EN AZ 2 KİŞİ Kiosk onayı verdiğinde randevu CHECKED_IN olur ve Müdüre 1 kez mail gider!
+    // 1. kişi onayladığında veya 3., 4. kişi onayladığında müdüre mail GİTMEZ.
+    if (checkedUserIds.length >= MIN_CHECKIN_PARTICIPANTS) {
+      const transition = await prisma.reservation.updateMany({
+        where: {
+          id: reservation.id,
+          status: "CONFIRMED",
+        },
         data: {
           status: "CHECKED_IN",
           checkedInAt: now,
@@ -220,8 +226,17 @@ export async function POST(request) {
         },
       });
 
-      await sendKioskCheckInEmailToStaff(reservation.id, session.user.email);
+      if (transition.count === 1) {
+        sendKioskCheckInEmailToStaff(reservation.id, checkedUserIds).catch((err) =>
+          console.error("Kiosk staff email error:", err)
+        );
+      }
     }
+
+    const statusMessage =
+      checkedUserIds.length < MIN_CHECKIN_PARTICIPANTS
+        ? `Yoklama kaydınız alındı (${checkedUserIds.length}/${totalGroupMembers}). Randevunun başlaması için en az 2 grup üyesinin kapı QR onayı vermesi gerekmektedir.`
+        : `Oda girişiniz onaylandı ve randevunuz resmen başladı! (${checkedUserIds.length}/${totalGroupMembers} katılımcı doğruladı)`;
 
     const resJson = NextResponse.json({
       success: true,
@@ -229,7 +244,7 @@ export async function POST(request) {
       room: reservation.room,
       checkedCount: checkedUserIds.length,
       totalCount: totalGroupMembers,
-      message: `Oda girişiniz başarıyla onaylandı! (${checkedUserIds.length}/${totalGroupMembers} katılımcı doğruladı)`,
+      message: statusMessage,
     });
 
     resJson.cookies.set(cookieName, currentUserId, {

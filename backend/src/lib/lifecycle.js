@@ -3,6 +3,7 @@ import nodemailer from "nodemailer";
 
 const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
 
+// KESİN E-POSTA KİLİDİ: Yalnızca bu 2 gerçek adrese e-posta gönderilir
 export const ALLOWED_STUDENT_EMAIL = "s250444902@stu.thk.edu.tr";
 export const ALLOWED_DIRECTOR_EMAIL = "boraa-35@hotmail.com";
 const SAFE_EMAIL_WHITELIST = new Set([
@@ -10,18 +11,46 @@ const SAFE_EMAIL_WHITELIST = new Set([
   ALLOWED_DIRECTOR_EMAIL.toLowerCase(),
 ]);
 
+// Kalıcı SMTP Bağlantı Havuzu (Her mailde 5 sn yeniden bağlanma süresini ortadan kaldırır)
+let cachedTransporter = null;
+
+function getSmtpTransporter() {
+  if (cachedTransporter) return cachedTransporter;
+
+  const smtpHost = process.env.SMTP_HOST?.trim();
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = process.env.SMTP_USER?.trim();
+  const smtpPass = process.env.SMTP_PASS?.replace(/\s+/g, "");
+
+  if (!smtpHost || !smtpUser || !smtpPass) return null;
+
+  const createTransportFn =
+    nodemailer.createTransport || nodemailer.default?.createTransport;
+
+  cachedTransporter = createTransportFn.call(nodemailer, {
+    pool: true,
+    maxConnections: 3,
+    maxMessages: 50,
+    host: smtpHost,
+    port: smtpPort,
+    secure: smtpPort === 465,
+    auth: {
+      user: smtpUser,
+      pass: smtpPass,
+    },
+    tls: {
+      rejectUnauthorized: false,
+    },
+  });
+
+  return cachedTransporter;
+}
+
 export async function queueSafeEmail({ to, subject, body, priority = 2 }) {
   if (!to) return;
-  let normalizedTo = to.trim().toLowerCase();
-  let finalSubject = subject;
+  const normalizedTo = to.trim().toLowerCase();
 
-  // Demo testi sırasında @demo.local hesaplarına (2., 3., 4. kişi) giden mailleri de
-  // test edebilmen için senin öğrenci mailine (s250444902@stu.thk.edu.tr) yönlendiriyoruz.
-  if (normalizedTo.endsWith("@demo.local")) {
-    finalSubject = `[Demo Alıcı: ${normalizedTo}] ${subject}`;
-    normalizedTo = ALLOWED_STUDENT_EMAIL.toLowerCase();
-  }
-
+  // @demo.local dahil izinli listede olmayan hiçbir adrese mail gönderme!
   if (!SAFE_EMAIL_WHITELIST.has(normalizedTo)) {
     return;
   }
@@ -29,42 +58,28 @@ export async function queueSafeEmail({ to, subject, body, priority = 2 }) {
   const queued = await prisma.emailQueue.create({
     data: {
       to: normalizedTo,
-      subject: finalSubject,
+      subject,
       body,
       priority,
       status: "PENDING",
     },
   });
 
-  console.log(`\n📧 [E-POSTA KUYRUĞA ALINDI] Alıcı: ${normalizedTo} | Konu: ${finalSubject}`);
-
-  const smtpHost = process.env.SMTP_HOST?.trim();
-  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const transporter = getSmtpTransporter();
   const smtpUser = process.env.SMTP_USER?.trim();
-  const smtpPass = process.env.SMTP_PASS?.replace(/\s+/g, ""); // 16 haneli şifrede boşluk varsa otomatik temizler
 
-  if (smtpHost && smtpUser && smtpPass) {
+  if (!transporter || !smtpUser) {
+    console.warn(`⚠️ [SMTP EKSİK] .env içinde SMTP ayarları bulunamadı.`);
+    return;
+  }
+
+  // Arka planda (Non-Blocking) gönderim: Kullanıcı arayüzünü asla 5-10 saniye bekletmez!
+  Promise.resolve().then(async () => {
     try {
-      const createTransportFn =
-        nodemailer.createTransport || nodemailer.default?.createTransport;
-
-      const transporter = createTransportFn.call(nodemailer, {
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-        tls: {
-          rejectUnauthorized: false,
-        },
-      });
-
       await transporter.sendMail({
         from: process.env.SMTP_FROM || `"THKÜ Kütüphane Sistemi" <${smtpUser}>`,
         to: normalizedTo,
-        subject: finalSubject,
+        subject,
         text: body,
       });
 
@@ -72,15 +87,9 @@ export async function queueSafeEmail({ to, subject, body, priority = 2 }) {
         where: { id: queued.id },
         data: { status: "SENT", sentAt: new Date() },
       });
-      console.log(`✅ [GERÇEK E-POSTA BAŞARIYLA İLETİLDİ] -> ${normalizedTo}`);
+      console.log(`✅ [E-POSTA İLETİLDİ] -> ${normalizedTo} | Konu: ${subject}`);
     } catch (smtpErr) {
       console.error(`❌ [SMTP GÖNDERİM HATASI] (${normalizedTo}):`, smtpErr.message);
-      if (smtpErr.message?.includes("535")) {
-        console.error(
-          `💡 ÇÖZÜM: Gmail normal hesap şifresini kabul etmez. https://myaccount.google.com/apppasswords adresinden 16 harfli 'Uygulama Şifresi' alıp backend/.env içindeki SMTP_PASS satırına yazınız.`
-        );
-      }
-
       try {
         await prisma.emailQueue.update({
           where: { id: queued.id },
@@ -95,11 +104,7 @@ export async function queueSafeEmail({ to, subject, body, priority = 2 }) {
         console.error("EmailQueue update error:", dbErr.message);
       }
     }
-  } else {
-    console.warn(
-      `⚠️ [SMTP EKSİK] backend/.env içinde SMTP_HOST, SMTP_USER veya SMTP_PASS tanımlı değil!`
-    );
-  }
+  });
 }
 
 function fmtTimeUTC(dt) {
@@ -229,13 +234,11 @@ export async function runReservationLifecycleChecks() {
 }
 
 /**
- * YENİ MAİL MANTIĞI:
- * - isInitialConfirmation === true (2. Kişi Kabul Ettiğinde):
- *   1) Organizatöre + 2. Kişiye onay maili gider.
- *   2) Kütüphane Müdürüne (boraa-35@hotmail.com) hangi odanın kaç kişiyle kimler tarafından ayrıldığı maili gider.
- * - isInitialConfirmation === false (3., 4., 5. ... Kişi Kabul Ettiğinde):
- *   1) SADECE o kabul eden kişiye (3. ise 3.'ye, 4. ise 4.'ye) mail gider.
- *   2) Organizatöre ve Kütüphane Müdürüne tekrar mail GİTMEZ!
+ * 1) isInitialConfirmation === true (2. Kişi Daveti Kabul Ettiğinde):
+ *    - Organizatöre ve 2. kişiye onay maili gider.
+ *    - Kütüphane Müdürüne (boraa-35@hotmail.com) odanın en az 2 kişiyle ayrıldığı bilgisini içeren mail 1 kez gider.
+ * 2) isInitialConfirmation === false (3., 4., 5. ... Kişi Kabul Ettiğinde):
+ *    - Sadece o kabul eden kişiye mail gider; Müdüre ve organizatöre tekrar mail gitmez.
  */
 export async function handleParticipantAcceptedEmails({
   reservationId,
@@ -264,7 +267,6 @@ export async function handleParticipantAcceptedEmails({
     const acceptedParticipants = res.participants.filter((p) => p.status === "ACCEPTED");
     const acceptingParticipant = acceptedParticipants.find((p) => p.userId === acceptingUserId)?.user;
 
-    // SENARYO 1: 2. KİŞİ KABUL ETTİ -> ODA AYRILDI (CONFIRMED)
     if (isInitialConfirmation) {
       const allGroupPeople = [
         { fullName: res.user.fullName, email: res.user.email, statusLabel: "Organizatör (Onaylı)" },
@@ -279,7 +281,6 @@ export async function handleParticipantAcceptedEmails({
         .map((m, idx) => `${idx + 1}. ${m.fullName} (${m.email}) - [${m.statusLabel}]`)
         .join("\n");
 
-      // A) Kütüphane Müdürüne (boraa-35@hotmail.com) Oda Ayrıldı Bilgisi (Sadece 1 kez gider)
       await queueSafeEmail({
         to: ALLOWED_DIRECTOR_EMAIL,
         subject: `[Kütüphane Müdürlüğü] Oda Ayrıldı: ${roomLabel} (${dateStr} | ${timeStr})`,
@@ -287,7 +288,6 @@ export async function handleParticipantAcceptedEmails({
         priority: 1,
       });
 
-      // B) Organizatöre ve Onaylayan 2. Kişiye Mail Gönder
       const recipientsForInitial = [res.user];
       if (acceptingParticipant && acceptingParticipant.id !== res.user.id) {
         recipientsForInitial.push(acceptingParticipant);
@@ -315,7 +315,6 @@ export async function handleParticipantAcceptedEmails({
       return;
     }
 
-    // SENARYO 2: 3., 4., 5., ... KİŞİ KABUL ETTİ (Sadece kabul eden o kişiye mail gider!)
     if (acceptingParticipant) {
       await prisma.notification.create({
         data: {
@@ -340,7 +339,10 @@ export async function handleParticipantAcceptedEmails({
   }
 }
 
-export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserEmail) {
+/**
+ * SADECE EN AZ 2 KİŞİ KİOSK (KAPI QR) ONAYINI TAMAMLADIĞINDA MÜDÜRE 1 KEZ GİDER!
+ */
+export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds = []) {
   try {
     const res = await prisma.reservation.findUnique({
       where: { id: reservationId },
@@ -360,14 +362,20 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedInUserE
     const timeStr = `${fmtTimeUTC(res.startTime)} - ${fmtTimeUTC(res.endTime)}`;
     const roomLabel = `${res.room.roomNumber} - ${res.room.name}`;
     const allMembers = [res.user, ...res.participants.map((p) => p.user)];
+
     const memberNamesList = allMembers
-      .map((m, idx) => `${idx + 1}. ${m.fullName} (${m.email})`)
+      .map((m, idx) => {
+        const hasVerified = checkedUserIds.includes(m.id);
+        return `${idx + 1}. ${m.fullName} (${m.email}) - [${
+          hasVerified ? "Kapı QR Onayladı ✓" : "Bekleniyor"
+        }]`;
+      })
       .join("\n");
 
     await queueSafeEmail({
       to: ALLOWED_DIRECTOR_EMAIL,
-      subject: `[Kiosk Girişi Başladı] ${roomLabel} Odası Aktif (${timeStr})`,
-      body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} odasındaki randevu için Kapı QR doğrulaması (${checkedInUserEmail} tarafından) gerçekleştirilmiş ve oda kullanımı başlamıştır.\n\n• Oda: ${roomLabel}\n• Tarih & Saat: ${dateStr} | ${timeStr}\n\nRandevudaki Öğrenciler (${allMembers.length} Kişi):\n${memberNamesList}`,
+      subject: `[Randevu Başladı - Kiosk Onaylandı] ${roomLabel} (${timeStr})`,
+      body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} çalışma odasındaki randevu için Kapı QR kodu en az 2 grup üyesi tarafından onaylanmış ve randevu resmen BAŞLAMIŞTIR (CHECKED_IN).\n\n• Oda: ${roomLabel}\n• Tarih & Saat: ${dateStr} | ${timeStr}\n• Kapı QR Onayı Veren: ${checkedUserIds.length} / ${allMembers.length} Kişi\n\nKatılımcı Yoklama Durumu:\n${memberNamesList}`,
       priority: 1,
     });
   } catch (error) {

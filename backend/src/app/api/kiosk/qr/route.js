@@ -9,7 +9,7 @@ import os from "os";
 const PERSONAL_OTP_TTL = 600;
 const TOLERANCE_MINUTES = 60;
 
-// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları
+// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (1 KM Sabit Yarıçap)
 const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
 const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.69035341292343);
 const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 1000);
@@ -24,7 +24,6 @@ function getClientIp(request) {
   return request.headers.get("x-real-ip") || "127.0.0.1";
 }
 
-// Bilgisayarın/Sunucunun bağlı olduğu Wi-Fi adaptöründe 10.2.x.x (eduroam / THKU-802.1x) IP'si var mı kontrol eder
 function hasCampusLocalWifiInterface() {
   try {
     const nets = os.networkInterfaces();
@@ -76,7 +75,6 @@ async function verifyCampusNetworkAndVpn(ip, netType) {
       ? [customPrefix, ...THKU_PUBLIC_PREFIXES]
       : THKU_PUBLIC_PREFIXES;
 
-    // 1. İstek doğrudan 10.2.x.x (THKÜ Wi-Fi) veya 212.154.67.x IP'sinden geliyorsa
     if (
       ip.startsWith(THKU_LOCAL_WIFI_PREFIX) ||
       validPublicPrefixes.some((pref) => ip.startsWith(pref))
@@ -84,7 +82,6 @@ async function verifyCampusNetworkAndVpn(ip, netType) {
       return { allowed: true };
     }
 
-    // 2. Dış IP ve Mobil Veri / VPN kontrolü
     try {
       const targetQueryIp =
         ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.")
@@ -130,7 +127,6 @@ async function verifyCampusNetworkAndVpn(ip, netType) {
         return { allowed: true };
       }
     } catch {
-      // Dış IP servisi zaman aşımına uğrarsa yerel 10.2.x.x Wi-Fi arayüzüne bak
       if (hasCampusLocalWifiInterface()) {
         return { allowed: true };
       }
@@ -199,7 +195,6 @@ export async function GET(request) {
 
     const { ip, hwLockHash, ipUaHash, headerDeviceId, netType } = getCrossIncognitoSignature(request);
 
-    // KAMPÜS WI-FI (212.154.67.142 / 10.2.x.x), MOBİL VERİ VE ANTI-VPN DENETİMİ
     const networkCheck = await verifyCampusNetworkAndVpn(ip, netType);
     if (!networkCheck.allowed) {
       return NextResponse.json({
@@ -208,7 +203,6 @@ export async function GET(request) {
       });
     }
 
-    // GPS FİZİKSEL KONUM DOĞRULAMASI
     const latParam = searchParams.get("lat");
     const lngParam = searchParams.get("lng");
     const enforceGps = process.env.ENFORCE_CAMPUS_GPS !== "false";
@@ -306,7 +300,6 @@ export async function GET(request) {
       });
     }
 
-    // GİZLİ SEKME (INCOGNITO) VE AYNI CİHAZ KONTROLÜ
     const cookieName = `thku_checkin_lock_${matchedReservation.id}`;
     const cookieOwner = request.cookies.get(cookieName)?.value;
     const devOwner = await redis.get(`kiosk:device_lock:${matchedReservation.id}:${headerDeviceId}`);
