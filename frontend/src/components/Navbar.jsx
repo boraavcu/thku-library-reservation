@@ -20,6 +20,7 @@ import LanguageIcon from '@mui/icons-material/Language';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 
 const THKU_LOGO = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 
@@ -45,7 +46,19 @@ export default function Navbar() {
   const [readIds, setReadIds] = useState([]);
   const [selectedNotif, setSelectedNotif] = useState(null);
 
-  const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role);
+  const userRole = session?.user?.role;
+  const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(userRole);
+  const isAdminOrSuper = ['ADMIN', 'SUPER_ADMIN'].includes(userRole);
+
+  // Kütüphane Görevlisi (LIBRARIAN) yalnızca "Öğrenci Ekranı" geçiş butonuna basıp
+  // /dashboard, /reserve veya /bookings sayfalarına geçtiğinde öğrenci menüsünü görür.
+  // /profile, /admin, /kiosk ve /rules sayfalarında tüm yetkililer (LIBRARIAN, ADMIN, SUPER_ADMIN) Yetkili Navbar'ını görür.
+  const isLibrarianInStudentMode =
+    userRole === 'LIBRARIAN' &&
+    ['/dashboard', '/reserve', '/bookings'].some((p) => location.pathname.startsWith(p));
+
+  const showStaffNavbar = isStaff && !isLibrarianInStudentMode;
+
   const storageKey = session?.user?.email ? `thku_read_notifs_${session.user.email}` : 'thku_read_notifs';
 
   useEffect(() => {
@@ -59,7 +72,9 @@ export default function Navbar() {
 
   const fetchNotifications = () => {
     if (!session?.user?.acceptedAgreementVersion) return;
-    api.get('/invitations').then(r => setInvitations(r.data || [])).catch(() => {});
+    if (!isAdminOrSuper) {
+      api.get('/invitations').then(r => setInvitations(r.data || [])).catch(() => {});
+    }
     api.get('/announcements').then(r => setAnnouncements(r.data || [])).catch(() => {});
   };
 
@@ -128,7 +143,15 @@ export default function Navbar() {
 
             {/* Sol - THKÜ Logo */}
             <Box
-              onClick={() => navigate(isStaff && location.pathname === '/admin' ? '/admin' : isStaff ? '/dashboard?studentView=true' : '/dashboard')}
+              onClick={() =>
+                navigate(
+                  showStaffNavbar
+                    ? '/admin'
+                    : isLibrarianInStudentMode
+                    ? '/dashboard?studentView=true'
+                    : '/dashboard'
+                )
+              }
               sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: 'pointer' }}
             >
               <Avatar
@@ -154,17 +177,17 @@ export default function Navbar() {
 
             {/* Orta - Rol Bazlı Menü Bağlantıları */}
             <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center', gap: 1 }}>
-              {isStaff && location.pathname === '/admin' ? (
+              {showStaffNavbar ? (
                 <>
                   <Button
                     onClick={() => navigate('/admin')}
                     sx={{
-                      color: 'primary.main',
-                      bgcolor: 'action.hover',
-                      fontWeight: 700,
+                      color: location.pathname === '/admin' ? 'primary.main' : 'text.secondary',
+                      bgcolor: location.pathname === '/admin' ? 'action.hover' : 'transparent',
+                      fontWeight: location.pathname === '/admin' ? 700 : 600,
                       fontSize: '0.875rem',
                       px: 2,
-                      '&:hover': { bgcolor: 'action.hover' },
+                      '&:hover': { bgcolor: 'action.hover', color: 'primary.main' },
                     }}
                   >
                     {isEn ? 'Management & Analytics Center' : 'Yönetim & Analiz Merkezi'}
@@ -172,14 +195,15 @@ export default function Navbar() {
                   <Button
                     onClick={() => navigate('/kiosk')}
                     sx={{
-                      color: 'text.secondary',
-                      fontWeight: 600,
+                      color: location.pathname === '/kiosk' ? 'primary.main' : 'text.secondary',
+                      bgcolor: location.pathname === '/kiosk' ? 'action.hover' : 'transparent',
+                      fontWeight: location.pathname === '/kiosk' ? 700 : 600,
                       fontSize: '0.875rem',
                       px: 2,
                       '&:hover': { bgcolor: 'action.hover', color: 'primary.main' },
                     }}
                   >
-                    {isEn ? 'Kiosk QR Screen' : 'Kiosk QR Ekranı'}
+                    {isEn ? 'Door QR Poster (/kiosk)' : 'Kapı QR Posteri (/kiosk)'}
                   </Button>
                 </>
               ) : (
@@ -187,7 +211,13 @@ export default function Navbar() {
                   {NAV_LINKS.map(item => (
                     <Button
                       key={item.path}
-                      onClick={() => navigate(item.path === '/dashboard' && isStaff ? '/dashboard?studentView=true' : item.path)}
+                      onClick={() =>
+                        navigate(
+                          item.path === '/dashboard' && userRole === 'LIBRARIAN'
+                            ? '/dashboard?studentView=true'
+                            : item.path
+                        )
+                      }
                       sx={{
                         color: location.pathname === item.path ? 'primary.main' : 'text.secondary',
                         bgcolor: location.pathname === item.path ? 'action.hover' : 'transparent',
@@ -199,7 +229,7 @@ export default function Navbar() {
                       {t(item.labelKey)}
                     </Button>
                   ))}
-                  {isStaff && (
+                  {userRole === 'LIBRARIAN' && (
                     <Button
                       variant="outlined"
                       size="small"
@@ -275,7 +305,7 @@ export default function Navbar() {
                       {isEn ? 'Notifications' : 'Bildirimler'}
                     </Typography>
                     <Chip
-                      label={ isEn ? `${unreadCount} Unread` : `${unreadCount} Okunmamış` }
+                      label={isEn ? `${unreadCount} Unread` : `${unreadCount} Okunmamış`}
                       size="small"
                       color={unreadCount > 0 ? 'error' : 'default'}
                       sx={{ height: 20, fontSize: '0.65rem', fontWeight: 700 }}
@@ -375,6 +405,7 @@ export default function Navbar() {
                 />
               </Box>
 
+              {/* Sağ Üst Profil Açılır Menüsü */}
               <Menu
                 anchorEl={menuAnchor}
                 open={Boolean(menuAnchor)}
@@ -385,7 +416,7 @@ export default function Navbar() {
                 slotProps={{
                   paper: {
                     sx: {
-                      mt: 1, minWidth: 190, borderRadius: '10px', py: 0.5,
+                      mt: 1, minWidth: 205, borderRadius: '10px', py: 0.5,
                       boxShadow: '0 8px 24px -4px rgba(0,0,0,0.1)',
                     },
                   },
@@ -396,10 +427,20 @@ export default function Navbar() {
                   <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('profile')}</Typography>
                 </MenuItem>
 
-                <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
-                  <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                  <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
-                </MenuItem>
+                {/* Yetkili modundayken Yönetim Merkezine hızlı dönüş; Öğrenci modundayken Rezervasyonlarım */}
+                {showStaffNavbar ? (
+                  <MenuItem onClick={() => navigate('/admin')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                    <AdminPanelSettingsIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>
+                      {isEn ? 'Management Center' : 'Yönetim Merkezi'}
+                    </Typography>
+                  </MenuItem>
+                ) : (
+                  <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                    <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                    <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
+                  </MenuItem>
+                )}
 
                 <MenuItem onClick={() => navigate('/rules?view=true')} sx={{ py: 1, px: 2, gap: 1.25 }}>
                   <GavelIcon sx={{ fontSize: 18, color: 'text.secondary' }} />

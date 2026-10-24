@@ -23,8 +23,8 @@ const ENGLISH_RULES = [
   },
   {
     id: 2,
-    title: "Door QR Code, Personal OTP & No-Show Policy",
-    desc: "Each participant must scan the common QR code at the room entrance and enter their personal 10-minute verification code within 15 minutes. Reservations cannot be cancelled within 1 hour of the start time. Users who fail to check in receive an email warning; 3 warnings result in a 30-day or semester ban.",
+    title: "Door QR Code, Personal Check-In & No-Show Policy",
+    desc: "At least 2 group members must scan the door QR code from their own mobile devices (connected to Campus Wi-Fi & GPS) within ±15 minutes of the start time to confirm check-in. Reservations cannot be cancelled within 1 hour of the start time. Users who fail to check in receive a No-Show warning (1/3); 3 warnings result in a 30-day reservation ban.",
   },
   {
     id: 3,
@@ -44,7 +44,7 @@ const ENGLISH_RULES = [
   {
     id: 6,
     title: "Advance Booking Window & Early Check-Out",
-    desc: "Reservations can be made up to 1 day in advance. Groups that finish early can use the 'Early Check-Out' button to free the remaining time for other students.",
+    desc: "Reservations can be made up to 1 day in advance. Groups that finish early can use the 'Early Check-Out' button during their session to free the remaining time for other students.",
   },
 ];
 
@@ -71,6 +71,9 @@ const RulesAcceptance = () => {
   const [agreement, setAgreement] = useState(null);
   const [agreementLoading, setAgreementLoading] = useState(true);
   const [agreementError, setAgreementError] = useState(null);
+
+  const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role);
+  const homePath = isStaff ? '/admin' : '/dashboard';
 
   const rules = useMemo(() => {
     if (isEn) return ENGLISH_RULES;
@@ -110,7 +113,7 @@ const RulesAcceptance = () => {
     try {
       const res = await api.post('/user/accept-rules');
       await update({ acceptedAgreementVersion: res.data.acceptedVersion });
-      window.location.href = '/dashboard';
+      window.location.href = homePath;
     } catch (error) {
       console.error("Sözleşme kabul hatası:", error);
       alert(t('agreementError'));
@@ -138,7 +141,7 @@ const RulesAcceptance = () => {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', bgcolor: 'background.default', color: 'text.primary' }}>
       <Paper elevation={0} sx={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 1100, borderBottom: '1px solid', borderColor: 'divider', px: { xs: 2, md: 4 }, py: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'space-between', bgcolor: 'background.paper' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: alreadyAccepted ? 'pointer' : 'default' }} onClick={() => alreadyAccepted && navigate('/dashboard')}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, cursor: alreadyAccepted ? 'pointer' : 'default' }} onClick={() => alreadyAccepted && navigate(homePath)}>
           <Avatar
             src={THKU_LOGO}
             alt="THKÜ Logo"
@@ -222,7 +225,7 @@ const RulesAcceptance = () => {
         <Paper elevation={0} sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 1100, borderTop: '1px solid', borderColor: 'divider', p: { xs: 2.5, md: 3 }, bgcolor: 'background.paper' }}>
           <Container maxWidth="md">
             {alreadyAccepted || isViewMode ? (
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
                 <Typography variant="body2" sx={{ color: 'success.main', fontWeight: 600 }}>
                   {isEn
                     ? `✓ You have accepted this agreement (${agreement.version}).`
@@ -231,9 +234,9 @@ const RulesAcceptance = () => {
                 <Button
                   variant="contained"
                   startIcon={<ArrowBackIcon />}
-                  onClick={() => navigate('/dashboard')}
+                  onClick={() => navigate(homePath)}
                 >
-                  {t('navDashboard')}
+                  {isStaff ? (isEn ? 'Back to Management Center' : 'Yönetim Merkezine Dön') : t('navDashboard')}
                 </Button>
               </Box>
             ) : (

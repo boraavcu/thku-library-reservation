@@ -21,6 +21,44 @@ import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 
+function getReservationTimingState(res) {
+  const now = new Date();
+  const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+  const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
+
+  const nowEpochMins =
+    Math.floor(new Date(todayIso + 'T00:00:00Z').getTime() / 60000) +
+    now.getHours() * 60 +
+    now.getMinutes();
+
+  const startH = new Date(res.startTime).getUTCHours();
+  const startM = new Date(res.startTime).getUTCMinutes();
+  const endDt = new Date(res.endTime);
+  const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+  const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
+
+  const resStartEpochMins =
+    Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
+    startH * 60 +
+    startM;
+
+  const resEndEpochMins =
+    Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
+    endH * 60 +
+    endM;
+
+  const isHappeningNow =
+    res.status === 'CHECKED_IN' ||
+    (['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
+      nowEpochMins >= resStartEpochMins &&
+      nowEpochMins < resEndEpochMins);
+
+  const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
+  const cancelLocked = resStartEpochMins - nowEpochMins < 60;
+
+  return { isHappeningNow, hasStarted, cancelLocked };
+}
+
 export default function MyBookings() {
   const navigate = useNavigate();
   const theme = useTheme();
@@ -51,8 +89,13 @@ export default function MyBookings() {
   useEffect(() => {
     if (status === 'loading') return;
     if (status === 'unauthenticated') { navigate('/'); return; }
+    // ADMIN (Müdür) ve SUPER_ADMIN (BİM) bu sayfaya erişemez, doğrudan yönetim paneline yönlendirilir
+    if (['ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role)) {
+      navigate('/admin', { replace: true });
+      return;
+    }
     fetchAllData();
-  }, [status, navigate, fetchAllData]);
+  }, [status, session, navigate, fetchAllData]);
 
   const handleCancel = async (id) => {
     try {
@@ -115,45 +158,6 @@ export default function MyBookings() {
     return d.toLocaleDateString(isEn ? 'en-US' : 'tr-TR', {
       day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC'
     });
-  };
-
-  // Randevunun zaman durumunu hesaplar (Başlamasına 1 saatten az mı kaldı, yoksa şu an randevu sırasında mıyız?)
-  const getReservationTimingState = (res) => {
-    const now = new Date();
-    const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
-    const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
-
-    const nowEpochMins =
-      Math.floor(new Date(todayIso + 'T00:00:00Z').getTime() / 60000) +
-      now.getHours() * 60 +
-      now.getMinutes();
-
-    const startH = new Date(res.startTime).getUTCHours();
-    const startM = new Date(res.startTime).getUTCMinutes();
-    const endDt = new Date(res.endTime);
-    const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-    const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
-
-    const resStartEpochMins =
-      Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
-      startH * 60 +
-      startM;
-
-    const resEndEpochMins =
-      Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
-      endH * 60 +
-      endM;
-
-    const isHappeningNow =
-      res.status === 'CHECKED_IN' ||
-      ( ['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
-        nowEpochMins >= resStartEpochMins &&
-        nowEpochMins < resEndEpochMins );
-
-    const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
-    const cancelLocked = resStartEpochMins - nowEpochMins < 60;
-
-    return { isHappeningNow, hasStarted, cancelLocked };
   };
 
   const activeList = reservations.filter(r => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status));
@@ -221,7 +225,7 @@ export default function MyBookings() {
                     const totalConfirmedPeople = 1 + acceptedParticipants.length;
                     const roomCapacity = res.room?.capacity || 8;
 
-                    const { isHappeningNow, hasStarted, cancelLocked } = getReservationTimingTiming(res);
+                    const { isHappeningNow, hasStarted, cancelLocked } = getReservationTimingState(res);
                     const showOrganizerActions = tab === 0 && isOrganizer && ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(res.status);
 
                     return (
@@ -373,42 +377,4 @@ export default function MyBookings() {
       </Snackbar>
     </Box>
   );
-}
-
-function getReservationTimingTiming(res) {
-  const now = new Date();
-  const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
-  const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
-
-  const nowEpochMins =
-    Math.floor(new Date(todayIso + 'T00:00:00Z').getTime() / 60000) +
-    now.getHours() * 60 +
-    now.getMinutes();
-
-  const startH = new Date(res.startTime).getUTCHours();
-  const startM = new Date(res.startTime).getUTCMinutes();
-  const endDt = new Date(res.endTime);
-  const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-  const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
-
-  const resStartEpochMins =
-    Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
-    startH * 60 +
-    startM;
-
-  const resEndEpochMins =
-    Math.floor(new Date(resDateIso + 'T00:00:00Z').getTime() / 60000) +
-    endH * 60 +
-    endM;
-
-  const isHappeningNow =
-    res.status === 'CHECKED_IN' ||
-    (['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
-      nowEpochMins >= resStartEpochMins &&
-      nowEpochMins < resEndEpochMins);
-
-  const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
-  const cancelLocked = resStartEpochMins - nowEpochMins < 60;
-
-  return { isHappeningNow, hasStarted, cancelLocked };
 }

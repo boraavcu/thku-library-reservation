@@ -11,7 +11,6 @@ import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import api from '../api';
 
-import PersonIcon from '@mui/icons-material/Person';
 import EmailIcon from '@mui/icons-material/Email';
 import BadgeIcon from '@mui/icons-material/Badge';
 import PhoneIcon from '@mui/icons-material/Phone';
@@ -19,6 +18,21 @@ import SchoolIcon from '@mui/icons-material/School';
 import CalendarTodayIcon from '@mui/icons-material/CalendarToday';
 import SaveIcon from '@mui/icons-material/Save';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+
+const ROLE_LABELS_TR = {
+  STUDENT: 'Öğrenci (STUDENT)',
+  LIBRARIAN: 'Kütüphane Görevlisi (LIBRARIAN)',
+  ADMIN: 'Kütüphane Müdürü (ADMIN)',
+  SUPER_ADMIN: 'BİM Sistem Yöneticisi (SUPER_ADMIN)',
+};
+
+const ROLE_LABELS_EN = {
+  STUDENT: 'Student (STUDENT)',
+  LIBRARIAN: 'Library Staff (LIBRARIAN)',
+  ADMIN: 'Library Director (ADMIN)',
+  SUPER_ADMIN: 'IT System Admin (SUPER_ADMIN)',
+};
 
 export default function Profile() {
   const navigate = useNavigate();
@@ -26,6 +40,7 @@ export default function Profile() {
   const { data: session, status: authStatus } = useSession();
   const { t, i18n } = useTranslation();
   const currentLang = i18n.language?.substring(0, 2) || 'tr';
+  const isEn = currentLang === 'en';
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -71,12 +86,17 @@ export default function Profile() {
 
   if (!profile) {
     return (
-      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+      <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
         <Navbar />
-        <Container sx={{ pt: 4 }}><Alert severity="error">{t('profileLoadError')}</Alert></Container>
+        <Container sx={{ pt: 4, flex: 1 }}><Alert severity="error">{t('profileLoadError')}</Alert></Container>
+        <Footer />
       </Box>
     );
   }
+
+  const isAdminOrSuper = ['ADMIN', 'SUPER_ADMIN'].includes(profile.role);
+  const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(profile.role);
+  const hasStudentNumber = Boolean(profile.studentNumber);
 
   const initials = profile.fullName
     ?.split(' ')
@@ -91,20 +111,29 @@ export default function Profile() {
   );
 
   const phoneIsMissing = !profile.phone;
+  const roleDisplay = isEn
+    ? ROLE_LABELS_EN[profile.role] || profile.role
+    : ROLE_LABELS_TR[profile.role] || profile.role;
 
   const infoRows = [
     { icon: <EmailIcon sx={{ fontSize: 18 }} />, label: t('profileEmail'), value: profile.email },
-    { icon: <BadgeIcon sx={{ fontSize: 18 }} />, label: t('profileStudentNo'), value: profile.studentNumber || '—' },
-    { icon: <SchoolIcon sx={{ fontSize: 18 }} />, label: t('profileDepartment'), value: profile.department || '—' },
+    ...(hasStudentNumber || profile.role === 'STUDENT'
+      ? [{ icon: <BadgeIcon sx={{ fontSize: 18 }} />, label: t('profileStudentNo'), value: profile.studentNumber || '—' }]
+      : [{ icon: <AdminPanelSettingsIcon sx={{ fontSize: 18 }} />, label: isEn ? 'System Role' : 'Kurumsal Yetki', value: roleDisplay }]),
+    {
+      icon: <SchoolIcon sx={{ fontSize: 18 }} />,
+      label: isStaff && !hasStudentNumber ? (isEn ? 'Department / Unit' : 'Birim / Daire Bşk.') : t('profileDepartment'),
+      value: profile.department || '—',
+    },
     { icon: <PhoneIcon sx={{ fontSize: 18 }} />, label: t('profilePhone'), value: profile.phone || '—' },
     { icon: <CalendarTodayIcon sx={{ fontSize: 18 }} />, label: t('profileMemberSince'), value: memberSince },
   ];
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', pb: 8 }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', display: 'flex', flexDirection: 'column' }}>
       <Navbar />
 
-      <Container maxWidth="sm" sx={{ pt: 4 }}>
+      <Container maxWidth="sm" sx={{ pt: 4, pb: 6, flex: 1 }}>
         {/* Profile Header Card */}
         <Card sx={{ overflow: 'hidden', mb: 3 }}>
           <Box sx={{
@@ -130,10 +159,10 @@ export default function Profile() {
                   {profile.fullName}
                 </Typography>
                 <Chip
-                  label={profile.role}
+                  label={roleDisplay}
                   size="small"
                   sx={{
-                    mt: 0.5, height: 22, fontSize: '0.65rem', fontWeight: 700,
+                    mt: 0.5, height: 22, fontSize: '0.68rem', fontWeight: 700,
                     bgcolor: alpha(theme.palette.primary.main, 0.1),
                     color: 'primary.main',
                   }}
@@ -143,15 +172,14 @@ export default function Profile() {
 
             <Divider sx={{ mb: 2 }} />
 
-            {/* Info Rows */}
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
               {infoRows.map((row) => (
-                <Box key={row.label} sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                <Box key={row.label} sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                   <Box sx={{ color: 'text.disabled', display: 'flex', flexShrink: 0 }}>{row.icon}</Box>
-                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', minWidth: 110, flexShrink: 0 }}>
+                  <Typography sx={{ fontSize: '0.8rem', color: 'text.secondary', minWidth: 125, flexShrink: 0 }}>
                     {row.label}
                   </Typography>
-                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 500 }}>
+                  <Typography sx={{ fontSize: '0.85rem', fontWeight: 600, wordBreak: 'break-word' }}>
                     {row.value}
                   </Typography>
                 </Box>
@@ -160,14 +188,16 @@ export default function Profile() {
           </Box>
         </Card>
 
-        {/* Phone Alert + Form */}
-        {phoneIsMissing && (
+        {/* Telefon Uyarısı Yalnızca Öğrencilere Gösterilir (BİM ve Müdüre Gösterilmez) */}
+        {phoneIsMissing && !isAdminOrSuper && (
           <Alert
             severity="warning"
             icon={<WarningAmberIcon />}
             sx={{ mb: 3, borderRadius: 2 }}
           >
-            {t('profilePhoneMissing')}
+            {isEn
+              ? 'Please add your phone number so library staff can reach you in case of emergencies or forgotten items.'
+              : 'Oda kullanımı sırasında acil durumlarda veya unutulan eşyalarda kütüphane görevlilerinin size ulaşabilmesi için lütfen telefon numaranızı ekleyiniz.'}
           </Alert>
         )}
 
@@ -176,10 +206,16 @@ export default function Profile() {
             {t('profileUpdatePhone')}
           </Typography>
           <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2.5, fontSize: '0.8rem' }}>
-            {t('profileUpdatePhoneDesc')}
+            {isAdminOrSuper
+              ? isEn
+                ? 'Saved as institutional contact information.'
+                : 'Kurumsal yönetici iletişim bilgisi olarak kaydedilir.'
+              : isEn
+              ? 'Visible only to library staff for emergency contact regarding your reservations.'
+              : 'Yalnızca kütüphane yönetimi tarafından oda rezervasyonlarınızla ilgili acil iletişim gereken durumlarda görüntülenir.'}
           </Typography>
 
-          <Box sx={{ display: 'flex', gap: 1.5 }}>
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5 }}>
             <TextField
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -198,7 +234,7 @@ export default function Profile() {
               onClick={handleSave}
               disabled={saving}
               startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon sx={{ fontSize: '18px !important' }} />}
-              sx={{ px: 3, borderRadius: 2, whiteSpace: 'nowrap', fontWeight: 600 }}
+              sx={{ px: 3, py: { xs: 1, sm: 'auto' }, borderRadius: 2, whiteSpace: 'nowrap', fontWeight: 600 }}
             >
               {t('profileSaveBtn')}
             </Button>

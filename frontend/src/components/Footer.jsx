@@ -3,6 +3,7 @@ import { useTheme, alpha } from '@mui/material/styles';
 import LinkedInIcon from '@mui/icons-material/LinkedIn';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
+import { useSession } from 'next-auth/react';
 
 const THKU_LOGO = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 const DEVELOPER_LINKEDIN = "https://www.linkedin.com/in/bora-avcu-b75a26204/";
@@ -11,7 +12,10 @@ export default function Footer() {
   const theme = useTheme();
   const { i18n } = useTranslation();
   const navigate = useNavigate();
+  const { data: session } = useSession();
   const isEn = i18n.language?.startsWith('en');
+
+  const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role);
 
   return (
     <Box
@@ -76,7 +80,7 @@ export default function Footer() {
               {isEn ? 'Terms of Use & Rules' : 'Kullanım Kuralları'}
             </Typography>
             <Typography
-              onClick={() => navigate('/dashboard')}
+              onClick={() => navigate(isStaff ? '/admin' : '/dashboard')}
               sx={{
                 fontSize: '0.75rem',
                 fontWeight: 500,
@@ -85,7 +89,13 @@ export default function Footer() {
                 '&:hover': { color: 'primary.main' },
               }}
             >
-              {isEn ? 'Study Room Portal' : 'Çalışma Odası Portalı'}
+              {isStaff
+                ? isEn
+                  ? 'Management Center'
+                  : 'Yönetim Merkezi'
+                : isEn
+                ? 'Study Room Portal'
+                : 'Çalışma Odası Portalı'}
             </Typography>
           </Stack>
 
