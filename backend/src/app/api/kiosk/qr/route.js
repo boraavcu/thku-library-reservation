@@ -7,7 +7,7 @@ import crypto from "crypto";
 import os from "os";
 
 const PERSONAL_OTP_TTL = 600;
-const TOLERANCE_MINUTES = 60;
+const DEFAULT_TOLERANCE_MINUTES = 15;
 
 // THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (1 KM Sabit Yarıçap)
 const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
@@ -227,6 +227,13 @@ export async function GET(request) {
       });
     }
 
+    // Dinamik CHECKIN_TOLERANCE_MINUTES kuralını veritabanından oku (Varsayılan: 15 dk)
+    const tolRule = await prisma.reservationRule.findFirst({
+      where: { ruleName: "CHECKIN_TOLERANCE_MINUTES", isActive: true },
+      select: { ruleValue: true },
+    });
+    const toleranceMinutes = Number(tolRule?.ruleValue?.value ?? DEFAULT_TOLERANCE_MINUTES);
+
     const now = new Date();
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDate = new Date(`${todayStr}T00:00:00Z`);
@@ -276,8 +283,8 @@ export async function GET(request) {
       const sH = new Date(r.startTime).getUTCHours();
       const sM = new Date(r.startTime).getUTCMinutes();
       const startTotalMins = sH * 60 + sM;
-      const minAllowed = startTotalMins - TOLERANCE_MINUTES;
-      const maxAllowed = startTotalMins + TOLERANCE_MINUTES;
+      const minAllowed = startTotalMins - toleranceMinutes;
+      const maxAllowed = startTotalMins + toleranceMinutes;
 
       if (nowMins >= minAllowed && nowMins <= maxAllowed) {
         matchedReservation = r;
@@ -285,7 +292,7 @@ export async function GET(request) {
       } else {
         windowInfoError = `${r.room.roomNumber} - ${r.room.name} odasındaki ${fmtMinsToTime(
           startTotalMins
-        )} randevunuz için kapı QR onayı yalnızca ±${TOLERANCE_MINUTES} dakika içinde (${fmtMinsToTime(
+        )} randevunuz için kapı QR onayı yalnızca ±${toleranceMinutes} dakika içinde (${fmtMinsToTime(
           minAllowed
         )} – ${fmtMinsToTime(maxAllowed)} saatleri arasında) yapılabilir. Şu anki saat: ${fmtMinsToTime(nowMins)}`;
       }
@@ -296,7 +303,7 @@ export async function GET(request) {
         mode: "OUTSIDE_TIME_WINDOW",
         error:
           windowInfoError ||
-          `Şu anki saat, randevunuzun ±${TOLERANCE_MINUTES} dakikalık başlangıç onay penceresi dışındadır.`,
+          `Şu anki saat, randevunuzun ±${toleranceMinutes} dakikalık başlangıç onay penceresi dışındadır.`,
       });
     }
 
@@ -318,8 +325,8 @@ export async function GET(request) {
     const sH = new Date(matchedReservation.startTime).getUTCHours();
     const sM = new Date(matchedReservation.startTime).getUTCMinutes();
     const startTotalMins = sH * 60 + sM;
-    const windowLabel = `${fmtMinsToTime(startTotalMins - TOLERANCE_MINUTES)} – ${fmtMinsToTime(
-      startTotalMins + TOLERANCE_MINUTES
+    const windowLabel = `${fmtMinsToTime(startTotalMins - toleranceMinutes)} – ${fmtMinsToTime(
+      startTotalMins + toleranceMinutes
     )}`;
 
     const checkedSetKey = `kiosk:checked_users:${matchedReservation.id}`;

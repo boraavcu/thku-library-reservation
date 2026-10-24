@@ -20,10 +20,10 @@ const resources = {
       rulesSubtitle: "Please read these critical guidelines carefully to ensure a productive and compliant study experience. Your understanding is vital.",
       
       rule1Title: "Maximum Reservation Time",
-      rule1Desc: "Study rooms can be reserved for a maximum of 2 hours per day per student group to ensure fair access for all cadets. Extensions are strictly subject to availability and must be requested at the front desk 15 minutes prior to session expiry. Consecutive bookings by the same group under different names are prohibited.",
+      rule1Desc: "Study rooms can be reserved only once (1) per day for a maximum of 3 hours to ensure fair access for all students. Extensions are not permitted. Consecutive bookings by the same group under different names are prohibited.",
       
       rule2Title: "Lateness / No-Show Policy",
-      rule2Desc: "Reservations will be automatically cancelled if the room is not occupied within 15 minutes of the start time. The room will then be made available to other students. Repeated no-shows (more than 3 times in a semester) may result in a temporary suspension of reservation privileges for up to 30 days.",
+      rule2Desc: "At least 2 group members must scan and confirm the door QR code from their own mobile devices within ±15 minutes of the start time. Repeated no-shows (3 times in a semester) result in a 30-day suspension of reservation privileges.",
       
       rule3Title: "Silence and Usage Rules",
       rule3Desc: "Users must maintain a quiet environment suitable for academic study. Loud conversations, music without headphones, or disruptive behavior is not permitted. Food and beverages (except for water in sealed bottles) are strictly prohibited inside the study rooms to maintain cleanliness.",
@@ -32,7 +32,7 @@ const resources = {
       rule4Desc: "Users are responsible for any damage to library property, furniture, or technical equipment during their reservation period. Do not unplug library equipment. Please report any pre-existing issues immediately upon entering the room to avoid liability.",
       
       rule5Title: "Group Study",
-      rule5Desc: "Study rooms are intended for group study (minimum 2 people). Individual students should use the general reading hall areas. Single occupants in group study rooms may be asked to vacate the room if a group requires the space.",
+      rule5Desc: "Study rooms are intended for group study (minimum 2, maximum 8 people). Individual students should use the general reading hall areas. Group invitations must be accepted within 30 minutes.",
       
       // Agreement
       agreementLoading: "Loading agreement...",
@@ -107,9 +107,9 @@ const resources = {
       profileDepartment: "Department",
       profilePhone: "Phone",
       profileMemberSince: "Member Since",
-      profilePhoneMissing: "Please add your phone number for reservation notifications.",
+      profilePhoneMissing: "Please add your phone number so library staff can reach you in case of emergencies or forgotten items.",
       profileUpdatePhone: "Phone Number",
-      profileUpdatePhoneDesc: "Used for reservation reminders and urgent notifications.",
+      profileUpdatePhoneDesc: "Visible only to library management for emergency contact regarding your reservations.",
       profileSaveBtn: "Save",
       profileSaved: "Profile updated successfully.",
       profileSaveError: "Failed to update profile.",
@@ -211,12 +211,12 @@ const resources = {
       rfSeatsFilled: "{{count}} / {{max}} Seats Filled",
       rfCapacityPolicy: "Maximum capacity is strictly enforced by library policy.",
       rfAddParticipant: "Add Participant",
-      rfEmailPlaceholder: "Enter institutional email (@thk.edu)",
+      rfEmailPlaceholder: "Enter institutional email (@stu.thk.edu.tr)",
       rfAdd: "Add",
       rfCurrentAttendees: "Current Attendees ({{count}})",
       rfOrganizer: "Organizer",
       rfParticipant: "Participant",
-      rfCannotRemove: "Cannot remove",
+      rfCannotRemove: "Kaldırılamaz",
       rfPurpose: "Purpose (Optional)",
       rfPurposePlaceholder: "e.g. Group study, Project meeting...",
       rfConfirm: "Continue to Confirmation",
@@ -245,10 +245,10 @@ const resources = {
       rulesSubtitle: "Verimli ve kurallara uygun bir çalışma deneyimi sağlamak için lütfen bu kritik yönergeleri dikkatlice okuyun. Anlayışınız hayati önem taşımaktadır.",
       
       rule1Title: "Maksimum Rezervasyon Süresi",
-      rule1Desc: "Tüm öğrencilere adil erişim sağlamak için çalışma odaları günde en fazla 2 saat rezerve edilebilir. Süre uzatmaları müsaitlik durumuna bağlıdır ve süre dolmadan 15 dakika önce danışmadan talep edilmelidir. Aynı grubun farklı isimlerle ardışık rezervasyon yapması yasaktır.",
+      rule1Desc: "Tüm öğrencilere adil erişim sağlamak için çalışma odaları günde yalnızca 1 defa ve en fazla 3 saat rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun farklı isimlerle ardışık rezervasyon yapması yasaktır.",
       
       rule2Title: "Geç Kalma / Gelmeme (No-Show)",
-      rule2Desc: "Başlangıç saatinden itibaren 15 dakika içinde odaya giriş yapılmazsa rezervasyon otomatik olarak iptal edilir ve oda diğer öğrencilerin kullanımına açılır. Tekrarlanan gelmeme durumları (dönem içinde 3 kezden fazla), rezervasyon ayrıcalıklarının 30 güne kadar askıya alınmasına neden olabilir.",
+      rule2Desc: "Başlangıç saatinden ±15 dakika içinde en az 2 grup üyesinin kendi telefonundan kapı QR kodunu okutarak onay vermesi zorunludur. Dönem içinde 3 kez No-Show uyarısı alan hesaplar 30 gün boyunca rezervasyonlara kapatılır.",
       
       rule3Title: "Sessizlik ve Kullanım Kuralları",
       rule3Desc: "Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yüksek sesli konuşmalar, kulaklıksız müzik veya rahatsız edici davranışlara izin verilmez. Temizliği korumak için (kapalı şişedeki su hariç) yiyecek ve içecek tüketimi kesinlikle yasaktır.",
@@ -257,7 +257,7 @@ const resources = {
       rule4Desc: "Kullanıcılar rezervasyon süresince kütüphane mülküne, mobilyalara veya teknik ekipmanlara verilen her türlü hasardan sorumludur. Kütüphane ekipmanlarının fişini çekmeyiniz. Sorumluluktan kaçınmak için lütfen odaya girdiğinizde mevcut sorunları derhal bildirin.",
       
       rule5Title: "Grup Çalışması",
-      rule5Desc: "Çalışma odaları grup çalışması (en az 2 kişi) için tasarlanmıştır. Bireysel çalışan öğrenciler genel okuma salonlarını kullanmalıdır. Odayı tek başına kullanan kişilerden, bir grubun alana ihtiyacı olması durumunda odayı boşaltmaları istenebilir.",
+      rule5Desc: "Çalışma odaları grup çalışması (en az 2 kişi, en fazla 8 kişi) için tasarlanmıştır. Gönderilen grup davetiyeleri 30 dakika içinde onaylanmalıdır.",
       
       // Agreement
       agreementLoading: "Sözleşme yükleniyor...",
@@ -332,9 +332,9 @@ const resources = {
       profileDepartment: "Bölüm",
       profilePhone: "Telefon",
       profileMemberSince: "Üyelik Tarihi",
-      profilePhoneMissing: "Rezervasyon bilgilendirmeleri için lütfen telefon numaranızı ekleyin.",
+      profilePhoneMissing: "Oda kullanımı sırasında acil durumlarda kütüphane görevlilerinin size ulaşabilmesi için lütfen telefon numaranızı ekleyiniz.",
       profileUpdatePhone: "Telefon Numarası",
-      profileUpdatePhoneDesc: "Rezervasyon hatırlatmaları ve acil bildirimler için kullanılır.",
+      profileUpdatePhoneDesc: "Yalnızca kütüphane yönetimi tarafından oda rezervasyonlarınızla ilgili acil iletişim gereken durumlarda görüntülenir.",
       profileSaveBtn: "Kaydet",
       profileSaved: "Profil başarıyla güncellendi.",
       profileSaveError: "Profil güncellenirken bir hata oluştu.",
@@ -436,7 +436,7 @@ const resources = {
       rfSeatsFilled: "{{count}} / {{max}} Koltuk Dolu",
       rfCapacityPolicy: "Maksimum kapasite, kütüphane politikası gereği kesin olarak uygulanır.",
       rfAddParticipant: "Katılımcı Ekle",
-      rfEmailPlaceholder: "Kurumsal e-posta girin (@thk.edu)",
+      rfEmailPlaceholder: "Kurumsal e-posta girin (@stu.thk.edu.tr)",
       rfAdd: "Ekle",
       rfCurrentAttendees: "Mevcut Katılımcılar ({{count}})",
       rfOrganizer: "Organizatör",

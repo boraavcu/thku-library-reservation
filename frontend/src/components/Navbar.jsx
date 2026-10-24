@@ -21,6 +21,9 @@ import DoneAllIcon from '@mui/icons-material/DoneAll';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
+import HomeIcon from '@mui/icons-material/Home';
+import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
+import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 
 const THKU_LOGO = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 
@@ -416,7 +419,7 @@ export default function Navbar() {
                 slotProps={{
                   paper: {
                     sx: {
-                      mt: 1, minWidth: 205, borderRadius: '10px', py: 0.5,
+                      mt: 1, minWidth: 215, borderRadius: '10px', py: 0.5,
                       boxShadow: '0 8px 24px -4px rgba(0,0,0,0.1)',
                     },
                   },
@@ -427,19 +430,51 @@ export default function Navbar() {
                   <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('profile')}</Typography>
                 </MenuItem>
 
-                {/* Yetkili modundayken Yönetim Merkezine hızlı dönüş; Öğrenci modundayken Rezervasyonlarım */}
+                {/* Yetkili modundayken Yönetim Merkezi; Öğrenci modundayken Rezervasyonlarım ve Mobil Linkler */}
                 {showStaffNavbar ? (
-                  <MenuItem onClick={() => navigate('/admin')} sx={{ py: 1, px: 2, gap: 1.25 }}>
-                    <AdminPanelSettingsIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>
-                      {isEn ? 'Management Center' : 'Yönetim Merkezi'}
-                    </Typography>
-                  </MenuItem>
+                  <>
+                    <MenuItem onClick={() => navigate('/admin')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                      <AdminPanelSettingsIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>
+                        {isEn ? 'Management Center' : 'Yönetim Merkezi'}
+                      </Typography>
+                    </MenuItem>
+                    <MenuItem onClick={() => navigate('/kiosk')} sx={{ py: 1, px: 2, gap: 1.25, display: { xs: 'flex', md: 'none' } }}>
+                      <QrCodeScannerIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>
+                        {isEn ? 'Door QR Poster' : 'Kapı QR Posteri'}
+                      </Typography>
+                    </MenuItem>
+                  </>
                 ) : (
-                  <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
-                    <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-                    <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
-                  </MenuItem>
+                  <>
+                    <MenuItem
+                      onClick={() => navigate(userRole === 'LIBRARIAN' ? '/dashboard?studentView=true' : '/dashboard')}
+                      sx={{ py: 1, px: 2, gap: 1.25, display: { xs: 'flex', md: 'none' } }}
+                    >
+                      <HomeIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navDashboard')}</Typography>
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => navigate('/reserve')}
+                      sx={{ py: 1, px: 2, gap: 1.25, display: { xs: 'flex', md: 'none' } }}
+                    >
+                      <MeetingRoomIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navStudyRooms')}</Typography>
+                    </MenuItem>
+                    <MenuItem onClick={() => navigate('/bookings')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                      <MailOutlineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+                      <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('navMyBookings')}</Typography>
+                    </MenuItem>
+                    {userRole === 'LIBRARIAN' && (
+                      <MenuItem onClick={() => navigate('/admin')} sx={{ py: 1, px: 2, gap: 1.25 }}>
+                        <AdminPanelSettingsIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                        <Typography sx={{ fontSize: '0.82rem', fontWeight: 700, color: 'primary.main' }}>
+                          {isEn ? 'Back to Admin' : 'Yönetim Merkezine Dön'}
+                        </Typography>
+                      </MenuItem>
+                    )}
+                  </>
                 )}
 
                 <MenuItem onClick={() => navigate('/rules?view=true')} sx={{ py: 1, px: 2, gap: 1.25 }}>

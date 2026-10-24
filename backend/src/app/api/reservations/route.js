@@ -12,6 +12,7 @@ const DEFAULT_MIN = 2;
 const DEFAULT_MAX = 8;
 const DEFAULT_MAX_HOURS = 3;
 const DEFAULT_MAX_ADVANCE_DAYS = 1;
+const DEFAULT_CANCEL_LOCK_MINUTES = 60;
 const EXCLUDED_STATUSES = ["CANCELLED", "NO_SHOW"];
 
 function getIstanbulNow() {
@@ -295,7 +296,6 @@ export async function POST(request) {
       },
     });
 
-    // Rezervasyon her zaman PENDING başlar; en az 2. kişi kabul ettiğinde CONFIRMED olur
     const initialStatus = "PENDING";
 
     const reservation = await prisma.reservation.create({
@@ -391,11 +391,6 @@ export async function GET() {
   }
 }
 
-/**
- * PATCH /api/reservations ->
- * Yalnızca EARLY_CHECKOUT (Odayı Erken Boşaltma) işlemini yapar.
- * KURAL: Yalnızca randevu günü ve randevu saat aralığı başladıktan sonra (randevu sırasında) yapılabilir!
- */
 export async function PATCH(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -496,11 +491,6 @@ export async function PATCH(request) {
   }
 }
 
-/**
- * DELETE /api/reservations ->
- * Randevu başlangıcına 1 saatten (60 dk) az kaldıysa öğrenci iptal edemez!
- * İptal edildiğinde tüm grubun rezervasyonu iptal olur; herkese ve (onaylıysa) Kütüphane Müdürüne iptal maili gider.
- */
 export async function DELETE(request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
@@ -545,6 +535,12 @@ export async function DELETE(request) {
     }
 
     if (!isStaff) {
+      const lockRule = await prisma.reservationRule.findFirst({
+        where: { ruleName: "CANCEL_LOCK_MINUTES", isActive: true },
+        select: { ruleValue: true },
+      });
+      const cancelLockMins = Number(lockRule?.ruleValue?.value ?? DEFAULT_CANCEL_LOCK_MINUTES);
+
       const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
       const resDateStr = new Date(reservation.reservationDate).toISOString().split("T")[0];
       const startH = new Date(reservation.startTime).getUTCHours();
@@ -557,11 +553,10 @@ export async function DELETE(request) {
 
       const minsRemaining = resStartEpochMins - nowEpochMins;
 
-      if (minsRemaining < 60) {
+      if (minsRemaining < cancelLockMins) {
         return NextResponse.json(
           {
-            error:
-              "Rezervasyon başlangıç saatine 1 saatten (60 dk) az kaldığı için iptal edilemez. Ceza/uyarı almamak için odaya gelip kapı QR onayınızı vermeniz gerekmektedir.",
+            error: `Rezervasyon başlangıç saatine ${cancelLockMins} dakikadan az kaldığı için iptal edilemez. Ceza/uyarı almamak için odaya gelip kapı QR onayınızı vermeniz gerekmektedir.`,
           },
           { status: 400 }
         );
@@ -571,7 +566,7 @@ export async function DELETE(request) {
     const wasConfirmed = ["CONFIRMED", "CHECKED_IN"].includes(reservation.status);
     const reasonText = isStaff
       ? `Kütüphane yetkilisi (${user.email}) tarafından iptal edildi`
-      : `Organizatör (${user.email}) tarafından başlangıçtan en az 1 saat önce iptal edildi`;
+      : `Organizatör (${user.email}) tarafından iptal edildi`;
 
     await prisma.reservation.update({
       where: { id: reservationId },
@@ -593,7 +588,6 @@ export async function DELETE(request) {
       },
     });
 
-    // Tüm grup üyelerine ve (onaylıysa) Kütüphane Müdürüne kurumsal iptal e-postası gönder
     sendReservationCancelledEmails({
       reservationId,
       cancelledByEmail: user.email,

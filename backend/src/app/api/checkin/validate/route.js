@@ -6,9 +6,9 @@ import redis from "@/lib/redis";
 import crypto from "crypto";
 import { sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
 
-const TOLERANCE_MINUTES = 60;
+const DEFAULT_TOLERANCE_MINUTES = 15;
+const DEFAULT_MIN_CHECKIN_PARTICIPANTS = 2;
 const DEVICE_LOCK_TTL = 14400; // 4 saat boyunca aynı cihazdan (gizli sekme dahil) başka öğrenci onay veremez
-const MIN_CHECKIN_PARTICIPANTS = 2; // En az 2 kişi Kiosk onayı verdiğinde randevu başlar ve müdüre mail gider
 
 // THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (1 KM Sabit Yarıçap)
 const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
@@ -90,6 +90,21 @@ export async function POST(request) {
       }
     }
 
+    // Dinamik CHECKIN_TOLERANCE_MINUTES ve MIN_PARTICIPANTS kurallarını veritabanından oku
+    const rulesRows = await prisma.reservationRule.findMany({
+      where: {
+        isActive: true,
+        ruleName: { in: ["CHECKIN_TOLERANCE_MINUTES", "MIN_PARTICIPANTS"] },
+      },
+      select: { ruleName: true, ruleValue: true },
+    });
+    const rulesMap = Object.fromEntries(rulesRows.map((r) => [r.ruleName, r.ruleValue?.value]));
+    const toleranceMinutes = Number(rulesMap.CHECKIN_TOLERANCE_MINUTES ?? DEFAULT_TOLERANCE_MINUTES);
+    const minCheckinParticipants = Math.max(
+      2,
+      Number(rulesMap.MIN_PARTICIPANTS ?? DEFAULT_MIN_CHECKIN_PARTICIPANTS)
+    );
+
     const now = new Date();
     const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
     const todayDate = new Date(`${todayStr}T00:00:00Z`);
@@ -134,14 +149,14 @@ export async function POST(request) {
       const sM = new Date(r.startTime).getUTCMinutes();
       const startMins = sH * 60 + sM;
       return (
-        nowTotalMinutes >= startMins - TOLERANCE_MINUTES &&
-        nowTotalMinutes <= startMins + TOLERANCE_MINUTES
+        nowTotalMinutes >= startMins - toleranceMinutes &&
+        nowTotalMinutes <= startMins + toleranceMinutes
       );
     });
 
     if (!reservation) {
       return NextResponse.json(
-        { error: `Şu anki saat diliminde (±${TOLERANCE_MINUTES} dk başlangıç penceresi içinde) onaylanabilecek bir randevunuz bulunamadı.` },
+        { error: `Şu anki saat diliminde (±${toleranceMinutes} dk başlangıç penceresi içinde) onaylanabilecek bir randevunuz bulunamadı.` },
         { status: 400 }
       );
     }
@@ -211,9 +226,8 @@ export async function POST(request) {
       },
     });
 
-    // KURAL: Sadece EN AZ 2 KİŞİ Kiosk onayı verdiğinde randevu CHECKED_IN olur ve Müdüre 1 kez mail gider!
-    // 1. kişi onayladığında veya 3., 4. kişi onayladığında müdüre mail GİTMEZ.
-    if (checkedUserIds.length >= MIN_CHECKIN_PARTICIPANTS) {
+    // KURAL: Sadece EN AZ 2 KİŞİ (minCheckinParticipants) Kiosk onayı verdiğinde randevu CHECKED_IN olur ve Müdüre 1 kez mail gider!
+    if (checkedUserIds.length >= minCheckinParticipants) {
       const transition = await prisma.reservation.updateMany({
         where: {
           id: reservation.id,
@@ -234,8 +248,8 @@ export async function POST(request) {
     }
 
     const statusMessage =
-      checkedUserIds.length < MIN_CHECKIN_PARTICIPANTS
-        ? `Yoklama kaydınız alındı (${checkedUserIds.length}/${totalGroupMembers}). Randevunun başlaması için en az 2 grup üyesinin kapı QR onayı vermesi gerekmektedir.`
+      checkedUserIds.length < minCheckinParticipants
+        ? `Yoklama kaydınız alındı (${checkedUserIds.length}/${totalGroupMembers}). Randevunun başlaması için en az ${minCheckinParticipants} grup üyesinin kapı QR onayı vermesi gerekmektedir.`
         : `Oda girişiniz onaylandı ve randevunuz resmen başladı! (${checkedUserIds.length}/${totalGroupMembers} katılımcı doğruladı)`;
 
     const resJson = NextResponse.json({
