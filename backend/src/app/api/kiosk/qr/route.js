@@ -5,10 +5,7 @@ import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import crypto from "crypto";
 import os from "os";
-import {
-  runReservationLifecycleChecks,
-  getEffectiveCheckInAnchorMins,
-} from "@/lib/lifecycle";
+import { runReservationLifecycleChecks, getReservationKioskWindow } from "@/lib/lifecycle";
 
 const PERSONAL_OTP_TTL = 600;
 const DEFAULT_TOLERANCE_MINUTES = 15;
@@ -286,9 +283,11 @@ export async function GET(request) {
     let activeWindowLabel = "";
 
     for (const r of todayReservations) {
-      const { startTotalMins, anchorMins } = getEffectiveCheckInAnchorMins(r, todayStr);
-      const minAllowed = startTotalMins - toleranceMinutes;
-      const maxAllowed = anchorMins + toleranceMinutes;
+      const { startTotalMins, minAllowed, maxAllowed } = getReservationKioskWindow(
+        r,
+        todayStr,
+        toleranceMinutes
+      );
 
       if (nowMins >= minAllowed && nowMins <= maxAllowed) {
         matchedReservation = r;

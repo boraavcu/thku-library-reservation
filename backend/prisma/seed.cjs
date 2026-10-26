@@ -110,7 +110,7 @@ async function main() {
     students.push(created);
   }
 
-  // 3. Çalışma Odaları (R103 -> Hürkuş olarak güncellendi)
+  // 3. Çalışma Odaları (R103 -> Hürkuş)
   const roomList = [
     { roomNumber: "R101", name: "Atatürk", capacity: 8, isActive: true },
     { roomNumber: "R102", name: "Gökçen", capacity: 8, isActive: true },
@@ -294,6 +294,11 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
         status: item.status,
         noShow: Boolean(item.noShow),
         penaltyApplied: Boolean(item.penaltyApplied),
+        // PENDING davetlerin süresi hemen dolmasın diye şu anki saat, diğerlerine 2 saat öncesi verilir
+        createdAt:
+          item.status === "PENDING"
+            ? new Date()
+            : new Date(Date.now() - 2 * 60 * 60 * 1000),
         checkedInAt: item.status === "CHECKED_IN" || item.status === "COMPLETED" ? new Date() : null,
         checkedInById: item.status === "CHECKED_IN" || item.status === "COMPLETED" ? orgUser.id : null,
         participants: {
@@ -307,7 +312,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     });
   }
 
-  // 6. Ceza Kayıtları (R103 - Hürkuş olarak güncellendi)
+  // 6. Ceza Kayıtları
   const caner = students[4];
   const hakan = students[17];
 
@@ -321,7 +326,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     ],
   });
 
-  // 7. Duyurular (Farklı Öncelik Seviyelerinde 5 Örnek Duyuru - Sayfalama ve Filtreleme İçin)
+  // 7. Duyurular
   await prisma.announcement.createMany({
     data: [
       {

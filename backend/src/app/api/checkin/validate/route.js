@@ -4,10 +4,7 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import crypto from "crypto";
-import {
-  sendKioskCheckInEmailToStaff,
-  getEffectiveCheckInAnchorMins,
-} from "@/lib/lifecycle";
+import { sendKioskCheckInEmailToStaff, getReservationKioskWindow } from "@/lib/lifecycle";
 
 const DEFAULT_TOLERANCE_MINUTES = 15;
 const DEFAULT_MIN_CHECKIN_PARTICIPANTS = 2;
@@ -147,11 +144,12 @@ export async function POST(request) {
     });
 
     const reservation = todayReservations.find((r) => {
-      const { startTotalMins, anchorMins } = getEffectiveCheckInAnchorMins(r, todayStr);
-      return (
-        nowTotalMinutes >= startTotalMins - toleranceMinutes &&
-        nowTotalMinutes <= anchorMins + toleranceMinutes
+      const { minAllowed, maxAllowed } = getReservationKioskWindow(
+        r,
+        todayStr,
+        toleranceMinutes
       );
+      return nowTotalMinutes >= minAllowed && nowTotalMinutes <= maxAllowed;
     });
 
     if (!reservation) {

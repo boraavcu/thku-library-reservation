@@ -54,28 +54,34 @@ function getIstanbulTimeDetails(dateInput = new Date()) {
   return { dateStr, hour, minute, totalMins: hour * 60 + minute };
 }
 
-export function getEffectiveCheckInAnchorMins(reservation, todayTrStr) {
+/**
+ * Randevu saat 16:00'dan ÖNCE alındıysa (veya seed.cjs ile oluşturulduysa):
+ *   Onay penceresi kesin olarak 15:45 – 16:15 (startTotalMins ± toleranceMinutes) arasındadır.
+ * Randevu saat 16:00'dan SONRA (oda boşa düştükten sonra, örn: 16:20'de) sıfırdan oluşturulduysa:
+ *   Yeni grubun hemen odaya girerken QR okutabilmesi için oluşturulma anından itibaren +15 dk (16:20 – 16:35) verilir.
+ *   (updatedAt / davet onay saati süreyi asla uzatmaz!)
+ */
+export function getReservationKioskWindow(reservation, todayTrStr, toleranceMinutes = 15) {
   const sH = new Date(reservation.startTime).getUTCHours();
   const sM = new Date(reservation.startTime).getUTCMinutes();
   const startTotalMins = sH * 60 + sM;
 
-  let anchorMins = startTotalMins;
-
   if (reservation.createdAt) {
     const createdInfo = getIstanbulTimeDetails(reservation.createdAt);
-    if (createdInfo.dateStr === todayTrStr && createdInfo.totalMins > anchorMins) {
-      anchorMins = createdInfo.totalMins;
+    if (createdInfo.dateStr === todayTrStr && createdInfo.totalMins > startTotalMins) {
+      return {
+        startTotalMins,
+        minAllowed: createdInfo.totalMins,
+        maxAllowed: createdInfo.totalMins + toleranceMinutes,
+      };
     }
   }
 
-  if (reservation.status === "CONFIRMED" && reservation.updatedAt) {
-    const updatedInfo = getIstanbulTimeDetails(reservation.updatedAt);
-    if (updatedInfo.dateStr === todayTrStr && updatedInfo.totalMins > anchorMins) {
-      anchorMins = updatedInfo.totalMins;
-    }
-  }
-
-  return { startTotalMins, anchorMins };
+  return {
+    startTotalMins,
+    minAllowed: startTotalMins - toleranceMinutes,
+    maxAllowed: startTotalMins + toleranceMinutes,
+  };
 }
 
 function buildCorporateEmailHtml({
@@ -324,7 +330,6 @@ export async function runReservationLifecycleChecks() {
       const roomLabel = `${stale.room.roomNumber} - ${stale.room.name}`;
       const timeRangeStr = `${fmtTimeUTC(stale.startTime)} - ${fmtTimeUTC(stale.endTime)}`;
 
-      // Sistem loguna (auditLog) kaydet
       await prisma.auditLog.create({
         data: {
           userId: stale.user.id,
@@ -379,7 +384,7 @@ export async function runReservationLifecycleChecks() {
     const { dateStr: todayTrStr, totalMins: nowMins } = getIstanbulTimeDetails(now);
     const todayDateObj = new Date(`${todayTrStr}T00:00:00Z`);
 
-    // 2. KAPI QR (KİOSK) SÜRESİ (±15 DK) DOLAN RANDEVULARIN OTOMATİK İPTALİ, CEZA İŞLEMESİ, LOGLANMASI VE MÜDÜRE BİLDİRİMİ
+    // 2. KAPI QR (KİOSK) SÜRESİ (BAŞLANGIÇ + 15 DK) DOLAN RANDEVULARIN OTOMATİK İPTALİ, CEZASI VE LOGLANMASI
     const activeTodayList = await prisma.reservation.findMany({
       where: {
         reservationDate: todayDateObj,
@@ -397,8 +402,14 @@ export async function runReservationLifecycleChecks() {
     });
 
     for (const res of activeTodayList) {
-      const { startTotalMins, anchorMins } = getEffectiveCheckInAnchorMins(res, todayTrStr);
-      const deadlineMins = anchorMins + toleranceMinutes;
+      const sH = new Date(res.startTime).getUTCHours();
+      const sM = new Date(res.startTime).getUTCMinutes();
+
+      const { startTotalMins, maxAllowed: deadlineMins } = getReservationKioskWindow(
+        res,
+        todayTrStr,
+        toleranceMinutes
+      );
       const diffMins = startTotalMins - nowMins;
 
       // A) Başlangıca 2 saat (120 dk) kala hatırlatma maili
@@ -459,7 +470,7 @@ export async function runReservationLifecycleChecks() {
         }
       }
 
-      // B) Kiosk Yoklama Süresi (Örn: 15:00 + 15 dk = 15:15) Geçtiyse Otomatik Denetim!
+      // B) Kiosk Yoklama Süresi (Örn: 16:00 + 15 dk = 16:15) Geçtiyse Otomatik Denetim!
       if (nowMins > deadlineMins) {
         const checkedSetKey = `kiosk:checked_users:${res.id}`;
         const checkedUserIds = await redis.smembers(checkedSetKey);
@@ -487,7 +498,6 @@ export async function runReservationLifecycleChecks() {
 
           if (lockUpdate.count === 0) continue;
 
-          // Otomatik oda iptalini sistem loguna (auditLog) yaz
           await prisma.auditLog.create({
             data: {
               userId: res.user.id,
@@ -504,7 +514,6 @@ export async function runReservationLifecycleChecks() {
             },
           });
 
-          // 1) Kiosk QR Okutan Öğrenci Varsa (Örn: Bora Avcu okuttu ama arkadaşı gelmedi): Ceza Almaz, Bilgilendirilir
           for (const verifiedMember of verifiedUsers) {
             await prisma.notification.create({
               data: {
@@ -540,7 +549,6 @@ export async function runReservationLifecycleChecks() {
             });
           }
 
-          // 2) Kiosk QR Okutmayan Öğrencilere (Örn: Mehmet Demir) Otomatik 1/3 No-Show Cezası, Sistem Logu ve (3/3 ise) Ban İşle
           for (const absentMember of absentUsers) {
             await prisma.penaltyHistory.create({
               data: {
@@ -577,7 +585,6 @@ export async function runReservationLifecycleChecks() {
               },
             });
 
-            // Müdür ve BİM'in "1. Öğrenci & Sistem Logları" sekmesinde görebilmesi için AuditLog kaydı oluştur
             await prisma.auditLog.create({
               data: {
                 userId: absentMember.id,
@@ -620,7 +627,6 @@ export async function runReservationLifecycleChecks() {
             }
           }
 
-          // 3) Kütüphane Müdürüne (boraa-35@hotmail.com) Otomatik Kiosk İptal ve Ceza Raporu Maili Gönder
           const attendanceSummary = allApprovedUsers.map((u) => {
             const didCheck = checkedUserIds.includes(u.id);
             return `<strong>${u.fullName}</strong> (${u.email}) — <span style="color:${
@@ -655,7 +661,7 @@ export async function runReservationLifecycleChecks() {
             priority: 1,
           });
         } else if (checkedUserIds.length >= minRequiredPeople && absentUsers.length > 0) {
-          // DURUM 2: En az 2 kişi onayladı (Oda CHECKED_IN ve aktif), ancak grupta QR okutmayan 3./4. üyeler var!
+          // DURUM 2: En az 2 kişi onayladı (Oda CHECKED_IN), ancak grupta QR okutmayan 3./4. üyeler var!
           const lockUpdate = await prisma.reservation.updateMany({
             where: { id: res.id, penaltyApplied: false },
             data: { penaltyApplied: true },
