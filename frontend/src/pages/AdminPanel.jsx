@@ -168,6 +168,50 @@ function formatAuditLog(log, isEn) {
           ? `Room: ${d.room || '-'} | Verified By: ${d.checkedInBy || actor} | Group Progress: ${d.progress || '-'}`
           : `Oda: ${d.room || '-'} | Doğrulayan: ${d.checkedInBy || actor} | Grup İlerlemesi: ${d.progress || '-'}`,
       };
+    case 'AUTO_NO_SHOW_PENALTY':
+      return {
+        badge: isEn ? `Auto No-Show (${d.warningCount || '1/3'})` : `Oto No-Show Uyarısı (${d.warningCount || '1/3'})`,
+        color: 'warning',
+        title: isEn
+          ? `${actor} did not scan the door QR code in time and received an automatic No-Show warning.`
+          : `${actor} süresi içinde kapı QR kodunu okutmadığı için otomatik No-Show uyarısı aldı.`,
+        detail: isEn
+          ? `Room: ${d.room || '-'} | Date: ${d.date || '-'} | Time: ${d.time || '-'} | Warning: ${d.warningCount || '-'}`
+          : `Oda: ${d.room || '-'} | Tarih: ${d.date || '-'} | Saat: ${d.time || '-'} | Güncel Uyarı: ${d.warningCount || '-'}`,
+      };
+    case 'AUTO_NO_SHOW_BANNED':
+      return {
+        badge: isEn ? 'Auto 3/3 Ban (30 Days)' : 'Oto 3/3 Ban (30 Gün)',
+        color: 'error',
+        title: isEn
+          ? `${actor} reached 3/3 No-Show warnings and was automatically banned for 30 days.`
+          : `${actor} 3/3 No-Show uyarısına ulaştığı için sistem tarafından 30 gün otomatik banlandı.`,
+        detail: isEn
+          ? `Room: ${d.room || '-'} | Time: ${d.time || '-'} | Ban Until: ${d.banUntil || '30 Days'}`
+          : `Oda: ${d.room || '-'} | Saat: ${d.time || '-'} | Ban Bitiş: ${d.banUntil || '30 Gün'}`,
+      };
+    case 'AUTO_KIOSK_CANCELLED':
+      return {
+        badge: isEn ? 'Auto Kiosk Cancelled' : 'Oto Kiosk İptali (Oda Boşa Çıktı)',
+        color: 'error',
+        title: isEn
+          ? `Reservation for ${d.room || 'Room'} was automatically cancelled due to insufficient door QR check-ins.`
+          : `${d.room || 'Oda'} randevusu süresi içinde kapı QR onayı tamamlanmadığı için otomatik iptal edildi ve oda boşa çıkarıldı.`,
+        detail: isEn
+          ? `Date: ${d.date || '-'} | Time: ${d.time || '-'} | Check-In Progress: ${d.progress || '-'}`
+          : `Tarih: ${d.date || '-'} | Saat: ${d.time || '-'} | Kiosk Onay Durumu: ${d.progress || '-'}`,
+      };
+    case 'AUTO_TIMEOUT_CANCELLED':
+      return {
+        badge: isEn ? '30m Invite Timeout' : '30 Dk Davet Süre Aşımı',
+        color: 'warning',
+        title: isEn
+          ? `${actor}'s reservation request was cancelled because invitations were not accepted within 30 minutes.`
+          : `${actor} tarafından oluşturulan randevu, davetler 30 dk içinde onaylanmadığı için otomatik iptal edildi.`,
+        detail: isEn
+          ? `Room: ${d.room || '-'} | Date: ${d.date || '-'} | Time: ${d.time || '-'}`
+          : `Oda: ${d.room || '-'} | Tarih: ${d.date || '-'} | Saat: ${d.time || '-'}`,
+      };
     case 'RESERVATION_CANCELLED':
       return {
         badge: isEn ? 'Cancelled' : 'İptal Edildi',

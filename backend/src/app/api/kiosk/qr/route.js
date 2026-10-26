@@ -5,6 +5,10 @@ import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import crypto from "crypto";
 import os from "os";
+import {
+  runReservationLifecycleChecks,
+  getEffectiveCheckInAnchorMins,
+} from "@/lib/lifecycle";
 
 const PERSONAL_OTP_TTL = 600;
 const DEFAULT_TOLERANCE_MINUTES = 15;
@@ -16,7 +20,7 @@ const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 1000);
 
 // THKÜ eduroam & THKU-802.1x Resmi IP Blokları
 const THKU_PUBLIC_PREFIXES = ["212.154.67.", "95.183.206.", "193.255."];
-const THKU_LOCAL_WIFI_PREFIX = "10.2."; // 10.2.8.x (eduroam & THKU-802.1x yerel IPv4)
+const THKU_LOCAL_WIFI_PREFIX = "10.2.";
 
 function getClientIp(request) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -170,6 +174,8 @@ export async function GET(request) {
   const isStaff = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"].includes(userRole);
 
   try {
+    await runReservationLifecycleChecks();
+
     if (isStaff) {
       const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
       const singleDoorQrUrl = `${frontendUrl}/kiosk?door=thku-study-room`;
@@ -227,7 +233,6 @@ export async function GET(request) {
       });
     }
 
-    // Dinamik CHECKIN_TOLERANCE_MINUTES kuralını veritabanından oku (Varsayılan: 15 dk)
     const tolRule = await prisma.reservationRule.findFirst({
       where: { ruleName: "CHECKIN_TOLERANCE_MINUTES", isActive: true },
       select: { ruleValue: true },
@@ -272,29 +277,29 @@ export async function GET(request) {
     if (todayReservations.length === 0) {
       return NextResponse.json({
         mode: "STUDENT_NO_ACTIVE_BOOKING",
-        error: "Bugün için onaylanmış aktif bir çalışma odası randevunuz bulunmamaktadır.",
+        error: "Bugün için onaylanmış aktif bir çalışma odası randevunuz bulunmamaktadır (veya ±15 dk yoklama süresi dolduğu için otomatik iptal edilmiştir).",
       });
     }
 
     let matchedReservation = null;
     let windowInfoError = null;
+    let activeWindowLabel = "";
 
     for (const r of todayReservations) {
-      const sH = new Date(r.startTime).getUTCHours();
-      const sM = new Date(r.startTime).getUTCMinutes();
-      const startTotalMins = sH * 60 + sM;
+      const { startTotalMins, anchorMins } = getEffectiveCheckInAnchorMins(r, todayStr);
       const minAllowed = startTotalMins - toleranceMinutes;
-      const maxAllowed = startTotalMins + toleranceMinutes;
+      const maxAllowed = anchorMins + toleranceMinutes;
 
       if (nowMins >= minAllowed && nowMins <= maxAllowed) {
         matchedReservation = r;
+        activeWindowLabel = `${fmtMinsToTime(minAllowed)} – ${fmtMinsToTime(maxAllowed)}`;
         break;
       } else {
         windowInfoError = `${r.room.roomNumber} - ${r.room.name} odasındaki ${fmtMinsToTime(
           startTotalMins
-        )} randevunuz için kapı QR onayı yalnızca ±${toleranceMinutes} dakika içinde (${fmtMinsToTime(
+        )} randevunuz için kapı QR onayı yalnızca ${fmtMinsToTime(
           minAllowed
-        )} – ${fmtMinsToTime(maxAllowed)} saatleri arasında) yapılabilir. Şu anki saat: ${fmtMinsToTime(nowMins)}`;
+        )} – ${fmtMinsToTime(maxAllowed)} saatleri arasında yapılabilir. Şu anki saat: ${fmtMinsToTime(nowMins)}`;
       }
     }
 
@@ -321,13 +326,6 @@ export async function GET(request) {
           "⛔ Güvenlik İhlali (Gizli Sekme / Aynı Cihaz Algılandı): Bu fiziksel cihazdan bu randevu için zaten başka bir öğrenci onay vermiştir. Her katılımcı kendi mobil cihazından QR okutmak zorundadır!",
       });
     }
-
-    const sH = new Date(matchedReservation.startTime).getUTCHours();
-    const sM = new Date(matchedReservation.startTime).getUTCMinutes();
-    const startTotalMins = sH * 60 + sM;
-    const windowLabel = `${fmtMinsToTime(startTotalMins - toleranceMinutes)} – ${fmtMinsToTime(
-      startTotalMins + toleranceMinutes
-    )}`;
 
     const checkedSetKey = `kiosk:checked_users:${matchedReservation.id}`;
     const checkedUserIds = await redis.smembers(checkedSetKey);
@@ -363,7 +361,7 @@ export async function GET(request) {
       mode: "STUDENT_ACTIVE",
       reservationId: matchedReservation.id,
       room: matchedReservation.room,
-      windowLabel,
+      windowLabel: activeWindowLabel,
       distanceMeters,
       personalSessionToken: alreadyCheckedIn ? null : personalSessionToken,
       alreadyCheckedIn,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 
 function getIstanbulNow() {
   const now = new Date();
@@ -25,6 +26,8 @@ export async function GET() {
   }
 
   try {
+    await runReservationLifecycleChecks();
+
     const user = await prisma.user.findUnique({
       where: { email: session.user.email.trim().toLowerCase() },
       select: { id: true },

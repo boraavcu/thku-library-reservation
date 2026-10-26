@@ -1,7 +1,10 @@
 import prisma from "@/lib/db";
+import redis from "@/lib/redis";
 import nodemailer from "nodemailer";
 
 const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
+const DEFAULT_TOLERANCE_MINUTES = 15;
+const DEFAULT_MIN_PARTICIPANTS = 2;
 const THKU_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 
 export const ALLOWED_STUDENT_EMAIL = "s250444902@stu.thk.edu.tr";
@@ -36,9 +39,45 @@ function createFreshTransporter() {
   });
 }
 
-/**
- * THKÜ Kurumsal Kimliğine Uygun HTML E-Posta Şablonu Üretici
- */
+function getIstanbulTimeDetails(dateInput = new Date()) {
+  const d = new Date(dateInput);
+  const dateStr = d.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+  const timeParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/Istanbul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+
+  const hour = Number(timeParts.find((p) => p.type === "hour").value);
+  const minute = Number(timeParts.find((p) => p.type === "minute").value);
+  return { dateStr, hour, minute, totalMins: hour * 60 + minute };
+}
+
+export function getEffectiveCheckInAnchorMins(reservation, todayTrStr) {
+  const sH = new Date(reservation.startTime).getUTCHours();
+  const sM = new Date(reservation.startTime).getUTCMinutes();
+  const startTotalMins = sH * 60 + sM;
+
+  let anchorMins = startTotalMins;
+
+  if (reservation.createdAt) {
+    const createdInfo = getIstanbulTimeDetails(reservation.createdAt);
+    if (createdInfo.dateStr === todayTrStr && createdInfo.totalMins > anchorMins) {
+      anchorMins = createdInfo.totalMins;
+    }
+  }
+
+  if (reservation.status === "CONFIRMED" && reservation.updatedAt) {
+    const updatedInfo = getIstanbulTimeDetails(reservation.updatedAt);
+    if (updatedInfo.dateStr === todayTrStr && updatedInfo.totalMins > anchorMins) {
+      anchorMins = updatedInfo.totalMins;
+    }
+  }
+
+  return { startTotalMins, anchorMins };
+}
+
 function buildCorporateEmailHtml({
   badgeText = "BİLGİLENDİRME",
   badgeColor = "#1D4ED8",
@@ -114,13 +153,9 @@ function buildCorporateEmailHtml({
     <tr>
       <td align="center">
         <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08); border: 1px solid #E2E8F0;">
-          
-          <!-- Üst Kurumsal Kırmızı Şerit -->
           <tr>
             <td style="background-color: #C8102E; height: 6px; font-size: 1px; line-height: 1px;">&nbsp;</td>
           </tr>
-
-          <!-- Kurumsal Lacivert Header & Logo -->
           <tr>
             <td style="background-color: #0F172A; padding: 24px 28px; text-align: center;">
               <img src="${THKU_LOGO_URL}" alt="THKÜ Logo" width="68" height="68" style="background-color: #FFFFFF; padding: 6px; border-radius: 50%; display: block; margin: 0 auto 12px auto; object-fit: contain;" />
@@ -132,8 +167,6 @@ function buildCorporateEmailHtml({
               </div>
             </td>
           </tr>
-
-          <!-- İçerik Gövdesi -->
           <tr>
             <td style="padding: 28px 30px;">
               <div style="margin-bottom: 14px;">
@@ -141,19 +174,15 @@ function buildCorporateEmailHtml({
                   ${badgeText}
                 </span>
               </div>
-
               <h2 style="margin: 0 0 14px 0; color: #0F172A; font-size: 20px; font-weight: 800; line-height: 1.3;">
                 ${title}
               </h2>
-
               <p style="margin: 0 0 12px 0; color: #1E293B; font-size: 14px; font-weight: 600;">
                 ${greeting}
               </p>
-
               <p style="margin: 0 0 20px 0; color: #475569; font-size: 14px; line-height: 1.6;">
                 ${leadText}
               </p>
-
               ${
                 details.length > 0
                   ? `
@@ -162,13 +191,10 @@ function buildCorporateEmailHtml({
               </table>`
                   : ""
               }
-
               ${participantsHtml}
               ${rulesHtml}
             </td>
           </tr>
-
-          <!-- Kurumsal Altbilgi (Footer) -->
           <tr>
             <td style="background-color: #F8FAFC; border-top: 1px solid #E2E8F0; padding: 18px 30px; text-align: center;">
               <div style="color: #64748B; font-size: 12px; line-height: 1.5;">
@@ -191,7 +217,6 @@ export async function queueSafeEmail({ to, subject, body, htmlBody = null, prior
   if (!to) return;
   const normalizedTo = to.trim().toLowerCase();
 
-  // Demo sırasında yalnızca s250444902@stu.thk.edu.tr ve boraa-35@hotmail.com adreslerine gerçek mail gönderilir
   if (!SAFE_EMAIL_WHITELIST.has(normalizedTo)) {
     return;
   }
@@ -267,10 +292,14 @@ function fmtDateUTC(dt) {
 }
 
 export async function runReservationLifecycleChecks() {
+  if (globalThis.__thkuLifecycleRunning) return;
+  globalThis.__thkuLifecycleRunning = true;
+
   try {
     const now = new Date();
     const thirtyMinsAgo = new Date(now.getTime() - INVITATION_TIMEOUT_MS);
 
+    // 1. 30 DAKİKALIK DAVET ONAY SÜRESİ DOLAN PENDING RANDEVULARIN OTOMATİK İPTALİ
     const stalePendings = await prisma.reservation.findMany({
       where: {
         status: "PENDING",
@@ -293,6 +322,24 @@ export async function runReservationLifecycleChecks() {
       });
 
       const roomLabel = `${stale.room.roomNumber} - ${stale.room.name}`;
+      const timeRangeStr = `${fmtTimeUTC(stale.startTime)} - ${fmtTimeUTC(stale.endTime)}`;
+
+      // Sistem loguna (auditLog) kaydet
+      await prisma.auditLog.create({
+        data: {
+          userId: stale.user.id,
+          action: "AUTO_TIMEOUT_CANCELLED",
+          entityType: "Reservation",
+          entityId: stale.id,
+          newData: {
+            room: roomLabel,
+            date: fmtDateUTC(stale.reservationDate),
+            time: timeRangeStr,
+            reason: "30 dakikalık grup davet onay süresi dolduğu için otomatik iptal edildi.",
+          },
+        },
+      });
+
       const htmlBody = buildCorporateEmailHtml({
         badgeText: "SÜRE AŞIMI İPTALİ",
         badgeColor: "#B91C1C",
@@ -303,7 +350,7 @@ export async function runReservationLifecycleChecks() {
         details: [
           { label: "Çalışma Odası", value: roomLabel },
           { label: "Tarih", value: fmtDateUTC(stale.reservationDate) },
-          { label: "Saat Aralığı", value: `${fmtTimeUTC(stale.startTime)} - ${fmtTimeUTC(stale.endTime)}` },
+          { label: "Saat Aralığı", value: timeRangeStr },
           { label: "Durum", value: "İPTAL EDİLDİ (30 Dk Onay Süresi Doldu)" },
         ],
       });
@@ -317,24 +364,27 @@ export async function runReservationLifecycleChecks() {
       });
     }
 
-    const todayTrStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
+    // Dinamik Kuralları Oku (CHECKIN_TOLERANCE_MINUTES ve MIN_PARTICIPANTS)
+    const rulesRows = await prisma.reservationRule.findMany({
+      where: {
+        isActive: true,
+        ruleName: { in: ["CHECKIN_TOLERANCE_MINUTES", "MIN_PARTICIPANTS"] },
+      },
+      select: { ruleName: true, ruleValue: true },
+    });
+    const rulesMap = Object.fromEntries(rulesRows.map((r) => [r.ruleName, r.ruleValue?.value]));
+    const toleranceMinutes = Number(rulesMap.CHECKIN_TOLERANCE_MINUTES ?? DEFAULT_TOLERANCE_MINUTES);
+    const minRequiredPeople = Math.max(2, Number(rulesMap.MIN_PARTICIPANTS ?? DEFAULT_MIN_PARTICIPANTS));
+
+    const { dateStr: todayTrStr, totalMins: nowMins } = getIstanbulTimeDetails(now);
     const todayDateObj = new Date(`${todayTrStr}T00:00:00Z`);
 
-    const timeParts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/Istanbul",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(now);
-
-    const curH = Number(timeParts.find((p) => p.type === "hour").value);
-    const curM = Number(timeParts.find((p) => p.type === "minute").value);
-    const nowMins = curH * 60 + curM;
-
-    const todayConfirmed = await prisma.reservation.findMany({
+    // 2. KAPI QR (KİOSK) SÜRESİ (±15 DK) DOLAN RANDEVULARIN OTOMATİK İPTALİ, CEZA İŞLEMESİ, LOGLANMASI VE MÜDÜRE BİLDİRİMİ
+    const activeTodayList = await prisma.reservation.findMany({
       where: {
         reservationDate: todayDateObj,
-        status: "CONFIRMED",
+        status: { in: ["CONFIRMED", "CHECKED_IN"] },
+        penaltyApplied: false,
       },
       include: {
         room: true,
@@ -346,13 +396,13 @@ export async function runReservationLifecycleChecks() {
       },
     });
 
-    for (const res of todayConfirmed) {
-      const startH = new Date(res.startTime).getUTCHours();
-      const startM = new Date(res.startTime).getUTCMinutes();
-      const startMins = startH * 60 + startM;
-      const diffMins = startMins - nowMins;
+    for (const res of activeTodayList) {
+      const { startTotalMins, anchorMins } = getEffectiveCheckInAnchorMins(res, todayTrStr);
+      const deadlineMins = anchorMins + toleranceMinutes;
+      const diffMins = startTotalMins - nowMins;
 
-      if (diffMins > 0 && diffMins <= 120) {
+      // A) Başlangıca 2 saat (120 dk) kala hatırlatma maili
+      if (res.status === "CONFIRMED" && diffMins > 0 && diffMins <= 120) {
         const alreadySent = await prisma.notification.findFirst({
           where: {
             relatedEntityId: res.id,
@@ -408,19 +458,290 @@ export async function runReservationLifecycleChecks() {
           }
         }
       }
+
+      // B) Kiosk Yoklama Süresi (Örn: 15:00 + 15 dk = 15:15) Geçtiyse Otomatik Denetim!
+      if (nowMins > deadlineMins) {
+        const checkedSetKey = `kiosk:checked_users:${res.id}`;
+        const checkedUserIds = await redis.smembers(checkedSetKey);
+
+        const allApprovedUsers = [res.user, ...res.participants.map((p) => p.user)];
+        const verifiedUsers = allApprovedUsers.filter((u) => checkedUserIds.includes(u.id));
+        const absentUsers = allApprovedUsers.filter((u) => !checkedUserIds.includes(u.id));
+
+        const roomLabel = `${res.room.roomNumber} - ${res.room.name}`;
+        const dateStr = fmtDateUTC(res.reservationDate);
+        const timeRangeStr = `${fmtTimeUTC(res.startTime)} - ${fmtTimeUTC(res.endTime)}`;
+
+        // DURUM 1: En az 2 kişi (minRequiredPeople) Kiosk onayı VERMEDİ -> Randevu NO_SHOW olur ve oda boşa çıkar!
+        if (checkedUserIds.length < minRequiredPeople && res.status !== "CHECKED_IN") {
+          const lockUpdate = await prisma.reservation.updateMany({
+            where: { id: res.id, penaltyApplied: false },
+            data: {
+              status: "NO_SHOW",
+              noShow: true,
+              penaltyApplied: true,
+              cancelledAt: now,
+              cancellationReason: `Başlangıçtan sonraki +${toleranceMinutes} dakika içinde en az ${minRequiredPeople} üye kapı QR onayı vermediği için otomatik iptal edildi.`,
+            },
+          });
+
+          if (lockUpdate.count === 0) continue;
+
+          // Otomatik oda iptalini sistem loguna (auditLog) yaz
+          await prisma.auditLog.create({
+            data: {
+              userId: res.user.id,
+              action: "AUTO_KIOSK_CANCELLED",
+              entityType: "Reservation",
+              entityId: res.id,
+              newData: {
+                room: roomLabel,
+                date: dateStr,
+                time: timeRangeStr,
+                progress: `${checkedUserIds.length}/${allApprovedUsers.length}`,
+                reason: `+${toleranceMinutes} dk içinde en az ${minRequiredPeople} kişi kapı QR onayı vermediği için randevu otomatik iptal edildi ve oda boşa çıkarıldı.`,
+              },
+            },
+          });
+
+          // 1) Kiosk QR Okutan Öğrenci Varsa (Örn: Bora Avcu okuttu ama arkadaşı gelmedi): Ceza Almaz, Bilgilendirilir
+          for (const verifiedMember of verifiedUsers) {
+            await prisma.notification.create({
+              data: {
+                userId: verifiedMember.id,
+                title: `Randevu İptal Edildi - Ceza Uygulanmadı (${roomLabel})`,
+                message: `Kapı QR onayınız alınmıştır ancak diğer grup üyeleri +${toleranceMinutes} dk içinde onay vermediği için randevu iptal edilmiştir. Tarafınıza ceza işlenmemiştir.`,
+                type: "CANCELLATION",
+                relatedEntityType: "Reservation",
+                relatedEntityId: res.id,
+              },
+            });
+
+            const sparedHtml = buildCorporateEmailHtml({
+              badgeText: "GRUP EKSİKLİĞİ İPTALİ • CEZA YOK",
+              badgeColor: "#0284C7",
+              badgeBg: "#E0F2FE",
+              title: "Randevunuz Diğer Katılımcılar Gelmediği İçin İptal Edildi",
+              greeting: `Sayın ${verifiedMember.fullName},`,
+              leadText: `${roomLabel} çalışma odası için kapı QR yoklama onayınız zamanında alınmıştır. Ancak grubunuzdaki diğer katılımcılar +${toleranceMinutes} dakikalık süre içinde onay vermediği için (minimum ${minRequiredPeople} kişi şartı sağlanamadığından) randevu otomatik iptal edilmiştir. Kendi yoklamanızı yaptığınız için tarafınıza herhangi bir No-Show cezası İŞLENMEMİŞTİR.`,
+              details: [
+                { label: "Çalışma Odası", value: roomLabel },
+                { label: "Tarih & Saat", value: `${dateStr} | ${timeRangeStr}` },
+                { label: "Sizin Yoklama Durumunuz", value: "Kapı QR Onaylandı ✓ (Ceza Yok)" },
+              ],
+            });
+
+            await queueSafeEmail({
+              to: verifiedMember.email,
+              subject: `THKÜ Kütüphane - Randevu İptal Bilgisi / Ceza Yok (${roomLabel})`,
+              body: `Sayın ${verifiedMember.fullName}, kapı QR onayınız alınmıştır ancak diğer grup üyeleri gelmediği için randevu iptal edilmiştir. Tarafınıza ceza işlenmemiştir.`,
+              htmlBody: sparedHtml,
+              priority: 1,
+            });
+          }
+
+          // 2) Kiosk QR Okutmayan Öğrencilere (Örn: Mehmet Demir) Otomatik 1/3 No-Show Cezası, Sistem Logu ve (3/3 ise) Ban İşle
+          for (const absentMember of absentUsers) {
+            await prisma.penaltyHistory.create({
+              data: {
+                userId: absentMember.id,
+                reservationId: res.id,
+                penaltyType: "NO_SHOW",
+                penaltyPoints: 15,
+                description: `${roomLabel} (${timeRangeStr}) rezervasyonunda +${toleranceMinutes} dk içinde kapı QR onayı verilmedi (Otomatik No-Show).`,
+              },
+            });
+
+            const activeNoShowCount = await prisma.penaltyHistory.count({
+              where: {
+                userId: absentMember.id,
+                penaltyType: "NO_SHOW",
+                isActive: true,
+              },
+            });
+
+            const shouldBan = activeNoShowCount >= 3;
+            const banUntilDate = shouldBan
+              ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+              : undefined;
+
+            await prisma.user.update({
+              where: { id: absentMember.id },
+              data: {
+                penaltyPoints: { increment: 15 },
+                ...(shouldBan && {
+                  isBanned: true,
+                  banUntil: banUntilDate,
+                  banReason: `Dönem içinde 3 kez No-Show (Kapı QR onayı vermeme) ihlali nedeniyle 30 gün otomatik banlandı.`,
+                }),
+              },
+            });
+
+            // Müdür ve BİM'in "1. Öğrenci & Sistem Logları" sekmesinde görebilmesi için AuditLog kaydı oluştur
+            await prisma.auditLog.create({
+              data: {
+                userId: absentMember.id,
+                action: shouldBan ? "AUTO_NO_SHOW_BANNED" : "AUTO_NO_SHOW_PENALTY",
+                entityType: "Reservation",
+                entityId: res.id,
+                newData: {
+                  room: roomLabel,
+                  date: dateStr,
+                  time: timeRangeStr,
+                  student: `${absentMember.fullName} (${absentMember.email})`,
+                  warningCount: `${activeNoShowCount}/3`,
+                  banUntil: shouldBan && banUntilDate ? banUntilDate.toLocaleDateString("tr-TR") : null,
+                },
+              },
+            });
+
+            await sendNoShowWarningEmail({
+              user: absentMember,
+              activeNoShowCount,
+              roomLabel,
+              dateStr,
+              isBanned: shouldBan,
+              banUntilDate,
+            });
+
+            if (shouldBan) {
+              await prisma.reservation.updateMany({
+                where: {
+                  userId: absentMember.id,
+                  status: { in: ["PENDING", "CONFIRMED"] },
+                  reservationDate: { gte: todayDateObj },
+                },
+                data: {
+                  status: "CANCELLED",
+                  cancelledAt: now,
+                  cancellationReason: "Kullanıcı 3. No-Show uyarısına ulaşıp banlandığı için otomatik iptal edildi.",
+                },
+              });
+            }
+          }
+
+          // 3) Kütüphane Müdürüne (boraa-35@hotmail.com) Otomatik Kiosk İptal ve Ceza Raporu Maili Gönder
+          const attendanceSummary = allApprovedUsers.map((u) => {
+            const didCheck = checkedUserIds.includes(u.id);
+            return `<strong>${u.fullName}</strong> (${u.email}) — <span style="color:${
+              didCheck ? "#15803D" : "#B91C1C"
+            }; font-weight:700;">${
+              didCheck ? "Kapı QR Okuttu ✓ (Ceza Yok)" : "Okutmadı ✗ (No-Show Uyarısı İşlendi)"
+            }</span>`;
+          });
+
+          const directorNoShowHtml = buildCorporateEmailHtml({
+            badgeText: "OTOMATİK NO-SHOW İPTALİ • ODA BOŞA ÇIKTI",
+            badgeColor: "#B91C1C",
+            badgeBg: "#FEE2E2",
+            title: `${roomLabel} Randevusu Kiosk Onayı Tamamlanmadığı İçin İptal Edildi`,
+            greeting: "Sayın Kütüphane Müdürü,",
+            leadText: `${roomLabel} çalışma odasının ${dateStr} (${timeRangeStr}) tarihli randevusunda +${toleranceMinutes} dakikalık yoklama süresi dolmuş olup, en az ${minRequiredPeople} katılımcı kapı QR onayı vermediği için randevu sistem tarafından otomatik iptal edilmiş ve oda diğer öğrencilerin kullanımına açılmıştır.`,
+            details: [
+              { label: "Çalışma Odası", value: `${roomLabel} (Tekrar Müsait Duruma Çekildi)` },
+              { label: "Tarih & Saat", value: `${dateStr} | ${timeRangeStr}` },
+              { label: "Kiosk Onay Durumu", value: `${checkedUserIds.length} / ${allApprovedUsers.length} Öğrenci Onayladı (Min: ${minRequiredPeople})` },
+              { label: "Ceza İşlenen Üye Sayısı", value: `${absentUsers.length} Öğrenciye No-Show Uyarısı Verildi` },
+            ],
+            participantsTitle: "Katılımcı Yoklama ve Ceza Detayı",
+            participantsList: attendanceSummary,
+          });
+
+          await queueSafeEmail({
+            to: ALLOWED_DIRECTOR_EMAIL,
+            subject: `[Kütüphane Müdürlüğü] Kiosk Onayı Yapılmadı - Randevu İptal Edildi: ${roomLabel} (${timeRangeStr})`,
+            body: `Sayın Kütüphane Müdürü,\n\n${roomLabel} odasının ${dateStr} (${timeRangeStr}) randevusu, süresi içinde en az ${minRequiredPeople} kişi kapı QR onayı vermediği için otomatik olarak iptal edilmiş ve oda boşa çıkarılmıştır.`,
+            htmlBody: directorNoShowHtml,
+            priority: 1,
+          });
+        } else if (checkedUserIds.length >= minRequiredPeople && absentUsers.length > 0) {
+          // DURUM 2: En az 2 kişi onayladı (Oda CHECKED_IN ve aktif), ancak grupta QR okutmayan 3./4. üyeler var!
+          const lockUpdate = await prisma.reservation.updateMany({
+            where: { id: res.id, penaltyApplied: false },
+            data: { penaltyApplied: true },
+          });
+
+          if (lockUpdate.count === 0) continue;
+
+          for (const absentMember of absentUsers) {
+            await prisma.penaltyHistory.create({
+              data: {
+                userId: absentMember.id,
+                reservationId: res.id,
+                penaltyType: "NO_SHOW",
+                penaltyPoints: 15,
+                description: `${roomLabel} (${timeRangeStr}) rezervasyonunda grup odayı açtı ancak üye bireysel kapı QR onayını vermedi (Otomatik No-Show).`,
+              },
+            });
+
+            const activeNoShowCount = await prisma.penaltyHistory.count({
+              where: {
+                userId: absentMember.id,
+                penaltyType: "NO_SHOW",
+                isActive: true,
+              },
+            });
+
+            const shouldBan = activeNoShowCount >= 3;
+            const banUntilDate = shouldBan
+              ? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+              : undefined;
+
+            await prisma.user.update({
+              where: { id: absentMember.id },
+              data: {
+                penaltyPoints: { increment: 15 },
+                ...(shouldBan && {
+                  isBanned: true,
+                  banUntil: banUntilDate,
+                  banReason: `Dönem içinde 3 kez No-Show (Kapı QR onayı vermeme) ihlali nedeniyle 30 gün otomatik banlandı.`,
+                }),
+              },
+            });
+
+            await prisma.auditLog.create({
+              data: {
+                userId: absentMember.id,
+                action: shouldBan ? "AUTO_NO_SHOW_BANNED" : "AUTO_NO_SHOW_PENALTY",
+                entityType: "Reservation",
+                entityId: res.id,
+                newData: {
+                  room: roomLabel,
+                  date: dateStr,
+                  time: timeRangeStr,
+                  student: `${absentMember.fullName} (${absentMember.email})`,
+                  warningCount: `${activeNoShowCount}/3`,
+                  banUntil: shouldBan && banUntilDate ? banUntilDate.toLocaleDateString("tr-TR") : null,
+                },
+              },
+            });
+
+            await sendNoShowWarningEmail({
+              user: absentMember,
+              activeNoShowCount,
+              roomLabel,
+              dateStr,
+              isBanned: shouldBan,
+              banUntilDate,
+            });
+          }
+        }
+      }
     }
   } catch (error) {
     console.error("Lifecycle check error:", error);
+  } finally {
+    globalThis.__thkuLifecycleRunning = false;
   }
 }
 
-/**
- * 2. Kişi Kabul Ettiğinde (isInitialConfirmation === true):
- * - Kütüphane Müdürüne (boraa-35@hotmail.com) Oda Ayrıldı maili 1 kez gider.
- * - Organizatöre ve 2. kişiye onay maili gider.
- * 3., 4., 5. Kişi Kabul Ettiğinde (isInitialConfirmation === false):
- * - Yalnızca kabul eden o kişiye mail gider, müdüre tekrar gitmez.
- */
+if (typeof globalThis !== "undefined" && !globalThis.__thkuLifecycleTimerStarted) {
+  globalThis.__thkuLifecycleTimerStarted = true;
+  setInterval(() => {
+    runReservationLifecycleChecks().catch(() => {});
+  }, 30 * 1000);
+}
+
 export async function handleParticipantAcceptedEmails({
   reservationId,
   acceptingUserId,
@@ -462,7 +783,6 @@ export async function handleParticipantAcceptedEmails({
     );
 
     if (isInitialConfirmation) {
-      // 1) Kütüphane Müdürüne (boraa-35@hotmail.com) Kurumsal HTML Bildirim Maili
       const directorHtml = buildCorporateEmailHtml({
         badgeText: "ODA AYRILDI (CONFIRMED)",
         badgeColor: "#15803D",
@@ -489,7 +809,6 @@ export async function handleParticipantAcceptedEmails({
         priority: 1,
       });
 
-      // 2) Organizatöre ve Onaylayan 2. Kişiye Kurumsal HTML Onay Maili
       const recipientsForInitial = [res.user];
       if (acceptingParticipant && acceptingParticipant.id !== res.user.id) {
         recipientsForInitial.push(acceptingParticipant);
@@ -541,7 +860,6 @@ export async function handleParticipantAcceptedEmails({
       return;
     }
 
-    // 3., 4., 5. Kişi Kabul Ettiğinde Sadece O Kişiye Giden Kurumsal HTML Mail
     if (acceptingParticipant) {
       await prisma.notification.create({
         data: {
@@ -586,12 +904,6 @@ export async function handleParticipantAcceptedEmails({
   }
 }
 
-/**
- * RANDEVU İPTAL EDİLDİĞİNDE ÇALIŞIR:
- * 1) Gruptaki tüm öğrencilere (Organizatör + Davetliler) "Rezervasyonunuz İptal Edilmiştir" maili gönderir.
- * 2) Eğer randevu daha önceden onaylanmış (CONFIRMED) ise Kütüphane Müdürüne (boraa-35@hotmail.com)
- *    "Onaylanan Rezervasyon İptal Edildi ve Oda Boşa Çıktı" maili gönderir.
- */
 export async function sendReservationCancelledEmails({
   reservationId,
   cancelledByEmail,
@@ -626,7 +938,6 @@ export async function sendReservationCancelledEmails({
       (m) => `<strong>${m.fullName}</strong> (${m.email})`
     );
 
-    // 1) Eğer randevu CONFIRMED (Onaylı) durumdayken iptal edildiyse Kütüphane Müdürüne (boraa-35@hotmail.com) haber ver
     if (wasConfirmed) {
       const directorCancelHtml = buildCorporateEmailHtml({
         badgeText: "ONAYLI RANDEVU İPTAL EDİLDİ",
@@ -655,7 +966,6 @@ export async function sendReservationCancelledEmails({
       });
     }
 
-    // 2) Gruptaki tüm öğrencilere "Rezervasyonunuz İptal Edilmiştir" bildirimi ve kurumsal maili gönder
     for (const member of allMembers) {
       await prisma.notification.create({
         data: {
@@ -798,7 +1108,7 @@ export async function sendNoShowWarningEmail({
       rulesTitle: "Disiplin ve Ceza Politikası",
       rulesList: [
         "Onaylanan randevulara başlangıç saatinde kapı QR kodu okutularak giriş yapılması zorunludur.",
-        "3 kez No-Show uyarısı alan kullanıcıların hesapları 30 gün veya dönem boyunca rezervasyonlara kapatılır.",
+        "3 kez No-Show uyarısı alan kullanıcıların hesapları 30 gün boyunca rezervasyonlara kapatılır.",
       ],
     });
 

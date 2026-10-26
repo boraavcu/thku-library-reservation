@@ -4,11 +4,14 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import crypto from "crypto";
-import { sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
+import {
+  sendKioskCheckInEmailToStaff,
+  getEffectiveCheckInAnchorMins,
+} from "@/lib/lifecycle";
 
 const DEFAULT_TOLERANCE_MINUTES = 15;
 const DEFAULT_MIN_CHECKIN_PARTICIPANTS = 2;
-const DEVICE_LOCK_TTL = 14400; // 4 saat boyunca aynı cihazdan (gizli sekme dahil) başka öğrenci onay veremez
+const DEVICE_LOCK_TTL = 14400;
 
 // THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (1 KM Sabit Yarıçap)
 const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
@@ -90,7 +93,6 @@ export async function POST(request) {
       }
     }
 
-    // Dinamik CHECKIN_TOLERANCE_MINUTES ve MIN_PARTICIPANTS kurallarını veritabanından oku
     const rulesRows = await prisma.reservationRule.findMany({
       where: {
         isActive: true,
@@ -145,12 +147,10 @@ export async function POST(request) {
     });
 
     const reservation = todayReservations.find((r) => {
-      const sH = new Date(r.startTime).getUTCHours();
-      const sM = new Date(r.startTime).getUTCMinutes();
-      const startMins = sH * 60 + sM;
+      const { startTotalMins, anchorMins } = getEffectiveCheckInAnchorMins(r, todayStr);
       return (
-        nowTotalMinutes >= startMins - toleranceMinutes &&
-        nowTotalMinutes <= startMins + toleranceMinutes
+        nowTotalMinutes >= startTotalMins - toleranceMinutes &&
+        nowTotalMinutes <= anchorMins + toleranceMinutes
       );
     });
 
@@ -161,7 +161,6 @@ export async function POST(request) {
       );
     }
 
-    // 4 KATMANLI GİZLİ SEKME (INCOGNITO) VE CİHAZ KİLİDİ KONTROLÜ
     const cookieName = `thku_checkin_lock_${reservation.id}`;
     const cookieOwner = request.cookies.get(cookieName)?.value;
     const deviceKey = `kiosk:device_lock:${reservation.id}:${headerDeviceId}`;
@@ -226,7 +225,6 @@ export async function POST(request) {
       },
     });
 
-    // KURAL: Sadece EN AZ 2 KİŞİ (minCheckinParticipants) Kiosk onayı verdiğinde randevu CHECKED_IN olur ve Müdüre 1 kez mail gider!
     if (checkedUserIds.length >= minCheckinParticipants) {
       const transition = await prisma.reservation.updateMany({
         where: {
