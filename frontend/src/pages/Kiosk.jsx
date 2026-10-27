@@ -267,13 +267,13 @@ export default function KioskPage() {
                 <strong>Kampüs Wi-Fi ve Konum (GPS) Zorunluluğu:</strong> QR kodu okutmadan önce telefonunuzun <strong>THKÜ Kampüs Wi-Fi (eduroam / THKU-802.1x)</strong> ağına bağlı olduğundan ve tarayıcı <strong>Konum (GPS)</strong> izninin açık olduğundan emin olunuz. (Mobil veri veya VPN ile giriş yapılamaz).
               </li>
               <li>
-                <strong>±15 Dakika Yoklama Süresi:</strong> Oda giriş onayınızı, randevu başlangıç saatinizden <strong>15 dakika öncesi ile 15 dakika sonrası</strong> arasında (Örn: 10:00 randevusu için <strong>09:45 – 10:15</strong> saatleri arasında) yapmanız zorunludur.
+                <strong>±15 Dakika Yoklama Süresi:</strong> Oda giriş onayınızı, randevu başlangıç saatinizden <strong>15 dakika öncesi ile 15 dakika sonrası</strong> arasında (Örn: 10:00 randevusu için <strong>09:45 – 10:15</strong> saatleri arasında) yapmanız zorunludur. (Bu süre yönetim tarafından değiştirilebilir).
               </li>
               <li>
-                <strong>En Az 2 Kişi ve Kendi Telefonundan Onay Şartı:</strong> Randevunun başlaması için gruptaki <strong>en az 2 öğrencinin kendi mobil cihazından</strong> bu QR kodu okutup <strong>&ldquo;Oda Girişimi Onayla&rdquo;</strong> butonuna basması zorunludur. Aynı telefondan başka bir öğrenci adına onay verilemez.
+                <strong>En Az 2 Kişi ve Kendi Telefonundan Onay Şartı:</strong> Randevunun başlaması ve odanın ayrılması için gruptaki <strong>en az 2 öğrencinin kendi mobil cihazından</strong> bu QR kodu okutup <strong>&ldquo;Oda Girişimi Onayla&rdquo;</strong> butonuna basması zorunludur. Aynı telefondan başka bir öğrenci adına onay verilemez. Ceza almamak için davetli olan herkesin butona basması zorunludur.
               </li>
               <li>
-                <strong>Gelmeme (No-Show) ve Ceza Kuralı:</strong> Zamanında kapı QR onayı yapılmayan randevular <strong>Gelmedi (No-Show)</strong> sayılır. Dönem içinde <strong>3 kez No-Show uyarısı</strong> alan öğrencilerin hesapları 30 gün / dönem boyunca rezervasyonlara kapatılır.
+                <strong>Gelmeme (No-Show) ve Ceza Kuralı:</strong> Zamanında kapı QR onayı yapılmayan randevular <strong>Gelmedi (No-Show)</strong> sayılır. Dönem içinde <strong>3 kez No-Show uyarısı</strong> alan öğrencilerin hesapları 30 gün boyunca rezervasyonlara kapatılır.
               </li>
             </Box>
           </Box>

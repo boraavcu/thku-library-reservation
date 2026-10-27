@@ -66,6 +66,7 @@ export default function MyBookings() {
   const { t, i18n } = useTranslation();
   const currentLang = i18n.language?.substring(0, 2) || 'tr';
   const isEn = currentLang === 'en';
+  const isBanned = Boolean(session?.user?.isBanned);
 
   const [reservations, setReservations] = useState([]);
   const [invitations, setInvitations] = useState([]);
@@ -190,8 +191,13 @@ export default function MyBookings() {
               </Typography>
             </Box>
           </Box>
-          <Button variant="contained" startIcon={<AddCircleOutlineIcon />} onClick={() => navigate('/reserve')}>
-            {t('reserveRoom')}
+          <Button
+            variant="contained"
+            disabled={isBanned}
+            startIcon={<AddCircleOutlineIcon />}
+            onClick={() => !isBanned && navigate('/reserve')}
+          >
+            {isBanned ? (isEn ? 'Suspended' : 'Hesap Askıda') : t('reserveRoom')}
           </Button>
         </Box>
 
@@ -354,7 +360,14 @@ export default function MyBookings() {
                       </Box>
                       <Divider />
                       <Box sx={{ display: 'flex', gap: 1 }}>
-                        <Button size="small" variant="contained" color="success" startIcon={<CheckCircleOutlineIcon />} onClick={() => handleInvitationRespond(inv.id, 'ACCEPT')}>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="success"
+                          disabled={isBanned}
+                          startIcon={<CheckCircleOutlineIcon />}
+                          onClick={() => handleInvitationRespond(inv.id, 'ACCEPT')}
+                        >
                           {t('accept')}
                         </Button>
                         <Button size="small" variant="outlined" color="error" startIcon={<HighlightOffIcon />} onClick={() => handleInvitationRespond(inv.id, 'REJECT')}>

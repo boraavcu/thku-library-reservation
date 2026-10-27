@@ -133,7 +133,7 @@ async function main() {
 Çalışma odaları günde yalnızca 1 (bir) defa ve en fazla 3 saat süreyle rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun veya üyelerin farklı isimlerle ardışık rezervasyon yapması yasaktır. Gece 21:00-24:00 saatleri arasına randevu alan kullanıcılar, ertesi gün 00:00-08:00 saatleri arasına randevu alamazlar.
 
 2. Kapı QR Kodu, Kişiye Özel Yoklama ve Gelmeme (No-Show)
-Oda girişlerinde bulunan QR kod okutularak randevu başlangıç saatinden ±15 dakika içinde en az 2 grup üyesinin kendi mobil cihazından onay vermesi zorunludur. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez. Randevusuna gelmeyen kullanıcılara e-posta ile uyarı gönderilir; 3 uyarı sonunda kullanıcı dönemsel/30 günlük rezervasyon yasağı (ban) alır.
+Oda girişlerinde bulunan QR kod okutularak randevu başlangıç saatinden ±15 dakika içinde en az 2 grup üyesinin kendi mobil cihazından onay vererek odayı ayırabilirler fakat her üyenin onay vermesi zorunludur. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez. Randevusuna gelmeyen kullanıcılara e-posta ile uyarı gönderilir; 3 uyarı sonunda kullanıcı 30 günlük rezervasyon yasağı (ban) alır.
 
 3. Sessizlik ve Kullanım Kuralları
 Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yüksek sesli konuşmalar, kulaklıksız müzik veya rahatsız edici davranışlara izin verilmez. Temizliği korumak için (kapalı şişedeki su hariç) yiyecek ve içecek tüketimi kesinlikle yasaktır.
@@ -440,3 +440,150 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+
+  /**
+   * CANLIYA ALINMADAN ÖNCE KOD BÖYLE GÜNCELLENMELİDİR: Rezervasyon tarihleri ve saatleri, sistemin çalıştığı anki 
+   * saat dilimine göre ayarlanmalıdır. Aksi takdirde, seed verileri gelecekte veya geçmişte kalabilir.
+   * Sistemi başlatırken node prisma/seed.cjs komutu ile seed verileri yüklenmelidir. 
+   * Bu işlem, demo kullanıcıları ve test verilerini temizler ve canlı sistem için gerekli başlangıç verilerini oluşturur.
+   * 
+   * require("dotenv").config();
+const { PrismaClient } = require("@prisma/client");
+
+const prisma = new PrismaClient();
+
+async function main() {
+  console.log("🚀 THKÜ Kütüphane Sistemi Canlı (Production) Başlangıç Verileri Yükleniyor...");
+
+  // 1. Test / Demo aşamasından kalan tüm eski kayıtları ve demo kullanıcıları temizle
+  await prisma.reservationParticipant.deleteMany();
+  await prisma.penaltyHistory.deleteMany();
+  await prisma.reservation.deleteMany();
+  await prisma.adminAction.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.announcement.deleteMany();
+  await prisma.emailQueue.deleteMany();
+  await prisma.notification.deleteMany();
+  await prisma.user.deleteMany({
+    where: { email: { endsWith: "@demo.local" } },
+  });
+
+  // 2. Gerçek Yetkili Hesapları (Microsoft Azure AD ile giriş yaptıklarında otomatik eşleşir)
+  const superAdmin = await prisma.user.upsert({
+    where: { email: "bim@thk.edu.tr" }, // BİM yetkilisinin gerçek kurumsal e-postası
+    update: { role: "SUPER_ADMIN", isActive: true },
+    create: {
+      email: "bim@thk.edu.tr",
+      fullName: "THKÜ Bilgi İşlem Müdürlüğü",
+      department: "Bilgi İşlem Müdürlüğü",
+      role: "SUPER_ADMIN",
+      acceptedAgreementVersion: "v1.0",
+      isActive: true,
+    },
+  });
+
+  const adminUser = await prisma.user.upsert({
+    where: { email: "library@thk.edu.tr" }, // Kütüphane Müdürünün gerçek kurumsal e-postası
+    update: { role: "ADMIN", isActive: true },
+    create: {
+      email: "library@thk.edu.tr",
+      fullName: "THKÜ Kütüphane Müdürlüğü",
+      department: "Kütüphane ve Dokümantasyon Daire Bşk.",
+      role: "ADMIN",
+      acceptedAgreementVersion: "v1.0",
+      isActive: true,
+    },
+  });
+
+  // 3. Çalışma Odaları (R101 - R104)
+  const roomList = [
+    { roomNumber: "R101", name: "Atatürk", capacity: 8, isActive: true },
+    { roomNumber: "R102", name: "Gökçen", capacity: 8, isActive: true },
+    { roomNumber: "R103", name: "Hürkuş", capacity: 8, isActive: true },
+    { roomNumber: "R104", name: "İstikbal", capacity: 8, isActive: true },
+  ];
+
+  for (const r of roomList) {
+    await prisma.room.upsert({
+      where: { roomNumber: r.roomNumber },
+      update: { name: r.name, capacity: r.capacity, isActive: r.isActive },
+      create: r,
+    });
+  }
+
+  // 4. Aktif Kullanıcı Sözleşmesi (v1.0)
+  const agreementContent = `1. Maksimum Rezervasyon Süresi ve Günlük Hak
+Çalışma odaları günde yalnızca 1 (bir) defa ve en fazla 3 saat süreyle rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun veya üyelerin farklı isimlerle ardışık rezervasyon yapması yasaktır. Gece 21:00-24:00 saatleri arasına randevu alan kullanıcılar, ertesi gün 00:00-08:00 saatleri arasına randevu alamazlar.
+
+2. Kapı QR Kodu, Kişiye Özel Yoklama ve Gelmeme (No-Show)
+Oda girişlerinde bulunan QR kod okutularak randevu başlangıç saatinden ±15 dakika içinde en az 2 grup üyesinin kendi mobil cihazından onay vermesi zorunludur. Başlangıç saatine 1 saatten az kalan randevular iptal edilemez. Randevusuna gelmeyen kullanıcılara e-posta ile uyarı gönderilir; 3 uyarı sonunda kullanıcı dönemsel/30 günlük rezervasyon yasağı (ban) alır.
+
+3. Sessizlik ve Kullanım Kuralları
+Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yüksek sesli konuşmalar, kulaklıksız müzik veya rahatsız edici davranışlara izin verilmez. Temizliği korumak için (kapalı şişedeki su hariç) yiyecek ve içecek tüketimi kesinlikle yasaktır.
+
+4. Ekipman Sorumluluğu
+Kullanıcılar rezervasyon süresince kütüphane mülküne, mobilyalara veya teknik ekipmanlara verilen her türlü hasardan sorumludur. Kütüphane ekipmanlarının fişini çekmeyiniz. Lütfen odaya girdiğinizde mevcut sorunları derhal bildirin.
+
+5. Grup Çalışması ve Davet Onay Süresi
+Çalışma odaları grup çalışması (en az 2 kişi, en fazla 8 kişi) için tasarlanmıştır. Gönderilen grup davetiyeleri 30 dakika içinde onaylanmalıdır; aksi takdirde rezervasyon otomatik olarak iptal edilir.
+
+6. İleri Tarih Sınırı ve Erken Boşaltma
+Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken tamamlayan gruplar randevu süresi içinde sistem üzerinden 'Odayı Erken Boşalt' işlemini yaparak odayı diğer öğrencilerin kullanımına açabilirler.`;
+
+  await prisma.agreement.updateMany({ data: { isActive: false } });
+  await prisma.agreement.upsert({
+    where: { version: "v1.0" },
+    update: { title: "Kullanım Kuralları", content: agreementContent, isActive: true },
+    create: { title: "Kullanım Kuralları", version: "v1.0", isActive: true, content: agreementContent },
+  });
+
+  // 5. Dinamik Rezervasyon Kuralları
+  const rules = [
+    { ruleName: "MIN_PARTICIPANTS", ruleType: "INTEGER", ruleValue: { value: 2 } },
+    { ruleName: "MAX_PARTICIPANTS", ruleType: "INTEGER", ruleValue: { value: 8 } },
+    { ruleName: "MAX_DURATION_HOURS", ruleType: "INTEGER", ruleValue: { value: 3 } },
+    { ruleName: "MAX_ADVANCE_DAYS", ruleType: "INTEGER", ruleValue: { value: 1 } },
+    { ruleName: "DAILY_RELEASE_HOUR", ruleType: "INTEGER", ruleValue: { value: 8 } },
+    { ruleName: "CHECKIN_TOLERANCE_MINUTES", ruleType: "INTEGER", ruleValue: { value: 15 } },
+    { ruleName: "CANCEL_LOCK_MINUTES", ruleType: "INTEGER", ruleValue: { value: 60 } },
+  ];
+
+  for (const rule of rules) {
+    await prisma.reservationRule.upsert({
+      where: { ruleName: rule.ruleName },
+      update: { ruleValue: rule.ruleValue, ruleType: rule.ruleType, isActive: true },
+      create: { ruleName: rule.ruleName, ruleType: rule.ruleType, ruleValue: rule.ruleValue, isActive: true },
+    });
+  }
+
+  // 6. Açılış Duyurusu
+  await prisma.announcement.create({
+    data: {
+      title: {
+        tr: "7/24 Grup Çalışma Odaları ve Kapı QR Sistemi Aktif Edildi",
+        en: "24/7 Group Study Rooms and Door QR System is Now Active",
+      },
+      content: {
+        tr: "Kütüphanemiz 7/24 hizmet vermektedir. Oda girişlerindeki ortak QR kodu okutarak randevu başlangıcından ±15 dakika içinde onay vermeniz zorunludur.",
+        en: "Our library is open 24/7. Please scan the door QR code within ±15 minutes of your start time to confirm check-in.",
+      },
+      priority: "URGENT",
+      isPinned: true,
+      isActive: true,
+      createdBy: adminUser.id,
+      publishedAt: new Date(),
+    },
+  });
+
+  console.log("✅ Canlı (Production) kurulumu tamamlandı! Odalar, kurallar ve sözleşme hazır.");
+}
+
+main()
+  .catch((e) => {
+    console.error("❌ Seed Hatası:", e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+   */

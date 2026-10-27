@@ -8,7 +8,7 @@ const DEFAULT_MIN_PARTICIPANTS = 2;
 const THKU_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 
 export const ALLOWED_STUDENT_EMAIL = "s250444902@stu.thk.edu.tr";
-export const ALLOWED_DIRECTOR_EMAIL = "boraa-35@hotmail.com";
+export const ALLOWED_DIRECTOR_EMAIL = process.env.DIRECTOR_EMAIL || "boraa-35@hotmail.com";
 const SAFE_EMAIL_WHITELIST = new Set([
   ALLOWED_STUDENT_EMAIL.toLowerCase(),
   ALLOWED_DIRECTOR_EMAIL.toLowerCase(),
@@ -18,7 +18,7 @@ function createFreshTransporter() {
   const smtpHost = process.env.SMTP_HOST?.trim();
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const smtpUser = process.env.SMTP_USER?.trim();
-  const smtpPass = process.env.SMTP_PASS?.replace(/\s+/g, "");
+  const smtpPass = process.env.SMTP_PASS?.trim();
 
   if (!smtpHost || !smtpUser || !smtpPass) return null;
 

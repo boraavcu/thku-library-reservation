@@ -25,6 +25,7 @@ function StudyRooms() {
   const theme = useTheme();
   const { data: session, status: authStatus } = useSession();
   const { t, i18n } = useTranslation();
+  const isBanned = Boolean(session?.user?.isBanned);
 
   const [rooms, setRooms] = useState([]);
   const [rules, setRules] = useState(null);
@@ -322,11 +323,12 @@ function StudyRooms() {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 2, sm: 3 }, p: 2.5, pt: { xs: 0, sm: 2.5 } }}>
                     <Button
                       variant="contained"
-                      onClick={() => navigate(`/reserve/new?roomId=${room.id}&date=${selectedDate}`)}
-                      endIcon={<ArrowForwardIcon />}
+                      disabled={isBanned}
+                      onClick={() => !isBanned && navigate(`/reserve/new?roomId=${room.id}&date=${selectedDate}`)}
+                      endIcon={!isBanned ? <ArrowForwardIcon /> : null}
                       sx={{ minWidth: 110, borderRadius: 2 }}
                     >
-                      {t('srSelect')}
+                      {isBanned ? (i18n.language === 'tr' ? 'Hesap Askıda' : 'Suspended') : t('srSelect')}
                     </Button>
                   </Box>
                 </Card>
