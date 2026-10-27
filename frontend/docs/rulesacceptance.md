@@ -1,49 +1,31 @@
 # Context: RulesAcceptance.jsx
 
-## 📌 1. Dosyanın Amacı ve Rolü
-`RulesAcceptance.jsx`, "THK University Kütüphane Rezervasyon Sistemi"nde bir **Ara Katman (Interstitial/Middleware)** sayfası olarak görev yapar. Kullanıcı sisteme başarılı bir şekilde giriş yaptıktan sonra, kütüphane kullanım kurallarını henüz onaylamamışsa zorunlu olarak bu sayfaya yönlendirilir. Kullanıcı bu sayfadaki kuralları okuyup onaylamadan sistemin (Dashboard vb.) hiçbir özelliğine erişemez. Hukuki ve sistemsel bir bariyerdir.
+##  1. Dosyanın Amacı ve Mimari Rolü
 
-## 🛠 2. Teknoloji Yığını (Tech Stack)
-- **UI Framework:** Material-UI (MUI v5)
-- **Authentication:** `next-auth/react` (`useSession`, `update`)
-- **Routing:** `react-router-dom` (`Maps`, `useNavigate`)
-- **API Mimarisi:** Custom Axios Instance (`import api from '../api'`)
-- **Etkileşim:** MUI `Checkbox`, `Button`, `Dialog` veya `Card` bileşenleri.
+`RulesAcceptance.jsx`, sisteme ilk kez giriş yapan (veya yeni bir sözleşme versiyonu yayınlandığında henüz onaylamamış olan) kullanıcıların kütüphane kullanım kurallarını okuyup onayladığı zorunlu sözleşme ekranıdır . Ayrıca sözleşmeyi daha önce onaylamış kullanıcıların üst menüden veya alt bilgiden (`Footer`) `/rules?view=true` bağlantısıyla kuralları tekrar okuyabilmesini sağlar.
 
-## 🧠 3. İş Mantığı ve State Yönetimi (Business Logic & State)
-Bu bileşenin en kritik noktası "State" ve "Session" yönetimidir. Kullanıcının sistemi atlatmasını (bypass) engellemelidir.
+##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-### A. Yönlendirme ve Güvenlik Duvarı (Auth Guard)
-- Bileşen yüklendiğinde `useSession()` ile oturum kontrol edilir.
-- **Oturum Yoksa:** `status === "unauthenticated"` ise anında `/` (Login) sayfasına atılır.
-- **Kurallar Zaten Onaylanmışsa:** `session.user.hasAcceptedRules === true` ise, kullanıcının bu sayfada işi yoktur. Yanlışlıkla geldiyse anında `<Navigate to="/dashboard" replace />` ile yönlendirilir.
+- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`) 
+- **Kimlik Doğrulama:** `next-auth/react` (`useSession`, `signOut`) 
+- **Yönlendirme:** `react-router-dom` (`useNavigate`, `useSearchParams`) 
+- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN`) 
+- **API İstemcisi:** `../api` (`GET /api/agreements/active` ve `POST /api/user/accept-rules`) 
 
-### B. Onay Akışı (Acceptance Flow)
-- Kullanıcıdan alınan "Okudum, anladım" eylemi bir `useState(false)` (Örn: `isChecked`) ile tutulur.
-- Checkbox işaretlenmeden "Kabul Et" butonu kesinlikle **`disabled`** (devre dışı) kalmalıdır.
+##  3. İş Mantığı, Çoklu Dil Ayrıştırıcısı ve Rol Yönlendirmesi
 
-### C. API İsteği ve Oturum Güncelleme (Mutation & Session Refresh)
-- Butona tıklandığında `api.post('/users/accept-rules')` (veya ilgili endpoint) çağrılır.
-- İstek esnasında buton `loading` durumuna geçer ve spam tıklamalar engellenir.
-- **Kritik Adım:** Veritabanı güncellendikten sonra, frontend'deki oturum verisinin de güncellenmesi gerekir. Bunun için NextAuth'un `update()` fonksiyonu çağrılır (Örn: `await update({ hasAcceptedRules: true })`).
-- Oturum güncellendikten sonra kullanıcı `/dashboard` rotasına yönlendirilir.
+### A. 6 Maddelik Sözleşme Ayrıştırıcısı (`parseRules` & `ENGLISH_RULES`)
+- Sayfa açıldığında `GET /api/agreements/active` uç noktasından veritabanındaki aktif sözleşme (`v1.0`) çekilir .
+- Dil Türkçe (`tr`) ise veritabanından gelen metin `parseRules(agreement.content)` fonksiyonu ile numaralı maddelere (`1.` – `6.`) ayrıştırılarak şık numaralı kartlar halinde ekrana basılır.
+- Dil İngilizce (`en`) ise `ENGLISH_RULES` sabiti devreye girerek aynı 6 kuralın (*Maksimum 3 Saat ve Gece-Gündüz Kuralı*, *±15 Dk Kapı QR ve 3/3 No-Show Ban Kuralı*, *Sessizlik Kuralları*, *Ekipman Sorumluluğu*, *2-8 Kişi Grup Çalışması ve 30 Dk Davet Süresi*, *1 Gün İleri Tarih ve Erken Boşaltma*) tam İngilizce karşılıklarını sunar.
 
-## 📐 4. Layout ve Grid Sistemi (Kritik Kurallar)
-Bu sayfa, kullanıcının metne odaklanmasını sağlamak için tasarlanmıştır.
+### B. Onay Modu vs. Görüntüleme Modu (`alreadyAccepted || isViewMode`)
+- Kullanıcı sözleşmeyi henüz onaylamamışsa alt sabit barda onay kutucuğu (`Checkbox`), *"Çıkış Yap"* butonu ve *"Anlıyorum ve Devam Et"* butonu gösterilir . Onaylandığında `POST /api/user/accept-rules` çağrılır ve NextAuth oturumu `update({ acceptedAgreementVersion })` ile anında güncellenir.
+- Kullanıcı sözleşmeyi zaten onaylamışsa (`alreadyAccepted`) veya `?view=true` ile girdiyse, alt barda yeşil bir onay rozeti (`✓ Bu sözleşmeyi (v1.0) onayladınız`) ve geri dönüş butonu gösterilir .
+- **Rol Bazlı Geri Dönüş (`homePath`):** `isStaff` (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`) için geri dönüş adresi `/admin` (*Yönetim Merkezine Dön*), öğrenciler için `/dashboard` (*Ana Sayfa*) olarak dinamik belirlenir.
 
-- **Ana Taşıyıcı:** Sayfa ortalanmış, tek bir ana sütundan oluşur. `Container maxWidth="md"` (veya `sm`) kullanılarak okunabilirlik artırılır.
-- **İçerik Alanı (Scrollable Area):** Kurallar metni uzun olabileceği için `Paper` veya `Card` bileşeninin içeriği sınırlandırılmalı ve kendi içinde kaydırılabilir olmalıdır (`maxHeight: '60vh'`, `overflowY: 'auto'`, `pr: 1` scrollbar payı).
-- **Aksiyon Alanı:** Checkbox ve Onay butonu, kaydırılabilir metnin **altında sabit (sticky) veya ayrı bir kutuda** yer almalıdır. Kullanıcı aşağı inmeden de onay kutusunu görebilmelidir (veya UX gereği en alta inmeye zorlanabilir).
+##  4. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
 
-## 🎨 5. Tasarım ve Tema Kuralları (MUI Constraints)
-Mevcut `theme.js` mimarisine tam uyum sağlanmalıdır.
-
-- **Renkler:** Arka plan `background.default`, kart/kağıt arka planı `background.paper` olmalıdır.
-- **Tipografi:** Başlık için vurgulu bir font (`h5` veya `h4`, `color: 'text.primary'`), kurallar metni için okunaklı bir gövde metni (`body1` veya `body2`, `color: 'text.secondary'`, `lineHeight: 1.6`) kullanılmalıdır.
-- **Butonlar:** - İptal / Çıkış butonu varsa `color: "error"` veya `color: "inherit"`.
-  - Onay butonu kesinlikle `variant="contained"`, `color="primary"` ve vurgulu (`fontWeight: 700`, `size="large"`) olmalıdır.
-- **Gölge (Elevation):** Kuralları içeren kutu, sayfa arka planından hafifçe ayrışması için gölgelendirilebilir (`elevation={1}` veya `border` ile).
-
-## 🚀 6. Hata Yönetimi ve Gelecek Geliştirmeler (Error Handling & Future)
-- **Hata Gösterimi:** Eğer `api.post` işlemi başarısız olursa (ağ hatası vb.), butonun hemen üzerinde veya Snackbar ile kullanıcıya MUI `<Alert severity="error">` gösterilmelidir.
-- **Dinamik Kurallar:** Şu an metin frontend içinde hardcoded (sabit) yazılmış olabilir. İlerleyen aşamalarda bu sayfa yüklendiğinde `api.get('/settings/rules')` gibi bir endpoint'ten güncel kural metnini (HTML veya Markdown olarak) çekip ekrana basacak şekilde güncellenecektir.
+- `backend/src/app/api/agreements/active/route.js` (`GET`) 
+- `backend/src/app/api/user/accept-rules/route.js` (`POST`) 
+- `backend/src/middleware/checkRulesAcceptance.js` 

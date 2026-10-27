@@ -1,62 +1,62 @@
 # Context: Dashboard.jsx
 
-## 📌 1. Dosyanın Amacı ve Rolü
+## 1. Dosyanın Amacı ve Rolü
 
-`Dashboard.jsx`, "THK University Kütüphane Rezervasyon Sistemi"nin **ana kontrol panelidir**. Kullanıcı başarılı bir şekilde giriş yaptıktan ve kuralları onayladıktan sonra gördüğü ilk ve en kapsamlı ekrandır. Uygulamanın kalbidir; navigasyonu, hızlı işlemleri, aktif/yaklaşan rezervasyonları ve sistem duyurularını tek bir ekranda sunar.
+`Dashboard.jsx`, **THKÜ Kütüphane Grup Çalışma Odaları Rezervasyon Sistemi**'nin öğrenci ana kontrol panelidir. Kullanıcı kurumsal Microsoft (Azure AD) hesabıyla giriş yapıp aktif kullanıcı sözleşmesini (`acceptedAgreementVersion`) onayladıktan sonra karşılaştığı ilk ekrandır. Hızlı aksiyonları, ceza/uyarı durumunu, bekleyen grup davetlerini, aktif randevuları ve kategorize edilmiş kütüphane duyurularını tek bir merkezde sunar.
 
-## 🛠 2. Teknoloji Yığını (Tech Stack)
+##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **UI Framework:** Material-UI (MUI v5)
-- **Authentication:** `next-auth/react` (`useSession`)
-- **Routing:** `react-router-dom` (`useNavigate`)
-- **API Mimarisi:** Custom Axios Instance (`import api from '../api'`)
-- **İkonlar:** `@mui/icons-material`
+- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`)
+- **Kimlik Doğrulama:** `next-auth/react` (`useSession`)
+- **Yönlendirme (Routing):** `react-router-dom` (`useNavigate`)
+- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN` tam dil desteği)
+- **API İstemcisi:** `../api` (Cihaz kimliği ve WebGL donanım parmak izi başlıklarını otomatik ekleyen Axios istemcisi)
+- **Yardımcı Fonksiyonlar:** `../utils/formatTime` (`formatRelativeTime` ile duyuru zamanlarının göreceli gösterimi)
+- **Alt Bileşenler:** `Navbar.jsx`, `Footer.jsx`
 
-## 🧠 3. İş Mantığı ve State Yönetimi (Business Logic & State)
+##  3. İş Mantığı, Güvenlik ve State Yönetimi (Business Logic & State)
 
-Bileşen yüklendiğinde kusursuz bir sırayla çalışan iki temel mantık (useEffect) vardır:
+Bileşen yüklendiğinde iki aşamalı güvenlik ve veri çekme yaşam döngüsü (`useEffect`) çalışır:
 
-### A. Güvenlik ve Yönlendirme (Auth Guard)
+### A. Güvenlik, Sözleşme ve Rol Koruması (Auth & Role Guard)
+1. **Oturum Kontrolü:** `status === "unauthenticated"` ise kullanıcı anında `/` (Login) sayfasına yönlendirilir.
+2. **Sözleşme Zorunluluğu:** `session.user.acceptedAgreementVersion` değeri yoksa kullanıcı Dashboard'u göremez ve zorunlu olarak `/rules` sayfasına yönlendirilir.
+3. **Yetkili Yönlendirmesi (Role Guard):**
+   - `ADMIN` (Kütüphane Müdürü) ve `SUPER_ADMIN` (BİM) rolleri öğrenci ekranına giremez; doğrudan `/admin` yönetim merkezine yönlendirilir.
+   - `LIBRARIAN` (Kütüphane Görevlisi) varsayılan olarak `/admin` sayfasına yönlendirilir; ancak URL'de `?studentView=true` parametresi varsa öğrenci görünümüne geçiş yapabilir.
 
-- `useSession()` kancası kullanılarak oturum durumu (`status`) dinlenir.
-- **Yükleniyor:** `status === "loading"` ise tam ekran `<CircularProgress />` döner.
-- **Oturum Yok:** `status === "unauthenticated"` ise anında Login (`/`) sayfasına postalanır.
-- **Kurallar Onaylanmamış:** Oturum var ama `session.user.hasAcceptedRules` değeri `false` ise, kullanıcı Dashboard'u göremez, zorunlu olarak `/rules` (Kural Kabul) sayfasına yönlendirilir.
+### B. Eşzamanlı Veri Çekme (`Promise.all`)
+Sayfa açılışında 3 API uç noktası paralel olarak çağrılır:
+- `GET /api/announcements`: Aktif kütüphane duyurularını çeker.
+- `GET /api/invitations`: Öğrenciye gelen ve 30 dakikalık onay süresi dolmamış `PENDING` grup davetlerini çeker.
+- `GET /api/reservations/active`: Öğrencinin organizatör veya onaylı katılımcı olduğu aktif (`PENDING`, `CONFIRMED`, `CHECKED_IN`) randevuları çeker.
 
-### B. Veri Çekme (Data Fetching)
+### C. Ban (Yasaklı) ve No-Show Ceza Kontrolü (`isBanned` & `noShowCount`)
+- Oturumdan gelen `session.user.isBanned`, `session.user.banUntil` ve `session.user.noShowCount` değerleri okunur.
+- Kullanıcı banlıysa (`isBanned === true`):
+  - Sayfanın en üstünde kırmızı bir `<Alert severity="error">` bandı ile ban bitiş tarihi (`banUntil` veya *Kalıcı/Süresiz*) ve ban sebebi (`banReason`) gösterilir.
+  - **"Oda Rezerve Et"** kartı grileşir (`cursor: 'not-allowed'`), butonu `disabled` olur ve üzerinde *"Hesap Askıda / Suspended"* yazar.
+  - Gelen grup davetlerindeki **"Kabul Et"** butonu `disabled` durumuna geçer (banlı öğrenci yeni bir gruba katılamaz, yalnızca daveti reddedebilir).
 
-- Sadece oturum varsa ve kurallar onaylanmışsa `api.get('/rooms')` tetiklenir.
-- Hata durumunda ekranda `<Alert severity="error">` gösterilir.
-- **ESLint Kuralı:** İleride kullanılmak üzere hazırlanan veri `const [, setRooms] = useState([]);` şeklinde tanımlanmıştır. Tasarım şu an statik (hardcoded) olduğu için `rooms` değişkeni kullanılıp "unused var" hatası alınmaması adına virgülle bypass edilmiştir.
+##  4. Arayüz Düzeni ve Bileşen Mimarisi (Layout Architecture)
 
-## 📐 4. Layout ve Grid Sistemi (Kritik Kurallar)
+Sayfa masaüstünde iki sütunlu esnek (`flex`) bir düzene sahiptir; mobilde (`xs`) tüm bloklar alt alta dizilir:
 
-Kusursuz bir "Landscape Tablet" ve Masaüstü görünümü için sayfa MUI `<Grid container spacing={3}>` ile iki ana kolona ayrılmıştır. **Bu yapı asla bozulmamalıdır:**
+1. **Üst Bilgi ve Disiplin Rozeti:**
+   - Sol tarafta kullanıcıyı adıyla karşılayan başlık, sağ tarafta ise **"No-Show Uyarısı: X / 3"** (veya yasaklı durumu) rozeti ile **"Kütüphane 7/24 Açık (00:00 - 24:00)"** bilgi kutusu yer alır.
+2. **Sol Sütun (Ana İşlemler - `flex: 1`):**
+   - **Hızlı İşlemler (Quick Actions):** *Oda Rezerve Et* (`/reserve`), *Rezervasyonlarım* (`/bookings`) ve *Rezervasyon Kuralları* (`/rules?view=true`) kartları.
+   - **Bekleyen Davetlerim (Pending Invitations):** Varsa 30 dakika onay süreli grup davetlerini listeler; `POST /api/invitations/respond` ile *Kabul Et* veya *Reddet* aksiyonu alır ve listeyi anında günceller.
+   - **Aktif Rezervasyonlarım:** Tarih rozeti, saat aralığı (`24:00` gece yarısı desteğiyle), onaylı katılımcı sayısı ve durum çipi (`Onay Bekliyor`, `Onaylandı`, `Şu An Aktif`) ile listelenir.
+3. **Sağ Sütun (Sabitlenmiş Duyuru Paneli - `width: 350px`, `sticky`):**
+   - Duyurular **Tümü (`ALL`)**, **Acil & Önemli (`IMPORTANT`)** ve **Bilgi / Normal (`NORMAL`)** çipleriyle filtrelenebilir.
+   - Sayfa uzamasını önlemek için duyurular `ANN_PER_PAGE = 3` sabitiyle **3'erli sayfalama (`<Pagination />`)** yapısıyla gösterilir.
+   - *(Mimari Karar: Oda yoğunluk grafiği `RoomDensityChart` öğrenci ekranında kalabalık yaratmaması için buradan kaldırılmış ve yalnızca Yönetim Paneline `/admin` taşınmıştır).*
 
-1. **Sol Kolon (Ana İşlemler - `md={8}`):**
-   - Sayfanın %66'sını kaplar.
-   - **Bileşenler:** Quick Actions (3'lü yan yana kartlar), Active Reservation (Check-in ve Geri Sayım arayüzü), Upcoming Reservations (Yaklaşan randevular listesi).
-2. **Sağ Kolon (Sidebar/Bilgi - `md={4}`):**
-   - Sayfanın %33'ünü kaplar.
-   - **Bileşenler:** Announcements (Duyurular), Weekly Summary (İstatistikler), Footer Linkleri.
+##  5. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
 
-_Not: `xs={12}` kullanılarak mobilde tüm kolonların alt alta kusursuz dizilmesi sağlanmıştır._
-
-## 🎨 5. Tasarım ve Tema Kuralları (MUI Constraints)
-
-Kodun içinde kesinlikle hardcoded (örn: `#137fec`, `#ffffff`) renk kodları **KULLANILAMAZ.** Tüm renkler projeye ait `theme.js` üzerinden çekilmelidir.
-
-- **Renk Kullanımı:** - Arka planlar için: `bgcolor: 'background.default'` veya `bgcolor: 'background.paper'`
-  - Metinler için: `color: 'text.primary'`, `color: 'text.secondary'`, `color: 'text.disabled'`
-  - Aksan renkleri: `primary.main`, `success.main`, `warning.main`
-- **Gölge ve Kenarlıklar (Flat Design):** - Tasarım "Flat" (Düz) mimaridedir. Kartlarda varsayılan gölge kullanılmaz (`elevation={0}`).
-  - Ayrım için hafif kenarlıklar kullanılır: `border: '1px solid'`, `borderColor: 'divider'`.
-- **Şeffaflık (Opacity/Alpha):**
-  - Buton veya rozet arka planlarında şeffaf renkler için MUI'nin `alpha` fonksiyonu kullanılır. _(Örn: `bgcolor: alpha(theme.palette.success.main, 0.1)`)_
-- **Hafif Etkileşimler (Hover States):**
-  - Tıklanabilir öğelerde (kartlar, butonlar) `.hover` stateleri `action.hover` kullanılarak yumuşak geçişler (`transition: 'all 0.2s'`) ile sağlanmıştır.
-
-## 🚀 6. Gelecekte Yapılacaklar (Future Implementations)
-
-- **Dinamik Veri Entegrasyonu:** Şu an arayüzde görünen "Room 302", "12 Hours Studied" gibi veriler statiktir. İlerleyen aşamalarda `setRooms` ile alınan veriler ve `/reservations` endpoint'i üzerinden alınacak veriler `map()` fonksiyonu ile bu tasarıma giydirilecektir. Giydirme yapılırken mevcut MUI elementlerinin (Card, Chip, Box) yapısı korunmalıdır.
-- **Geri Sayım Sayacı (Timer):** "Active Reservation" içindeki "45 MINUTES LEFT" kısmı için gerçek zamanlı bir `setInterval` mantığı kurulacaktır.
+- `frontend/src/components/Navbar.jsx` & `Footer.jsx`
+- `backend/src/app/api/announcements/route.js` (`GET`)
+- `backend/src/app/api/invitations/route.js` (`GET`)
+- `backend/src/app/api/invitations/respond/route.js` (`POST`)
+- `backend/src/app/api/reservations/active/route.js` (`GET`)
