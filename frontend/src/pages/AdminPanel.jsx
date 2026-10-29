@@ -1699,7 +1699,7 @@ export default function AdminPanel() {
                   />
                 </Paper>
 
-                {/* SOL VE SAĞ SÜTUNDAKİ LOG KARTLARI EŞİT BOYDA (minHeight: 118) HİZALANDI */}
+                {/* SOL VE SAĞ SÜTUNDAKİ LOG KARTLARI EŞİT BOYDA HİZALANDI */}
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'stretch' }}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
                     <Box>

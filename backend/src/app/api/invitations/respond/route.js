@@ -201,8 +201,8 @@ export async function POST(request) {
         });
 
         // Tam 2. kişi onayladığında (totalConfirmed === minP) veya PENDING -> CONFIRMED geçişi olduğunda
-        // Kütüphane Müdürüne (boraa-35@hotmail.com) ve organizatöre mail gönderilir.
-        // 3., 4., 5. kişi onayladığında (totalConfirmed > minP) müdüre tekrar mail gitmez!
+        // Kütüphane Müdürüne ve organizatöre mail gönderilir.
+        // Diğer kişiler onayladığında (totalConfirmed > minP) müdüre tekrar mail gitmez.
         const isInitialConfirmation =
           transitionResult.count === 1 || totalConfirmed === minP;
 

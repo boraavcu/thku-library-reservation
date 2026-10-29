@@ -6,7 +6,6 @@ import {
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
-import QrCode2Icon from '@mui/icons-material/QrCode2';
 import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 import PrintIcon from '@mui/icons-material/Print';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
@@ -122,7 +121,7 @@ export default function KioskPage() {
   }
 
   // =========================================================================
-  // MOD 1: GÖREVLİ / MÜDÜR EKRANI -> 4 ODAYA ASILACAK RESMİ A4 KAPI QR POSTERİ
+  // GÖREVLİ / MÜDÜR EKRANI -> 4 ODAYA ASILACAK RESMİ A4 KAPI QR POSTERİ
   // =========================================================================
   if (isStaff && kioskData?.mode === 'STAFF_POSTER') {
     const qrImageSrc = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(kioskData.doorQrUrl)}`;
@@ -283,7 +282,7 @@ export default function KioskPage() {
   }
 
   // =========================================================================
-  // MOD 2: ÖĞRENCİ EKRANI -> KAPI QR OKUTULDUĞUNDA AÇILAN TEK TIKLA ONAY EKRANI
+  // ÖĞRENCİ EKRANI -> KAPI QR OKUTULDUĞUNDA AÇILAN TEK TIKLA ONAY EKRANI
   // =========================================================================
   return (
     <Box

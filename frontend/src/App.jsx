@@ -47,8 +47,6 @@ function App() {
       <Route path="/reserve" element={<StudyRooms />} />
       <Route path="/reserve/new" element={<ReserveForm />} />
       <Route path="/profile" element={<Profile />} />
-      {/* <Route path="/bookings" element={<Dashboard />} />
-      <Route element={<MyBookings />} path="/bookings" />*/}
       <Route path="/bookings" element={<MyBookings />} />
       <Route path="/admin" element={<AdminPanel />} />
       <Route path="/kiosk" element={<Kiosk />} />  

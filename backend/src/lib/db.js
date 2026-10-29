@@ -1,8 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 
 const prismaClientSingleton = () => {
-  // Adaptör vs. yok. Standart başlatma.
-  // Prisma, .env dosyasındaki DATABASE_URL'i otomatik okur.
   return new PrismaClient({
     log: ['query', 'error', 'warn'],
   });

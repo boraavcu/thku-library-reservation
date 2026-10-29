@@ -2,7 +2,7 @@ import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import nodemailer from "nodemailer";
 
-const INVITATION_TIMEOUT_MS = 30 * 60 * 1000; // Madde 10: 30 Dakika
+const INVITATION_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_TOLERANCE_MINUTES = 15;
 const DEFAULT_MIN_PARTICIPANTS = 2;
 const THKU_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
@@ -223,7 +223,7 @@ export async function queueSafeEmail({ to, subject, body, htmlBody = null, prior
   if (!to) return;
   const normalizedTo = to.trim().toLowerCase();
 
-  if (!SAFE_EMAIL_WHITELIST.has(normalizedTo)) {
+  if (normalizedTo.endsWith("@demo.local")) {
     return;
   }
 
@@ -470,7 +470,7 @@ export async function runReservationLifecycleChecks() {
         }
       }
 
-      // B) Kiosk Yoklama Süresi (Örn: 16:00 + 15 dk = 16:15) Geçtiyse Otomatik Denetim!
+      // B) Kiosk Yoklama Süresi (Örn: 16:00 + 15 dk = 16:15) Geçtiyse Otomatik Denetim
       if (nowMins > deadlineMins) {
         const checkedSetKey = `kiosk:checked_users:${res.id}`;
         const checkedUserIds = await redis.smembers(checkedSetKey);
@@ -483,7 +483,7 @@ export async function runReservationLifecycleChecks() {
         const dateStr = fmtDateUTC(res.reservationDate);
         const timeRangeStr = `${fmtTimeUTC(res.startTime)} - ${fmtTimeUTC(res.endTime)}`;
 
-        // DURUM 1: En az 2 kişi (minRequiredPeople) Kiosk onayı VERMEDİ -> Randevu NO_SHOW olur ve oda boşa çıkar!
+        // DURUM 1: En az 2 kişi (minRequiredPeople) Kiosk onayı VERMEDİ -> Randevu NO_SHOW olur ve oda boşa çıkar
         if (checkedUserIds.length < minRequiredPeople && res.status !== "CHECKED_IN") {
           const lockUpdate = await prisma.reservation.updateMany({
             where: { id: res.id, penaltyApplied: false },

@@ -38,7 +38,7 @@ function StudyRooms() {
   const [duration, setDuration] = useState(1);
   const [timeRange, setTimeRange] = useState([LIBRARY_OPEN, LIBRARY_CLOSE]);
 
-  // Madde 3: İleri tarih varsayılan 1 gün
+  // İleri tarih varsayılan 1 gün
   const maxDate = useMemo(() => {
     const advanceDays = rules?.maxAdvanceDays ?? 1;
     const max = new Date(today + 'T12:00:00');

@@ -8,7 +8,6 @@ import {
   sendNoShowWarningEmail,
   sendKioskCheckInEmailToStaff,
   sendReservationCancelledEmails,
-  queueSafeEmail,
 } from "@/lib/lifecycle";
 
 const ALLOWED_ROLES = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"];
@@ -43,14 +42,6 @@ export async function GET() {
 
   try {
     runReservationLifecycleChecks().catch(() => {});
-
-    // R103 hâlâ Uçantürk olarak kayıtlıysa otomatik Hürkuş olarak güncelle
-    await prisma.room
-      .updateMany({
-        where: { roomNumber: "R103", name: "Uçantürk" },
-        data: { name: "Hürkuş" },
-      })
-      .catch(() => {});
 
     const now = new Date();
     const days180Ago = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);

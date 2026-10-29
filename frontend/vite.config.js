@@ -6,10 +6,24 @@ export default defineConfig({
   define: {
     'process.env': {}
   },
+  // 1. LOKAL GELİŞTİRME İÇİN (npm run dev)
   server: {
-    host: true, // Test sunucusu IP'si veya domaini üzerinden erişime izin verir
+    host: true, 
     port: 5173,
-    allowedHosts: true, // Test sunucusu domain adını (örn: test.library.thk.edu.tr) engellemez
+    allowedHosts: 'all',
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      }
+    }
+  },
+  // 2. CANLI SUNUCU İÇİN (npm run preview)
+  preview: {
+    host: true,
+    port: 5173,
+    allowedHosts: 'all',
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

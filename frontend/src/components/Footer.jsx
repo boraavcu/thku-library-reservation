@@ -99,7 +99,6 @@ export default function Footer() {
             </Typography>
           </Stack>
 
-          {/* Sağ: Developer İmza Rozeti (LinkedIn Profil Yönlendirmeli) */}
           <Tooltip title={isEn ? 'View Bora Avcu on LinkedIn' : 'Bora Avcu LinkedIn Profilini Görüntüle'}>
             <Chip
               component="a"

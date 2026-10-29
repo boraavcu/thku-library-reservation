@@ -6,7 +6,7 @@ const getRedisClient = () => {
     console.log("🔄 Redis'e bağlanılıyor... Hedef URL:", redisUrl);
 
     global.redisClient = new Redis(redisUrl, {
-      maxRetriesPerRequest: 3, // Bağlanamazsa sonsuza kadar beklemesin, hata fırlatsın
+      maxRetriesPerRequest: 3,
       retryStrategy(times) {
         if (times > 3) {
           console.error("🚨 Redis'e ulaşılamadı! Lütfen Docker konteynerini kontrol edin.");

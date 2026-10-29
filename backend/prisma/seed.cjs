@@ -16,7 +16,7 @@ function getTimeUTC(hour, minute = 0, second = 0) {
 }
 
 async function main() {
-  console.log("🌱 THKÜ Kütüphane Sistemi Zengin Analitik Demo Verileri Yükleniyor...");
+  console.log("THKÜ Kütüphane Sistemi Demo Verileri Yükleniyor");
 
   await prisma.reservationParticipant.deleteMany();
   await prisma.penaltyHistory.deleteMany();
@@ -27,7 +27,7 @@ async function main() {
   await prisma.emailQueue.deleteMany();
   await prisma.notification.deleteMany();
 
-  // 1. Yetkili Hesapları (Kütüphane Müdürü: boraa-35@hotmail.com)
+  // Yetkili Hesapları 
   const superAdmin = await prisma.user.upsert({
     where: { email: "bim.demo@demo.local" },
     update: { role: "SUPER_ADMIN", fullName: "THKÜ Sistem Yöneticisi (BİM)", department: "Bilgi İşlem Müdürlüğü", acceptedAgreementVersion: "v1.0", isActive: true },
@@ -46,7 +46,7 @@ async function main() {
     create: { email: "gorevli.demo@demo.local", fullName: "Kütüphane Görevlisi", department: "Kütüphane ve Dokümantasyon", role: "LIBRARIAN", acceptedAgreementVersion: "v1.0", isActive: true },
   });
 
-  // 2. 18 Öğrenci (Sadece Öğrenci 1 gerçek: s250444902@stu.thk.edu.tr, diğer 17 öğrenci rastgele @demo.local)
+  // 18 Öğrenci (Sadece Öğrenci 1 gerçek: s250444902@stu.thk.edu.tr, diğer 17 öğrenci rastgele @demo.local)
   const studentDefinitions = [
     { email: "s250444902@stu.thk.edu.tr", fullName: "Bora Avcu (Öğrenci 1)", studentNumber: "250444902", department: "Bilgisayar Mühendisliği", penaltyPoints: 0, isBanned: false },
     { email: "demo.ogrenci2.x91@demo.local", fullName: "Ayşe Yılmaz (Öğrenci 2)", studentNumber: "990000002", department: "Havacılık ve Uzay Mühendisliği", penaltyPoints: 0, isBanned: false },
@@ -110,7 +110,7 @@ async function main() {
     students.push(created);
   }
 
-  // 3. Çalışma Odaları (R103 -> Hürkuş)
+  // Çalışma Odaları
   const roomList = [
     { roomNumber: "R101", name: "Atatürk", capacity: 8, isActive: true },
     { roomNumber: "R102", name: "Gökçen", capacity: 8, isActive: true },
@@ -128,7 +128,7 @@ async function main() {
     rooms.push(rm);
   }
 
-  // 4. Aktif Sözleşme (v1.0) ve Dinamik Kurallar
+  // Aktif Sözleşme (v1.0) ve Dinamik Kurallar
   const agreementContent = `1. Maksimum Rezervasyon Süresi ve Günlük Hak
 Çalışma odaları günde yalnızca 1 (bir) defa ve en fazla 3 saat süreyle rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun veya üyelerin farklı isimlerle ardışık rezervasyon yapması yasaktır. Gece 21:00-24:00 saatleri arasına randevu alan kullanıcılar, ertesi gün 00:00-08:00 saatleri arasına randevu alamazlar.
 
@@ -172,7 +172,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     });
   }
 
-  // 5. ZENGİN REZERVASYON VERİ SETİ
+  // ZENGİN REZERVASYON VERİ SETİ
   const trHourParts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Istanbul",
     hour: "2-digit",
@@ -266,7 +266,6 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
       purpose: "Uçuş Simülasyon ve Kontrol Grubu",
     },
 
-    // YARIN
     {
       dayOffset: 1,
       roomIdx: 1,
@@ -312,7 +311,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     });
   }
 
-  // 6. Ceza Kayıtları
+  // Ceza Kayıtları
   const caner = students[4];
   const hakan = students[17];
 
@@ -326,7 +325,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     ],
   });
 
-  // 7. Duyurular
+  // Duyurular
   await prisma.announcement.createMany({
     data: [
       {
@@ -392,7 +391,7 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
     ],
   });
 
-  // 8. 15 Öğrenci Logu + 15 Yönetici Logu
+  // 15 Öğrenci Logu + 15 Yönetici Logu
   for (let i = 0; i < 15; i++) {
     const st = students[i % students.length];
     const rm = rooms[i % rooms.length];

@@ -14,7 +14,7 @@ export async function GET() {
   }
 
   try {
-    // Türkiye saat dilimine göre YYYY-MM-DD formatında bugünün tarihini al
+    // Türkiye saat dilimine göre YYYY-MM-DD formatında bugünün tarihini alır.
     const todayStr = new Date().toLocaleDateString("en-CA", {
       timeZone: "Europe/Istanbul",
     });
