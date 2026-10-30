@@ -138,16 +138,38 @@ export default function KioskPage() {
           justifyContent: 'center',
           p: { xs: 2, sm: 3 },
           '@media print': {
+            minHeight: 'auto',
+            display: 'block',
             bgcolor: '#fff',
             color: '#0F172A',
             p: 0,
+            m: 0,
           },
         }}
       >
+        <style>
+          {`
+            @media print {
+              @page {
+                size: A4 portrait;
+                margin: 8mm;
+              }
+              html, body {
+                height: auto !important;
+                overflow: visible !important;
+                background: #ffffff !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+            }
+          `}
+        </style>
+
         <Card
           sx={{
             maxWidth: 640,
             width: '100%',
+            mx: 'auto',
             p: { xs: 2.5, sm: 4.5 },
             borderRadius: 4,
             textAlign: 'center',
@@ -156,11 +178,15 @@ export default function KioskPage() {
             border: '1px solid rgba(255,255,255,0.14)',
             boxShadow: '0 25px 50px -12px rgba(0,0,0,0.6)',
             '@media print': {
+              maxWidth: '100%',
               bgcolor: '#fff',
               color: '#0F172A',
               boxShadow: 'none',
-              border: '3px solid #0F172A',
-              p: 4,
+              border: '2.5px solid #0F172A',
+              borderRadius: 3,
+              p: 2.5,
+              breakInside: 'avoid',
+              pageBreakInside: 'avoid',
             },
           }}
         >
@@ -201,18 +227,51 @@ export default function KioskPage() {
               p: 1,
               borderRadius: '50%',
               border: '2px solid #38BDF8',
+              '@media print': {
+                width: 64,
+                height: 64,
+                mb: 1,
+                p: 0.5,
+                borderColor: '#0F172A',
+              },
             }}
           />
 
-          <Typography variant="subtitle2" sx={{ fontWeight: 800, letterSpacing: '0.06em', color: '#38BDF8', mb: 0.5, '@media print': { color: '#C8102E' } }}>
+          <Typography
+            variant="subtitle2"
+            sx={{
+              fontWeight: 800,
+              letterSpacing: '0.06em',
+              color: '#38BDF8',
+              mb: 0.5,
+              '@media print': { color: '#C8102E', fontSize: '0.78rem', mb: 0.25 },
+            }}
+          >
             TÜRK HAVA KURUMU ÜNİVERSİTESİ • KÜTÜPHANE MÜDÜRLÜĞÜ
           </Typography>
 
-          <Typography variant="h5" sx={{ fontWeight: 900, mb: 1, fontSize: { xs: '1.25rem', sm: '1.55rem' } }}>
+          <Typography
+            variant="h5"
+            sx={{
+              fontWeight: 900,
+              mb: 1,
+              fontSize: { xs: '1.25rem', sm: '1.55rem' },
+              '@media print': { fontSize: '1.3rem', mb: 1, lineHeight: 1.25 },
+            }}
+          >
             Grup Çalışma Odaları (R101 – R104) Kapı Giriş Yoklama Noktası
           </Typography>
 
-          <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, flexWrap: 'wrap', mb: 2.5 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 1,
+              flexWrap: 'wrap',
+              mb: 2.5,
+              '@media print': { mb: 1.5 },
+            }}
+          >
             <Chip label="R101 • Atatürk" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
             <Chip label="R102 • Gökçen" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
             <Chip label="R103 • Hürkuş" size="small" sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, '@media print': { border: '1px solid #0F172A', color: '#0F172A' } }} />
@@ -228,14 +287,23 @@ export default function KioskPage() {
               display: 'inline-block',
               mb: 3,
               border: '4px solid #38BDF8',
-              '@media print': { borderColor: '#0F172A' },
+              '@media print': {
+                borderColor: '#0F172A',
+                p: 1.5,
+                mb: 1.75,
+              },
             }}
           >
             <Box
               component="img"
               src={qrImageSrc}
               alt="THKÜ Ortak Kapı QR Kodu"
-              sx={{ width: { xs: 210, sm: 250 }, height: { xs: 210, sm: 250 }, display: 'block' }}
+              sx={{
+                width: { xs: 300, sm: 300 },
+                height: { xs: 300, sm: 300 },
+                display: 'block',
+                '@media print': { width: 300, height: 300 },
+              }}
             />
           </Box>
 
@@ -251,17 +319,43 @@ export default function KioskPage() {
                 bgcolor: '#F8FAFC',
                 borderColor: '#0F172A',
                 color: '#0F172A',
+                p: 1.75,
+                breakInside: 'avoid',
+                pageBreakInside: 'avoid',
               },
             }}
           >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25 }}>
-              <WarningAmberIcon sx={{ color: '#FBBF24', fontSize: 20, '@media print': { color: '#C8102E' } }} />
-              <Typography sx={{ color: '#FBBF24', fontWeight: 800, fontSize: '0.88rem', letterSpacing: '0.02em', '@media print': { color: '#C8102E' } }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1.25, '@media print': { mb: 0.75 } }}>
+              <WarningAmberIcon sx={{ color: '#FBBF24', fontSize: 20, '@media print': { color: '#C8102E', fontSize: 18 } }} />
+              <Typography
+                sx={{
+                  color: '#FBBF24',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  letterSpacing: '0.02em',
+                  '@media print': { color: '#C8102E', fontSize: '0.82rem' },
+                }}
+              >
                 ÖĞRENCİLERİMİZİN DİKKATİNE — ZORUNLU ODA GİRİŞ KURALLARI:
               </Typography>
             </Box>
 
-            <Box component="ol" sx={{ m: 0, pl: 2.5, color: '#E2E8F0', fontSize: '0.82rem', lineHeight: 1.75, '@media print': { color: '#0F172A' } }}>
+            <Box
+              component="ol"
+              sx={{
+                m: 0,
+                pl: 2.5,
+                color: '#E2E8F0',
+                fontSize: '0.82rem',
+                lineHeight: 1.75,
+                '@media print': {
+                  color: '#0F172A',
+                  fontSize: '0.76rem',
+                  lineHeight: 1.48,
+                  '& li': { mb: 0.5 },
+                },
+              }}
+            >
               <li>
                 <strong>Kampüs Wi-Fi ve Konum (GPS) Zorunluluğu:</strong> QR kodu okutmadan önce telefonunuzun <strong>THKÜ Kampüs Wi-Fi (eduroam / THKU-802.1x)</strong> ağına bağlı olduğundan ve tarayıcı <strong>Konum (GPS)</strong> izninin açık olduğundan emin olunuz. (Mobil veri veya VPN ile giriş yapılamaz).
               </li>
