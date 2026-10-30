@@ -276,6 +276,7 @@ export default function AdminPanel() {
   const [resSearch, setResSearch] = useState('');
   const [resRoomFilter, setResRoomFilter] = useState('ALL');
   const [userSearch, setUserSearch] = useState('');
+  const [logSearch, setLogSearch] = useState('');
 
   const [resPage, setResPage] = useState(1);
   const [studentPage, setStudentPage] = useState(1);
@@ -438,15 +439,44 @@ export default function AdminPanel() {
     return studentList.slice(start, start + ITEMS_PER_PAGE);
   }, [studentList, studentPage]);
 
+  const filteredAuditLogs = useMemo(() => {
+    const q = logSearch.trim().toLowerCase();
+    if (!q) return data.auditLogs || [];
+    return (data.auditLogs || []).filter((log) => {
+      const formatted = formatAuditLog(log, isEn);
+      return (
+        (log.action || '').toLowerCase().includes(q) ||
+        (log.user?.fullName || '').toLowerCase().includes(q) ||
+        (log.user?.email || '').toLowerCase().includes(q) ||
+        (formatted.badge || '').toLowerCase().includes(q) ||
+        (formatted.title || '').toLowerCase().includes(q) ||
+        (formatted.detail || '').toLowerCase().includes(q)
+      );
+    });
+  }, [data.auditLogs, logSearch, isEn]);
+
+  const filteredAdminLogs = useMemo(() => {
+    const q = logSearch.trim().toLowerCase();
+    if (!q) return data.adminActions || [];
+    return (data.adminActions || []).filter((act) => {
+      return (
+        (act.actionType || '').toLowerCase().includes(q) ||
+        (act.description || '').toLowerCase().includes(q) ||
+        (act.admin?.fullName || '').toLowerCase().includes(q) ||
+        (act.admin?.email || '').toLowerCase().includes(q)
+      );
+    });
+  }, [data.adminActions, logSearch]);
+
   const paginatedAuditLogs = useMemo(() => {
     const start = (auditPage - 1) * ITEMS_PER_PAGE;
-    return (data.auditLogs || []).slice(start, start + ITEMS_PER_PAGE);
-  }, [data.auditLogs, auditPage]);
+    return filteredAuditLogs.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredAuditLogs, auditPage]);
 
   const paginatedAdminLogs = useMemo(() => {
     const start = (adminLogPage - 1) * ITEMS_PER_PAGE;
-    return (data.adminActions || []).slice(start, start + ITEMS_PER_PAGE);
-  }, [data.adminActions, adminLogPage]);
+    return filteredAdminLogs.slice(start, start + ITEMS_PER_PAGE);
+  }, [filteredAdminLogs, adminLogPage]);
 
   if (status === 'loading' || loading) {
     return (
@@ -1699,6 +1729,30 @@ export default function AdminPanel() {
                   />
                 </Paper>
 
+                {/* LOG ARAMA ÇUBUĞU */}
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder={
+                    isEn
+                      ? 'Search in student & admin logs (Student name, email, room code R101, No-Show, Ban, Check-In)...'
+                      : 'Öğrenci ve yönetici loglarında ara (Öğrenci adı, e-posta, oda kodu R101, No-Show, Ban, Kiosk)...'
+                  }
+                  value={logSearch}
+                  onChange={(e) => {
+                    setLogSearch(e.target.value);
+                    setAuditPage(1);
+                    setAdminLogPage(1);
+                  }}
+                  InputProps={{
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <SearchIcon color="action" />
+                      </InputAdornment>
+                    ),
+                  }}
+                />
+
                 {/* SOL VE SAĞ SÜTUNDAKİ LOG KARTLARI EŞİT BOYDA HİZALANDI */}
                 <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 3, alignItems: 'stretch' }}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
@@ -1707,49 +1761,55 @@ export default function AdminPanel() {
                         <Typography variant="h6" sx={{ fontWeight: 800 }}>
                           {isEn ? '1. Student & System Logs (Last 180 Days)' : '1. Öğrenci & Sistem Logları (Son 180 Gün)'}
                         </Typography>
-                        <Chip label={`${data.auditLogs?.length || 0}`} size="small" />
+                        <Chip label={`${filteredAuditLogs.length}`} size="small" />
                       </Box>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                        {paginatedAuditLogs.map((log) => {
-                          const formatted = formatAuditLog(log, isEn);
-                          return (
-                            <Paper
-                              key={log.id}
-                              variant="outlined"
-                              sx={{
-                                p: 2,
-                                borderRadius: 2,
-                                minHeight: 118,
-                                display: 'flex',
-                                flexDirection: 'column',
-                                justifyContent: 'space-between',
-                              }}
-                            >
-                              <Box>
-                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, flexWrap: 'wrap', gap: 0.5 }}>
-                                  <Chip label={formatted.badge} size="small" color={formatted.color} sx={{ fontWeight: 700, height: 22 }} />
-                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                                    {new Date(log.createdAt).toLocaleString(isEn ? 'en-US' : 'tr-TR')}
+                        {paginatedAuditLogs.length === 0 ? (
+                          <Alert severity="info">
+                            {isEn ? 'No matching student/system logs found.' : 'Arama kriterine uygun öğrenci/sistem logu bulunamadı.'}
+                          </Alert>
+                        ) : (
+                          paginatedAuditLogs.map((log) => {
+                            const formatted = formatAuditLog(log, isEn);
+                            return (
+                              <Paper
+                                key={log.id}
+                                variant="outlined"
+                                sx={{
+                                  p: 2,
+                                  borderRadius: 2,
+                                  minHeight: 118,
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  justifyContent: 'space-between',
+                                }}
+                              >
+                                <Box>
+                                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, flexWrap: 'wrap', gap: 0.5 }}>
+                                    <Chip label={formatted.badge} size="small" color={formatted.color} sx={{ fontWeight: 700, height: 22 }} />
+                                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                                      {new Date(log.createdAt).toLocaleString(isEn ? 'en-US' : 'tr-TR')}
+                                    </Typography>
+                                  </Box>
+                                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                                    {formatted.title}
                                   </Typography>
                                 </Box>
-                                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
-                                  {formatted.title}
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', wordBreak: 'break-word', pt: 0.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+                                  {formatted.detail}
                                 </Typography>
-                              </Box>
-                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', wordBreak: 'break-word', pt: 0.5, borderTop: '1px dashed', borderColor: 'divider' }}>
-                                {formatted.detail}
-                              </Typography>
-                            </Paper>
-                          );
-                        })}
+                              </Paper>
+                            );
+                          })
+                        )}
                       </Box>
                     </Box>
 
-                    {(data.auditLogs?.length || 0) > ITEMS_PER_PAGE && (
+                    {filteredAuditLogs.length > ITEMS_PER_PAGE && (
                       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2.5 }}>
                         <Pagination
                           size="small"
-                          count={Math.ceil(data.auditLogs.length / ITEMS_PER_PAGE)}
+                          count={Math.ceil(filteredAuditLogs.length / ITEMS_PER_PAGE)}
                           page={auditPage}
                           onChange={(_, p) => setAuditPage(p)}
                           color="primary"
@@ -1764,46 +1824,52 @@ export default function AdminPanel() {
                         <Typography variant="h6" sx={{ fontWeight: 800 }}>
                           {isEn ? '2. Admin Intervention Logs (Last 180 Days)' : '2. Yönetici Müdahale Logları (Son 180 Gün)'}
                         </Typography>
-                        <Chip label={`${data.adminActions?.length || 0}`} size="small" />
+                        <Chip label={`${filteredAdminLogs.length}`} size="small" />
                       </Box>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-                        {paginatedAdminLogs.map((act) => (
-                          <Paper
-                            key={act.id}
-                            variant="outlined"
-                            sx={{
-                              p: 2,
-                              borderRadius: 2,
-                              minHeight: 118,
-                              display: 'flex',
-                              flexDirection: 'column',
-                              justifyContent: 'space-between',
-                            }}
-                          >
-                            <Box>
-                              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, flexWrap: 'wrap', gap: 0.5 }}>
-                                <Chip label={act.actionType} size="small" color="secondary" sx={{ fontWeight: 700, height: 22 }} />
-                                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                                  {new Date(act.createdAt).toLocaleString(isEn ? 'en-US' : 'tr-TR')}
+                        {paginatedAdminLogs.length === 0 ? (
+                          <Alert severity="info">
+                            {isEn ? 'No matching admin logs found.' : 'Arama kriterine uygun yönetici logu bulunamadı.'}
+                          </Alert>
+                        ) : (
+                          paginatedAdminLogs.map((act) => (
+                            <Paper
+                              key={act.id}
+                              variant="outlined"
+                              sx={{
+                                p: 2,
+                                borderRadius: 2,
+                                minHeight: 118,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                              }}
+                            >
+                              <Box>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 0.75, flexWrap: 'wrap', gap: 0.5 }}>
+                                  <Chip label={act.actionType} size="small" color="secondary" sx={{ fontWeight: 700, height: 22 }} />
+                                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                                    {new Date(act.createdAt).toLocaleString(isEn ? 'en-US' : 'tr-TR')}
+                                  </Typography>
+                                </Box>
+                                <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                                  {act.description}
                                 </Typography>
                               </Box>
-                              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
-                                {act.description}
+                              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pt: 0.5, borderTop: '1px dashed', borderColor: 'divider' }}>
+                                {isEn ? 'Performed By:' : 'İşlemi Yapan Yetkili:'} {act.admin?.fullName} ({act.admin?.email})
                               </Typography>
-                            </Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', pt: 0.5, borderTop: '1px dashed', borderColor: 'divider' }}>
-                              {isEn ? 'Performed By:' : 'İşlemi Yapan Yetkili:'} {act.admin?.fullName} ({act.admin?.email})
-                            </Typography>
-                          </Paper>
-                        ))}
+                            </Paper>
+                          ))
+                        )}
                       </Box>
                     </Box>
 
-                    {(data.adminActions?.length || 0) > ITEMS_PER_PAGE && (
+                    {filteredAdminLogs.length > ITEMS_PER_PAGE && (
                       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2.5 }}>
                         <Pagination
                           size="small"
-                          count={Math.ceil(data.adminActions.length / ITEMS_PER_PAGE)}
+                          count={Math.ceil(filteredAdminLogs.length / ITEMS_PER_PAGE)}
                           page={adminLogPage}
                           onChange={(_, p) => setAdminLogPage(p)}
                           color="secondary"
