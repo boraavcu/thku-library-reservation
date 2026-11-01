@@ -4,14 +4,19 @@
 
 `AdminPanel.jsx`, **THKÜ Kütüphane Grup Çalışma Odaları Rezervasyon Sistemi**'nin yönetim, denetim, analitik ve moderasyon merkezidir . Kütüphane Görevlileri (`LIBRARIAN`), Kütüphane Müdürü (`ADMIN`) ve Bilgi İşlem Müdürlüğü Sistem Yöneticileri (`SUPER_ADMIN`) tarafından kullanılır . Oda doluluk analizlerinden A4 PDF faaliyet raporu çıktısına, canlı rezervasyon müdahalelerinden takvimli/kalıcı ban yönetimine ve 7 dinamik sistem kuralından 180 günlük denetim loglarına kadar tüm idari operasyonları tek bir ekranda toplar .
 
-##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
+## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`) 
-- **Kimlik Doğrulama & Yetki:** `next-auth/react` (`useSession`) 
-- **Yönlendirme:** `react-router-dom` (`useNavigate`) 
-- **Çoklu Dil (i18n):** `react-i18next` (`isEn` kontrolü ve `DEPT_EN_MAP` ile bölüm isimlerinin dinamik İngilizce çevirisi) 
-- **Alt Bileşenler:** `Navbar.jsx`, `Footer.jsx`, `RoomDensityChart.jsx` 
-- **API İstemcisi:** `../api` (`GET /api/admin/manage` ve `POST /api/admin/manage`) 
+- **UI Kütüphanesi:** `@mui/material` (`Box`, `Container`, `Tabs`, `Tab`, `CircularProgress`, `Alert`), `@mui/icons-material`
+- **Oturum:** `next-auth/react` (`useSession`)
+- **API İstemcisi:** `../api` (`POST /api/admin/manage`)
+- **Alt Sekmeler:**
+  - `../components/admin/AnalyticsTab`
+  - `../components/admin/ReservationsTab`
+  - `../components/admin/RoomsTab`
+  - `../components/admin/AnnouncementsTab`
+  - `../components/admin/UsersTab`
+  - `../components/admin/RulesAndLogsTab`
+  - `../components/admin/adminConstants`
 
 ##  3. Rol Hiyerarşisi ve Güvenlik Korumaları (RBAC & Security)
 

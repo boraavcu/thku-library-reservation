@@ -2,41 +2,27 @@
 
 ## 1. Dosyanın Amacı ve Mimari Rolü
 
-`ReserveForm.jsx`, öğrencilerin seçtikleri çalışma odası için tarih ve saat aralığı belirlediği (**Adım 1**) ve ardından çalışma amacını girip grup arkadaşlarını davet ederek zorunlu kullanım kurallarını onayladığı (**Adım 2**) iki aşamalı rezervasyon oluşturma sihirbazıdır.
+`ReserveForm.jsx`, öğrencinin seçtiği oda için zaman aralığını belirlediği, grup arkadaşlarını kurumsal e-postalarıyla (`@stu.thk.edu.tr`) davet ettiği ve rezervasyonu onayladığı başvuru formudur.
 
 ## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`) 
-- **Kimlik Doğrulama:** `next-auth/react` (`useSession`) 
-- **Yönlendirme & URL Parametreleri:** `react-router-dom` (`useNavigate`, `useSearchParams` ile `roomId` ve `date` okuma) 
-- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN`) 
-- **API İstemcisi:** `../api` (`/reserve/init`, `/rooms/[id]/availability`, `POST /reservations`) 
+- **UI Kütüphanesi:** `@mui/material` (`Container`, `Card`, `TextField`, `Chip`, `LinearProgress`, `Alert`)
+- **Navigasyon:** `react-router-dom` (`useNavigate`, `useSearchParams`)
+- **Oturum:** `next-auth/react` (`useSession`)
+- **Tarih Modülü:** `../utils/dateUtils` (`getIstanbulNowInfo`, `toDateStr`)
+- **API İstemcisi:** `../api` (`GET /api/reserve/init`, `POST /api/reservations`)
 
-## 3. İş Mantığı ve Kritik Saat / Kapasite Kuralları
+## 3. Çekirdek Fonksiyonlar ve İş Mantığı (Core Business Logic)
 
-### A. Dinamik Kural ve Müsaitlik Yükleme
-- Sayfa açıldığında `GET /api/reserve/init` çağrılarak odanın bilgisi ve veritabanındaki 7 dinamik kural (`minParticipants`, `maxParticipants`, `maxDurationHours`, `maxAdvanceDays`, `checkinToleranceMinutes`, `cancelLockMinutes`) `rules` state'ine yüklenir.
-- Tarih veya oda değiştiğinde `GET /api/rooms/${roomId}/availability?date=${date}` uç noktası çağrılarak o günkü dolu saat dilimleri (`occupiedSlots`) çekilir.
+1. **Başlangıç Doğrulaması:** URL'den gelen `roomId` ve `date` parametreleri doğrulanır; `/api/reserve/init` çağrılarak odanın minimum ve maksimum grup büyüklükleri alınır.
+2. **Organizatör Otomasyonu:** Giriş yapan öğrenci katılımcı listesinin 1. sırasına `"Organizatör"` rolüyle otomatik eklenir ve listeden silinemez (`rfCannotRemove`).
+3. **Katılımcı Doğrulama:**
+   - Eklenen e-postaların `s[öğrenciNo]@stu.thk.edu.tr` formatına uyduğu test edilir.
+   - Toplam katılımcı sayısı odanın `minGroupSize` ve `maxGroupSize` sınırları arasındaysa form onay butonunu aktif hale getirir.
+4. **Rezervasyon Gönderimi:** Form onaylandığında `/api/reservations` uç noktasına istek atılır; grup arkadaşlarına e-posta davetleri fırlatılır ve kullanıcı `/bookings` sayfasına yönlendirilir.
 
-### B. 7/24 Takvim Izgarası ve "Boşa Düşen Odayı Anında Tutma" Mantığı (`isSlotPast`)
-- Kütüphane 7/24 açık olduğu için saat ızgarası `HOUR_START = 0` ile `HOUR_END = 24` arasında 24 saatlik dilimler halinde çizilir . Gece yarısı bitişleri (`23:59`) otomatik olarak `24:00` (`endH = 24`) şeklinde normalize edilir.
-- **Kritik Saat Kuralı (`(hour + 1) * 60 <= nowMinutes`):** Geçmiş saat kontrolü yapılırken içinde bulunulan saat dilimi **henüz bitmediyse** (`(hour + 1) * 60 > nowMinutes`) o saat dilimi kilitlenmez.
-  - *Neden Bu Şekilde Tasarlandı?* Örneğin saat `16:00 - 18:00` randevusu olan bir grup kapı QR kodunu `16:15`'e kadar okutmadığı için `16:16`'da sistem odayı otomatik `NO_SHOW` yapıp boşa düşürdüğünde (veya bir grup odayı `16:20`'de erken boşalttığında), saat `16:20`'de kütüphaneye gelen yeni bir grup `17:00`'ı beklemek zorunda kalmadan doğrudan `16:00 - 18:00` (veya `16:00 - 19:00`) dilimini seçip odaya girebilir.
+## 4. Bağlantılı Olduğu Dosyalar
 
-### C. Katılımcı Ekleme ve `pendingTypedEmail` Koruması (Adım 2)
-- Öğrenci çalışma amacını serbest metin olarak yazabileceği gibi 5 hazır çipten (`PURPOSE_PRESETS_TR` / `PURPOSE_PRESETS_EN`) birine tıklayarak da hızlıca seçebilir.
-- **Kullanıcı Deneyimi Koruması (`effectiveParticipants`):** Öğrenci davet edeceği arkadaşının e-postasını metin kutusuna yazıp **"Ekle" butonuna basmayı unutsa bile**, `hasValidTypedEmail` kontrolü sayesinde kutudaki geçerli e-posta otomatik olarak katılımcı listesine (`effectiveParticipants`) dahil edilir ve kapasite çubuğunu günceller.
-- Toplam kişi sayısı (`totalPeople = effectiveParticipants.length + 1`), `minRequiredPeople` (varsayılan 2) ile `effectiveMax` (varsayılan 8) arasında değilse onay butonu aktif olmaz.
-
-### D. 4 Maddelik Zorunlu Kurallar Onay Kutucuğu (`rulesConfirmed`)
-- Rezervasyonun oluşturulabilmesi için öğrencinin en alttaki onay kutucuğunu (`rulesConfirmed`) işaretlemesi zorunludur. Bu kutucukta dinamik olarak:
-  1. **30 Dakika Davet Onay Süresi**,
-  2. **Son 1 Saat (`cancelLockMins` dk) İptal Kilidi**,
-  3. **±`checkinToleranceMins` Dakika Kapı QR Yoklama ve Kişisel Cihaz Zorunluluğu**,
-  4. **1/3 No-Show Uyarısı ve 3/3 (30 Gün) Ban Kuralı** açıkça beyan edilir.
-
-##  4. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
-
-- `backend/src/app/api/reserve/init/route.js` (`GET`) 
-- `backend/src/app/api/rooms/[id]/availability/route.js` (`GET`) 
-- `backend/src/app/api/reservations/route.js` (`POST`) 
+- `backend/src/app/api/reservations/route.js`
+- `backend/src/app/api/reserve/init/route.js`
+- `frontend/src/pages/MyBookings.jsx`

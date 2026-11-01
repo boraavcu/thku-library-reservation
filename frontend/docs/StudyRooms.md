@@ -1,34 +1,39 @@
 # Context: StudyRooms.jsx
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-`StudyRooms.jsx`, öğrencilerin kütüphanedeki aktif grup çalışma odalarını (`R101 - Atatürk`, `R102 - Gökçen`, `R103 - Hürkuş`, `R104 - İstikbal`) incelediği, tarih/süre/saat kriterlerine göre filtreleme yaptığı ve rezervasyon sihirbazına (`/reserve/new`) geçiş yaptığı oda seçim ekranıdır.
+`StudyRooms.jsx`, öğrencilerin kütüphanedeki çalışma odalarını filtrelediği, saatlik müsaitlik durumlarını incelediği ve oda seçimi yaptığı ana keşif ve rezervasyon giriş sayfasıdır.
 
-##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
+**Kritik Hata Düzeltmeleri:**
+1. "Odayı Seç" butonunun yanlışlıkla `/reserve-form` rotasına yönlendirmesi düzeltilerek `App.jsx` ile tam uyumlu **`/reserve/new?roomId=${room.id}&date=${selectedDate}`** adresine yönlendirilmesi sağlandı.
+2. Cezalı öğrenciler için buton kilidi (`disabled={isBanned}`) ve `"Hesap Askıda"` etiketi eklendi.
+3. Takvim seçiciye sözleşmedeki `maxAdvanceDays` sınırını zorunlu kılan `maxSelectableDate` eklendi.
 
-- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`) 
-- **Kimlik Doğrulama:** `next-auth/react` (`useSession`) 
-- **Yönlendirme:** `react-router-dom` (`useNavigate`) 
-- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN`) 
-- **API İstemcisi:** `../api` (`GET /api/reserve/init`) 
+## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-##  3. İş Mantığı, Dinamik Kurallar ve Ban Koruması
+- **UI Kütüphanesi:** `@mui/material` (`Slider`, `TextField`, `Card`, `Chip`, `Button`), `@mui/icons-material`
+- **Tarih Motoru:** `../utils/dateUtils` (`getIstanbulNowInfo`, `toDateStr`, `getFutureDateStr`)
+- **API İstemcisi:** `../api` (`GET /api/rooms?date=...`)
+- **Navigasyon:** `react-router-dom` (`useNavigate`)
+- **Oturum:** `next-auth/react` (`useSession`)
 
-### A. Dinamik Kural Entegrasyonu (`/api/reserve/init`)
-- Sayfa açıldığında `GET /api/reserve/init` uç noktasından hem aktif odalar (`rooms`) hem de yöneticinin belirlediği dinamik kurallar (`rules`) çekilir.
-- **İleri Tarih Sınırı (`maxDate`):** Yöneticinin `MAX_ADVANCE_DAYS` kuralında belirlediği gün sayısı (`rules?.maxAdvanceDays ?? 1`) bugünün tarihine (`Europe/Istanbul`) eklenerek tarih seçicinin (`<TextField type="date" />`) `max` sınırı dinamik olarak belirlenir.
-- Sol paneldeki bilgilendirme kutusunda maksimum çalışma süresi (`rules?.maxDurationHours ?? 3`) ve maksimum oda kapasitesi (`rules?.maxParticipants ?? 8`) dinamik olarak yazdırılır .
+## 3. Çekirdek Fonksiyonlar ve İş Mantığı (Core Business Logic)
 
-### B. Bakımdaki Odaların Gizlenmesi ve Ban Koruması (`isBanned`)
-- Yönetici panelinden yeni randevulara kapatılan (`isActive === false`) odalar listede gösterilmez (`rooms.filter(r => r.isActive !== false)`).
-- **Banlı Öğrenci Koruması:** Oturumdaki `session?.user?.isBanned` değeri `true` ise, öğrenci odaları ve kapasitelerini salt okunur olarak görebilir ancak odaların yanındaki **"Seç" (`Select`)** butonu `disabled` durumuna geçer, ok ikonu gizlenir ve buton üzerinde *"Hesap Askıda / Suspended"* yazar.
+### A. Kesintisiz Boşluk Filtreleme Algoritması (`hasContinuousAvailableSlot`)
+Kullanıcının seçtiği **Süre (`requiredDuration`: 1, 2 veya 3 saat)** ve **Saat Aralığı (`timeRange`: örn. 13:00 - 18:00)** filtrelerini odanın veritabanından gelen `occupiedSlots` verisiyle eşleştirir:
+1. Oda pasifse (`!room.isActive`) doğrudan elenir.
+2. Seçilen saat aralığında geçmiş saatler (bugünün geride kalan saatleri) elenir.
+3. Seçilen aralıkta odanın dolu dilimleriyle çakışmayan, **kesintisiz en az `requiredDuration` saat uzunluğunda** boş bir zaman bloğu olup olmadığı test edilir. Blok yoksa oda listede gizlenir.
 
-##  4. Arayüz Düzeni (Responsive Sidebar & Room Cards)
+### B. Gerçek Zamanlı Oda Arama ve Kapasite Filtresi
+- Oda adına veya numarasına göre canlı arama (`searchQuery`).
+- Seçilen tarihe göre anında API'den odanın o günkü doluluk haritasının çekilmesi.
 
-- **Masaüstü (`md` ve üzeri):** Sol tarafta `280px` genişliğinde sabit (`sticky`) filtreleme paneli, sağ tarafta müsait oda kartları yer alır.
-- **Mobil (`xs` ve `sm`):** Filtre paneli ekranı kaplamaması için açılır/kapanır `<Collapse in={filtersOpen}>` çekmecesine dönüşür.
+### C. Rezervasyon Formuna Güvenli Geçiş
+Öğrenci "Odayı Seç" butonuna bastığında oda ID'si ve seçilen tarih URL sorgu parametreleriyle `/reserve/new` formuna taşınır.
 
-##  5. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
+## 4. Bağlantılı Olduğu Dosyalar
 
-- `backend/src/app/api/reserve/init/route.js` (`GET`) 
-- `frontend/src/pages/ReserveForm.jsx` (`/reserve/new?roomId=...&date=...` yönlendirmesi) 
+- `frontend/src/pages/ReserveForm.jsx`
+- `backend/src/app/api/rooms/route.js`
+- `frontend/src/utils/dateUtils.js`
