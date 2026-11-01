@@ -1,4 +1,4 @@
-# 🏛️ THKÜ 7/24 Kütüphane Grup Çalışma Odaları Rezervasyon ve Kiosk Yoklama Sistemi
+#  THKÜ 7/24 Kütüphane Grup Çalışma Odaları Rezervasyon ve Kiosk Yoklama Sistemi
 
 [](https://nextjs.org/)
 [](https://react.dev/)
@@ -10,7 +10,7 @@
 
 **Türk Hava Kurumu Üniversitesi (THKÜ) Kütüphane ve Dokümantasyon Daire Başkanlığı & Bilgi İşlem Müdürlüğü** için geliştirilmiş; **Microsoft Entra ID (Azure AD) SSO**, **4 Katmanlı Fiziksel Kiosk Kapı QR Güvenliği**, **Adil No-Show Ceza Motoru** ve **Canlı Yoğunluk Analitiği** barındıran tam otonom Full-Stack Rezervasyon Platformu.
 
-> 📌 **Hızlı Dokümantasyon Bağlantıları:**
+>  **Hızlı Dokümantasyon Bağlantıları:**
 > - [🇹🇷 Kurumsal Sistem Mimarisi (TR)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md)
 > - [🇬🇧 System Architecture (EN)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md)
 > - [📘 Backend Kod Dokümanları (29 Modül)](https://www.google.com/search?q=./backend/docs/README.md)
