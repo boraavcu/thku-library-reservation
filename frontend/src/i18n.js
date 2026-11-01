@@ -1,7 +1,6 @@
 import i18n from 'i18next';
 import { initReactI18next } from 'react-i18next';
 
-// Çeviri metinleri
 const resources = {
   en: {
     translation: {
@@ -14,26 +13,26 @@ const resources = {
       dataProtected: "Your data is protected.",
       footerRights: "© 2026 University of Turkish Aeronautical Association. All rights reserved.",
       loginTitle: "Login",
-      
+
       // Kurallar Sayfası
       rulesTitle: "Study Room Reservation Rules",
       rulesSubtitle: "Please read these critical guidelines carefully to ensure a productive and compliant study experience. Your understanding is vital.",
-      
+
       rule1Title: "Maximum Reservation Time",
       rule1Desc: "Study rooms can be reserved only once (1) per day for a maximum of 3 hours to ensure fair access for all students. Extensions are not permitted. Consecutive bookings by the same group under different names are prohibited.",
-      
+
       rule2Title: "Lateness / No-Show Policy",
       rule2Desc: "At least 2 group members must scan and confirm the door QR code from their own mobile devices within ±15 minutes of the start time. Repeated no-shows (3 times in a semester) result in a 30-day suspension of reservation privileges.",
-      
+
       rule3Title: "Silence and Usage Rules",
       rule3Desc: "Users must maintain a quiet environment suitable for academic study. Loud conversations, music without headphones, or disruptive behavior is not permitted. Food and beverages (except for water in sealed bottles) are strictly prohibited inside the study rooms to maintain cleanliness.",
-      
+
       rule4Title: "Equipment Responsibility",
       rule4Desc: "Users are responsible for any damage to library property, furniture, or technical equipment during their reservation period. Do not unplug library equipment. Please report any pre-existing issues immediately upon entering the room to avoid liability.",
-      
+
       rule5Title: "Group Study",
       rule5Desc: "Study rooms are intended for group study (minimum 2, maximum 8 people). Individual students should use the general reading hall areas. Group invitations must be accepted within 30 minutes.",
-      
+
       // Agreement
       agreementLoading: "Loading agreement...",
       agreementNotFound: "No active agreement found. Please contact the administration.",
@@ -150,7 +149,15 @@ const resources = {
       navStudyRooms: "Study Rooms",
       navMyBookings: "My Bookings",
 
-      // Study Rooms - Filters
+      // Study Rooms - Filters & Cards
+      srTitle: "Study Rooms",
+      srSubtitle: "Select an available group study room to make a reservation.",
+      srFilters: "Filters",
+      srReset: "Reset",
+      srSearchPlaceholder: "Search room...",
+      srDate: "Date",
+      srDuration: "Duration",
+      srBookNow: "Select Room",
       srFilterCriteria: "Filter Criteria",
       srFilterSubtitle: "Select a date and time range to see available rooms.",
       srFiltersAndDate: "Filters & Date",
@@ -169,7 +176,7 @@ const resources = {
       srAvailableRooms: "Available Rooms",
       srShowingRooms: "Showing {{count}} rooms matching your criteria for",
       srMaxBooking: "Max booking duration: {{hours}} hours",
-      srCapacity: "Up to {{count}} people",
+      srCapacity: "Min Capacity",
       srSlotsFree: "{{count}} Slots Free",
       srSlotsLeft: "{{count}} Slots Left",
       srStarting: "Starting {{time}}",
@@ -196,7 +203,7 @@ const resources = {
       rfYourSelection: "Your Selection",
       rfSelectEnd: "Select end time",
       rfSelectedReservation: "Selected Reservation",
-      rfContinue: "Confirm Reservation",
+      rfContinue: "Continue",
       rfReservationPolicy: "Reservations: Mon-Sun. Max <strong>{{hours}} hours</strong> per booking.",
       rfBack: "Back",
 
@@ -214,14 +221,18 @@ const resources = {
       rfEmailPlaceholder: "Enter institutional email (@stu.thk.edu.tr)",
       rfAdd: "Add",
       rfCurrentAttendees: "Current Attendees ({{count}})",
+      rfParticipantsList: "Participants List",
+      rfYou: "You",
       rfOrganizer: "Organizer",
       rfParticipant: "Participant",
-      rfCannotRemove: "Kaldırılamaz",
+      rfCannotRemove: "Cannot remove",
       rfPurpose: "Purpose (Optional)",
       rfPurposePlaceholder: "e.g. Group study, Project meeting...",
-      rfConfirm: "Continue to Confirmation",
+      rfConfirm: "Confirm Reservation",
+      rfConfirmBooking: "Confirm Reservation",
       rfSubmitting: "Creating...",
       rfSuccess: "Reservation created successfully! Waiting for participants' approval.",
+      rfSuccessMessage: "Reservation created successfully! Waiting for participants' approval.",
       rfMinMaxError: "Total participants must be between {{min}} and {{max}}.",
       rfMissingEmails: "The following e-mails are not registered in the system:",
       rfOverlap: "This room is already reserved for the selected date and time range.",
@@ -243,22 +254,22 @@ const resources = {
       // Kurallar Sayfası
       rulesTitle: "Çalışma Odası Rezervasyon Kuralları",
       rulesSubtitle: "Verimli ve kurallara uygun bir çalışma deneyimi sağlamak için lütfen bu kritik yönergeleri dikkatlice okuyun. Anlayışınız hayati önem taşımaktadır.",
-      
+
       rule1Title: "Maksimum Rezervasyon Süresi",
       rule1Desc: "Tüm öğrencilere adil erişim sağlamak için çalışma odaları günde yalnızca 1 defa ve en fazla 3 saat rezerve edilebilir. Süre uzatması yapılmaz. Aynı grubun farklı isimlerle ardışık rezervasyon yapması yasaktır.",
-      
+
       rule2Title: "Geç Kalma / Gelmeme (No-Show)",
       rule2Desc: "Başlangıç saatinden ±15 dakika içinde en az 2 grup üyesinin kendi telefonundan kapı QR kodunu okutarak onay vermesi zorunludur. Dönem içinde 3 kez No-Show uyarısı alan hesaplar 30 gün boyunca rezervasyonlara kapatılır.",
-      
+
       rule3Title: "Sessizlik ve Kullanım Kuralları",
       rule3Desc: "Kullanıcılar akademik çalışmaya uygun sessiz bir ortam sağlamalıdır. Yüksek sesli konuşmalar, kulaklıksız müzik veya rahatsız edici davranışlara izin verilmez. Temizliği korumak için (kapalı şişedeki su hariç) yiyecek ve içecek tüketimi kesinlikle yasaktır.",
-      
+
       rule4Title: "Ekipman Sorumluluğu",
       rule4Desc: "Kullanıcılar rezervasyon süresince kütüphane mülküne, mobilyalara veya teknik ekipmanlara verilen her türlü hasardan sorumludur. Kütüphane ekipmanlarının fişini çekmeyiniz. Sorumluluktan kaçınmak için lütfen odaya girdiğinizde mevcut sorunları derhal bildirin.",
-      
+
       rule5Title: "Grup Çalışması",
       rule5Desc: "Çalışma odaları grup çalışması (en az 2 kişi, en fazla 8 kişi) için tasarlanmıştır. Gönderilen grup davetiyeleri 30 dakika içinde onaylanmalıdır.",
-      
+
       // Agreement
       agreementLoading: "Sözleşme yükleniyor...",
       agreementNotFound: "Aktif bir sözleşme bulunamadı. Lütfen yönetimle iletişime geçin.",
@@ -375,7 +386,15 @@ const resources = {
       navStudyRooms: "Çalışma Odaları",
       navMyBookings: "Rezervasyonlarım",
 
-      // Study Rooms - Filters
+      // Study Rooms - Filters & Cards
+      srTitle: "Çalışma Odaları",
+      srSubtitle: "Rezervasyon yapmak için uygun bir grup çalışma odası seçin.",
+      srFilters: "Filtreler",
+      srReset: "Sıfırla",
+      srSearchPlaceholder: "Oda ara...",
+      srDate: "Tarih",
+      srDuration: "Süre",
+      srBookNow: "Odayı Seç",
       srFilterCriteria: "Filtre Kriterleri",
       srFilterSubtitle: "Müsait odaları görmek için tarih ve saat aralığı seçin.",
       srFiltersAndDate: "Filtreler ve Tarih",
@@ -394,7 +413,7 @@ const resources = {
       srAvailableRooms: "Müsait Odalar",
       srShowingRooms: "Kriterlerinize uyan {{count}} oda gösteriliyor, tarih:",
       srMaxBooking: "Maks. rezervasyon süresi: {{hours}} saat",
-      srCapacity: "En fazla {{count}} kişi",
+      srCapacity: "Minimum Kapasite",
       srSlotsFree: "{{count}} Slot Boş",
       srSlotsLeft: "{{count}} Slot Kaldı",
       srStarting: "Başlangıç {{time}}",
@@ -421,7 +440,7 @@ const resources = {
       rfYourSelection: "Seçiminiz",
       rfSelectEnd: "Bitiş saatini seçin",
       rfSelectedReservation: "Seçilen Rezervasyon",
-      rfContinue: "Rezervasyonu Onayla",
+      rfContinue: "Devam Et",
       rfReservationPolicy: "Rezervasyonlar: Ptesi-Pazar. Rezervasyon başına maks. <strong>{{hours}} saat</strong>.",
       rfBack: "Geri",
 
@@ -439,14 +458,18 @@ const resources = {
       rfEmailPlaceholder: "Kurumsal e-posta girin (@stu.thk.edu.tr)",
       rfAdd: "Ekle",
       rfCurrentAttendees: "Mevcut Katılımcılar ({{count}})",
+      rfParticipantsList: "Katılımcı Listesi",
+      rfYou: "Siz",
       rfOrganizer: "Organizatör",
       rfParticipant: "Katılımcı",
       rfCannotRemove: "Kaldırılamaz",
       rfPurpose: "Kullanım Amacı (Opsiyonel)",
       rfPurposePlaceholder: "Örn: Grup çalışması, Proje toplantısı...",
-      rfConfirm: "Onaya Devam Et",
+      rfConfirm: "Rezervasyonu Onayla",
+      rfConfirmBooking: "Rezervasyonu Onayla",
       rfSubmitting: "Oluşturuluyor...",
       rfSuccess: "Rezervasyon başarıyla oluşturuldu! Arkadaşlarınızın onayı bekleniyor.",
+      rfSuccessMessage: "Rezervasyon başarıyla oluşturuldu! Arkadaşlarınızın onayı bekleniyor.",
       rfMinMaxError: "Toplam katılımcı sayısı {{min}} ile {{max}} arasında olmalıdır.",
       rfMissingEmails: "Şu e-postalar sisteme kayıtlı değil:",
       rfOverlap: "Bu oda seçilen tarih ve saat aralığında zaten rezerve edilmiş.",
@@ -459,10 +482,10 @@ i18n
   .use(initReactI18next)
   .init({
     resources,
-    lng: "tr", // Varsayılan dil
+    lng: "tr",
     fallbackLng: "en",
     interpolation: {
-      escapeValue: false 
+      escapeValue: false
     }
   });
 

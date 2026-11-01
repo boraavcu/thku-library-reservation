@@ -50,12 +50,10 @@ export default function Navbar() {
   const [selectedNotif, setSelectedNotif] = useState(null);
 
   const userRole = session?.user?.role;
+  const isBanned = Boolean(session?.user?.isBanned);
   const isStaff = ['LIBRARIAN', 'ADMIN', 'SUPER_ADMIN'].includes(userRole);
   const isAdminOrSuper = ['ADMIN', 'SUPER_ADMIN'].includes(userRole);
 
-  // Kütüphane Görevlisi (LIBRARIAN) yalnızca "Öğrenci Ekranı" geçiş butonuna basıp
-  // /dashboard, /reserve veya /bookings sayfalarına geçtiğinde öğrenci menüsünü görür.
-  // /profile, /admin, /kiosk ve /rules sayfalarında tüm yetkililer (LIBRARIAN, ADMIN, SUPER_ADMIN) Yetkili Navbar'ını görür.
   const isLibrarianInStudentMode =
     userRole === 'LIBRARIAN' &&
     ['/dashboard', '/reserve', '/bookings'].some((p) => location.pathname.startsWith(p));
@@ -430,7 +428,6 @@ export default function Navbar() {
                   <Typography sx={{ fontSize: '0.82rem', fontWeight: 500 }}>{t('profile')}</Typography>
                 </MenuItem>
 
-                {/* Yetkili modundayken Yönetim Merkezi; Öğrenci modundayken Rezervasyonlarım ve Mobil Linkler */}
                 {showStaffNavbar ? (
                   <>
                     <MenuItem onClick={() => navigate('/admin')} sx={{ py: 1, px: 2, gap: 1.25 }}>
@@ -562,6 +559,7 @@ export default function Navbar() {
                 <Button
                   variant="contained"
                   color="success"
+                  disabled={isBanned}
                   startIcon={<CheckCircleOutlineIcon />}
                   onClick={() => handleRespondFromModal(selectedNotif.item.id, 'ACCEPT')}
                 >

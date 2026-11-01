@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import api from '../api';
+import { getIstanbulNowParts } from '../utils/dateUtils';
 
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import GroupIcon from '@mui/icons-material/Group';
@@ -22,14 +23,13 @@ import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 
 function getReservationTimingState(res) {
-  const now = new Date();
-  const todayIso = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Istanbul' });
+  const { todayIso, hour, minute } = getIstanbulNowParts();
   const resDateIso = new Date(res.reservationDate).toISOString().split('T')[0];
 
   const nowEpochMins =
     Math.floor(new Date(todayIso + 'T00:00:00Z').getTime() / 60000) +
-    now.getHours() * 60 +
-    now.getMinutes();
+    hour * 60 +
+    minute;
 
   const startH = new Date(res.startTime).getUTCHours();
   const startM = new Date(res.startTime).getUTCMinutes();
@@ -48,10 +48,9 @@ function getReservationTimingState(res) {
     endM;
 
   const isHappeningNow =
-    res.status === 'CHECKED_IN' ||
-    (['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
-      nowEpochMins >= resStartEpochMins &&
-      nowEpochMins < resEndEpochMins);
+    ['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
+    nowEpochMins >= resStartEpochMins &&
+    nowEpochMins < resEndEpochMins;
 
   const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
   const cancelLocked = resStartEpochMins - nowEpochMins < 60;
@@ -90,7 +89,6 @@ export default function MyBookings() {
   useEffect(() => {
     if (status === 'loading') return;
     if (status === 'unauthenticated') { navigate('/'); return; }
-    // ADMIN (Müdür) ve SUPER_ADMIN (BİM) bu sayfaya erişemez, doğrudan yönetim paneline yönlendirilir
     if (['ADMIN', 'SUPER_ADMIN'].includes(session?.user?.role)) {
       navigate('/admin', { replace: true });
       return;
@@ -295,7 +293,6 @@ export default function MyBookings() {
                           <>
                             <Divider />
                             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                              {/* Odayı Erken Boşalt YALNIZCA randevu saatleri başladıktan sonra (randevu sırasında) görünür */}
                               {isHappeningNow && (
                                 <Button
                                   variant="contained"
@@ -308,7 +305,6 @@ export default function MyBookings() {
                                 </Button>
                               )}
 
-                              {/* İptal Et butonu randevu saati başlamadan önce görünür (Son 1 saat kala kilitlenir) */}
                               {!hasStarted && ['PENDING', 'CONFIRMED'].includes(res.status) && (
                                 <Tooltip
                                   title={
