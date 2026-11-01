@@ -1,12 +1,12 @@
 #  THKÜ 7/24 Kütüphane Grup Çalışma Odaları Rezervasyon ve Kiosk Yoklama Sistemi
 
-[](https://nextjs.org/)
-[](https://react.dev/)
-[](https://mui.com/)
-[](https://www.prisma.io/)
-[](https://redis.io/)
-[](https://next-auth.js.org/)
-[](#)
+[![Next.js](https://img.shields.io/badge/Backend-Next.js_16_(App_Router)-000000?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/Frontend-React_19_%2B_Vite_7-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev/)
+[![MUI](https://img.shields.io/badge/UI-Material_UI_v7-007FFF?style=for-the-badge&logo=mui&logoColor=white)](https://mui.com/)
+[![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL_16_%2B_Prisma-4169E1?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.prisma.io/)
+[![Redis](https://img.shields.io/badge/Cache_%26_OTP-Redis_(ioredis)-DC382D?style=for-the-badge&logo=redis&logoColor=white)](https://redis.io/)
+[![Azure AD](https://img.shields.io/badge/Auth-Microsoft_Entra_ID_(SSO)-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white)](https://next-auth.js.org/)
+[![i18n](https://img.shields.io/badge/Dil_Deste%C4%9Fi-TR_%7C_EN_(%25100)-C8102E?style=for-the-badge)](#)
 
 **Türk Hava Kurumu Üniversitesi (THKÜ) Kütüphane ve Dokümantasyon Daire Başkanlığı & Bilgi İşlem Müdürlüğü** için geliştirilmiş; **Microsoft Entra ID (Azure AD) SSO**, **4 Katmanlı Fiziksel Kiosk Kapı QR Güvenliği**, **Adil No-Show Ceza Motoru** ve **Canlı Yoğunluk Analitiği** barındıran tam otonom Full-Stack Rezervasyon Platformu.
 
