@@ -1,26 +1,25 @@
+## 5. `backend/docs/Admin-Set-role.md`
+
+```markdown
+# Context: admin/set-role/route.js
+
 ## 1. Dosyanın Amacı ve Mimari Rolü
 
-`admin/set-role/route.js`, sistemin ilk kurulumunda (cold-start) veya acil durum kurtarma senaryolarında bir kullanıcıya `ADMIN` veya `DIRECTOR` rolü atamak için tasarlanmış güvenli uç noktadır.
+`backend/src/app/api/admin/set-role/route.js`, Bilgi İşlem Müdürlüğü Sistem Yöneticisinin (`SUPER_ADMIN`) e-posta adresi üzerinden bir kullanıcının sistem rolünü (`STUDENT`, `LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`) doğrudan değiştirmesini sağlayan uç noktadır (`POST`).
 
 ## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `User`, `AuditLog`)
-- **Oturum:** `next-auth` (`getServerSession`)
-- **Çevre Değişkeni:** `process.env.DIRECTOR_SETUP_SECRET`
+- **Oturum:** `next-auth` (`getServerSession`, `authOptions`)
+- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `User`, `AdminAction`)
 
-## 3. Çekirdek Fonksiyonlar ve İş Mantığı (Core Business Logic)
+## 3. İş Mantığı ve Güvenlik (`POST`)
 
-### A. Çift Kademeli Güvenlik Kontrolü (`POST`)
-Rol yükseltme işlemi için iki yöntemden biri zorunludur:
-1. **Kurulum Parolası:** Gövdede gönderilen `setupSecret` parametresinin sunucu ortamındaki `DIRECTOR_SETUP_SECRET` ile tam eşleşmesi, VEYA
-2. **Yönetici Yetkisi:** İsteği atan oturum sahibinin `role === "DIRECTOR"` olması.
-
-### B. Rol Atama ve Denetim Kaydı
-- Hedef kullanıcının e-postası veya ID'si ile kullanıcı kaydı bulunur.
-- Kullanıcı rolü istenen seviyeye (`ADMIN` veya `DIRECTOR`) güncellenir.
-- İşlem `AuditLog` tablosuna `ROLE_UPDATED` eylemiyle ve güvenlik gerekçesiyle loglanır.
+1. Oturum açmış kullanıcının rolü kontrol edilir; yalnızca `session.user.role === "SUPER_ADMIN"` ise işleme izin verilir (`403 Unauthorized`).
+2. Gövdedeki `{ email, role }` parametreleri doğrulanır (`VALID_ROLES = ["STUDENT", "ADMIN", "LIBRARIAN", "SUPER_ADMIN"]`).
+3. Kullanıcının rolü güncellenir ve `AdminAction` tablosuna `USER_ROLE_CHANGED` kaydı düşülür.
 
 ## 4. Bağlantılı Olduğu Dosyalar
 
 - `backend/src/app/api/auth/[...nextauth]/route.js`
-- `backend/prisma/seed.cjs`
+- `frontend/src/components/admin/UsersTab.jsx`
+```

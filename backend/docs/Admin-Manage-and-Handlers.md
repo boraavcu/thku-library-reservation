@@ -1,51 +1,47 @@
-# Context: admin/manage/route.js
+## 4. `backend/docs/Admin-Manage-and-Handlers.md`
+
+```markdown
+# Context: admin/manage/route.js & handlers.js
 
 ## 1. Dosyanın Amacı ve Mimari Rolü
 
-`admin/manage/route.js` ve `handlers.js`, Kütüphane Yönetim Paneli'nin (`AdminPanel.jsx`) tüm idari arka uç operasyonlarını karşılayan merkezi yönetim merkezidir. Sistem istatistiklerinin çekilmesi, kullanıcı banlama/affetme, oda ekleme/silme/güncelleme, randevu iptali, duyuru yönetimi ve sözleşme kurallarını güncelleme operasyonları bu modülde yürütülür.
+`backend/src/app/api/admin/manage/route.js` ve `handlers.js`, Yönetim Panelinin (`AdminPanel.jsx`) tüm analitik veri sorgulama (`GET`) ve idari operasyon (`POST`) uç noktasıdır.
 
-**Açık/Kapalı Prensibi (OCP):** `route.js` yalnızca NextAuth oturumunu ve `ADMIN` / `DIRECTOR` rol yetkisini doğrular; gelen `action` isteğini `handlers.js` içindeki `ADMIN_ACTION_HANDLERS` komut tablosuna dağıtır. Yeni bir idari fonksiyon eklendiğinde `route.js` koduna dokunulmaz.
+**SOLID & Açık/Kapalı Prensibi (OCP):** `route.js` yalnızca yetki kontrolünü (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`), 180/365 günlük log arşiv politikasını ve analitik hesaplamaları (`GET`) yürütür; `POST` isteklerini ise `handlers.js` içindeki `ADMIN_ACTION_HANDLERS` komut haritasına devreder.
 
 ## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **Oturum ve Yetkilendirme:** `next-auth` (`getServerSession`, `authOptions` — `ADMIN` ve `DIRECTOR` rolleri)
-- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `User`, `Room`, `Reservation`, `Announcement`, `SystemAgreement`, `AuditLog`, `PenaltyLog`)
-- **Yardımcı Servisler:**
-  - `@/lib/penaltyService` (`manualBanUser`, `manualUnbanUser`)
-  - `@/lib/emailService` (`sendReservationCancelledEmails`)
-  - `@/lib/timeUtils` (`getIstanbulTimeDetails`)
+- **Oturum ve Yetkilendirme:** `next-auth` (`getServerSession`, `authOptions`)
+- **Veritabanı & Önbellek:** `@/lib/db` (Prisma Client) & `@/lib/redis` (`kiosk:checked_users:${id}`)
+- **Yardımcı Servisler:** `@/lib/lifecycle`, `@/lib/timeUtils`, `@/lib/emailService`, `@/lib/penaltyService`
 
 ## 3. Çekirdek Fonksiyonlar ve İş Mantığı (Core Business Logic)
 
-### A. Yetkilendirme ve Aksiyon Yönlendirme (`route.js`)
-1. Gelen HTTP `POST` isteğinde `getServerSession(authOptions)` çağrılır.
-2. Oturum yoksa veya kullanıcının rolü `ADMIN` ya da `DIRECTOR` değilse `403 Forbidden` (`ADMIN_ROLE_REQUIRED`) fırlatılır.
-3. Gövdedeki `{ action, ...payload }` ayrıştırılır; `ADMIN_ACTION_HANDLERS[action]` fonksiyonu çağrılır. Tanımsız bir aksiyonda `400 Invalid Action` dönülür.
+### A. `GET /api/admin/manage` — Analitik, Yoğunluk ve 180/365 Gün Log Motoru
+1. **365 Gün Otomatik Arşiv Temizliği:** 1 yılı (365 gün) aşan `AuditLog` ve `AdminAction` kayıtlarını veritabanından otomatik temizler; son 180 günün kayıtlarını aktif listeler, 180–365 gün arasındaki kayıt sayısını `archivedRecordsCount` olarak raporlar.
+2. **Gerçek Zamanlı Analitik Üretimi (`analytics`):**
+   - `hourlyHeatmap`: 00:00 – 24:00 arası 24 saatlik yoğunluk dağılımı ve zirve saat (`peakHour`).
+   - `departmentBreakdown` & `roomBreakdown`: Bölüm bazlı katılım yüzdeleri ve 4 çalışma odasının tercih sıralaması.
+   - `activeNowRooms`, `upcomingHourReservations`, `upcomingHourStudents`: Gelecek 1 saatlik canlı operasyon radarı.
+   - `completionRate`, `cancellationRate`, `noShowRate`, `avgDurationHours`, `avgGroupSize`.
 
-### B. Başlangıç Veri Paketi (`GET_INITIAL_DATA`)
-Yönetici paneli yüklendiğinde tek HTTP turunda (round-trip) tüm panel bileşenlerinin ihtiyaç duyduğu veriyi döner:
-- `stats`: Toplam rezervasyon, bugün tamamlananlar, aktif banlı kullanıcı sayısı ve şu an içeride olan (`CHECKED_IN`) oda sayısı.
-- `rooms`: Tüm odalar, kapasiteler, katlar ve aktiflik durumları.
-- `reservations`: Son 100 rezervasyon ve detaylı katılımcı listeleri.
-- `users`: Sistemdeki tüm öğrenciler, ceza puanları (`PenaltyLog`) ve ban durumları.
-- `announcements`: Sistem duyuruları ve geçerlilik tarihleri.
-- `activeAgreement`: Yürürlükteki sistem kuralları ve limitleri (`maxAdvanceDays`, `maxDailyHours`, `noShowToleranceMinutes`).
-
-### C. Kullanıcı Disiplin Yönetimi (`BAN_USER` & `UNBAN_USER`)
-- **`BAN_USER`:** Kullanıcıyı 30 gün askıya alır (`isBanned: true`, `bannedUntil: now + 30 gün`). `reservationDate: { gte: todayDate }` filtresiyle kullanıcının bugünkü ileri saatli randevuları dahil tüm gelecek rezervasyonlarını iptal eder (`CANCELLED`) ve odaları anında takvime kazandırır.
-- **`UNBAN_USER`:** `isBanned: false` yapar ve askı süresini sıfırlar. Her iki işlem de denetim için `AuditLog` tablosuna işlenir.
-
-### D. Oda Yönetimi (`CREATE_ROOM`, `UPDATE_ROOM`, `DELETE_ROOM`)
-- **`CREATE_ROOM`:** Yeni oda numarası (`roomNumber`) mükerrerlik kontrolünden geçirilir ve oda şemaya eklenir.
-- **`UPDATE_ROOM`:** Oda kapasitesi (`capacity`, `minGroupSize`, `maxGroupSize`) veya aktiflik durumu güncellenir.
-- **`DELETE_ROOM`:** Odaya ait gelecekteki rezervasyonlar kontrol edilir; aktif randevusu olan odalar silinemez, önce randevuların iptali veya odanın pasife (`isActive: false`) alınması zorunlu tutulur.
-
-### E. Sistem Kuralları Güncelleme (`UPDATE_RULES`)
-- `maxAdvanceDays` (ileri tarih sınırı), `maxDailyHours` (maksimum günlük kullanım) veya tolerans süresi güncellendiğinde mevcut sözleşme pasife alınır ve yeni bir versiyon numarasıyla (`version: current + 1`) yeni bir `SystemAgreement` kaydı açılır (İzlenebilirlik ve Hukuki Uyumluluk).
+### B. `POST /api/admin/manage` — `ADMIN_ACTION_HANDLERS` Komutları (`handlers.js`)
+| Aksiyon (`action`) | Yetki | Açıklama |
+| :--- | :--- | :--- |
+| `TOGGLE_ROOM` | Tüm Yetkililer | Odayı yeni randevulara açar/kapatır (mevcut onaylı randevular korunur). |
+| `CREATE_ROOM` | `ADMIN`, `SUPER_ADMIN` | Yeni çalışma odası ekler ve `AdminAction` logu düşer. |
+| `UPDATE_ROOM` | `ADMIN`, `SUPER_ADMIN` | Oda kodunu, adını ve kapasitesini günceller. |
+| `DELETE_ROOM` | `ADMIN`, `SUPER_ADMIN` | Odayı ve ilişkili kayıtları transaction içinde kalıcı siler. |
+| `RESERVATION_OP` | Tüm Yetkililer | `FORCE_CHECKIN` (manuel giriş), `EARLY_FINISH` (erken boşaltma), `CANCEL` (iptal) ve `MARK_NO_SHOW` (gelmeyenlere ceza işleme). |
+| `CREATE_ANNOUNCEMENT`| Tüm Yetkililer | TR/EN çok dilli ve öncelikli (`LOW`, `MEDIUM`, `HIGH`, `URGENT`) duyuru yayınlar. |
+| `DELETE_ANNOUNCEMENT`| Tüm Yetkililer | Duyuruyu siler. |
+| `USER_MODERATION` | `ADMIN`, `SUPER_ADMIN` | `BAN_USER` (takvimli veya kalıcı Perma ban + bugünkü/gelecekteki randevu iptali), `UNBAN`, `RESET_PENALTY` ve sıkı hiyerarşili `CHANGE_ROLE`. |
+| `UPDATE_RULE` | `ADMIN`, `SUPER_ADMIN` | 7 dinamik rezervasyon kuralını (`ReservationRule`) anında günceller. |
 
 ## 4. Bağlantılı Olduğu Dosyalar
 
-- `backend/src/lib/penaltyService.js`
-- `backend/src/lib/emailService.js`
 - `frontend/src/pages/AdminPanel.jsx`
 - `frontend/src/components/admin/*`
+- `backend/src/lib/penaltyService.js`
+- `backend/src/lib/emailService.js`
+```

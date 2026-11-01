@@ -1,37 +1,35 @@
+## 3. `backend/docs/PenaltyService.md`
+
+```markdown
+# Context: penaltyService.js
+
 ## 1. Dosyanın Amacı ve Mimari Rolü
 
-`penaltyService.js`, kütüphane kullanım kurallarını ihlal eden (No-Show, geç kalma, kurallara uymama) öğrencilerin disiplin kayıtlarını tutan, **dönemlik 3/3 ceza limitini** denetleyen ve kuralı aşan öğrencileri otomatik olarak **30 gün süreyle sistemden askıya alan (banlayan)** bağımsız disiplin servisidir.
+`backend/src/lib/penaltyService.js`, hem otonom yaşam döngüsü motoru (`lifecycle.js`) hem de Yönetim Panelindeki görevli/müdür müdahalesi (`MARK_NO_SHOW`) tarafından ortak kullanılan **Adil No-Show Ceza ve 3/3 Otomatik 30 Gün Ban** servisidir.
 
 ## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `PenaltyLog`, `User`, `Reservation`, `AuditLog`)
+- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `PenaltyHistory`, `User`, `Reservation`, `AuditLog`)
+- **E-Posta Servisi:** `@/lib/emailService` (`sendNoShowWarningEmail`)
 - **Zaman Modülü:** `@/lib/timeUtils` (`getIstanbulTimeDetails`)
-- **E-Posta Servisi:** `@/lib/emailService` (`sendNoShowWarningEmail`, `sendBanEmail`)
 
-## 3. Çekirdek Fonksiyonlar ve İş Mantığı (Core Business Logic)
+## 3. Çekirdek Fonksiyonlar ve İş Mantığı (`applyNoShowPenaltiesForUsers`)
 
-### A. No-Show Cezası Uygulama (`applyNoShowPenalty`)
-Yoklamaya katılmayan (`absentUsers`) öğrencilere uygulanır:
-1. `PenaltyLog` tablosuna `NO_SHOW` tipinde, oda ve rezervasyon referansıyla yeni bir ceza kaydı yazılır.
-2. Öğrencinin aktif dönemdeki toplam ceza sayısı (`penaltyCount`) sayılır.
-3. Eğer `penaltyCount >= 3` ise `banUserAccount` fonksiyonu devreye girer.
-4. Öğrenciye ceza uyarı maili gönderilir (`1/3` veya `2/3`).
-
-### B. Otomatik 30 Gün Hesap Askıya Alma (`banUserAccount`)
-1. Kullanıcı kaydı güncellenir:
-   - `isBanned = true`
-   - `bannedUntil = now + 30 gün`
-2. **Aynı Gün ve İleri Tarihli Randevuların İptali:**
-   - PostgreSQL `@db.Date` alanının saat dilimi yapısı gözetilerek `reservationDate: { gte: todayDate }` filtresiyle, kullanıcının bugünkü ileri saatli randevuları dahil tüm gelecek rezervasyonları `CANCELLED` yapılır ve odalar boşa çıkarılır.
-3. Kütüphane Müdürüne ve öğrenciye ban bilgilendirme e-postası iletilir.
-
-### C. Yönetici Tarafından Manuel Ceza ve Ban İşlemleri (`manualBanUser` & `manualUnbanUser`)
-- Admin panelden yapılan müdahalelerde işlem `AuditLog` tablosuna yönetici ID'si ile mühürlenir.
-- Ban kaldırıldığında (`manualUnbanUser`) `isBanned: false` yapılır ve öğrencinin rezervasyon yapma hakkı anında iade edilir.
+Kapı QR kodunu süresi içinde okutmayan (`usersToPenalize`) her grup üyesi için sırasıyla şu adımları yürütür:
+1. **Ceza Tarihçesi Kaydı (`PenaltyHistory`):**
+   - `penaltyType: "NO_SHOW"`, `penaltyPoints: 15`, `isActive: true` olarak yeni uyarı kaydı oluşturur.
+2. **Aktif Uyarı Sayımı ve 3/3 Ban Kuralı:**
+   - Öğrencinin aktif `NO_SHOW` uyarı sayısını (`activeNoShowCount`) sayar.
+   - `activeNoShowCount >= 3` ise (`shouldBan = true`), öğrenciyi **30 gün süreyle** banlar (`isBanned: true`, `banUntil: now + 30 gün`) ve toplam ceza puanını `15` artırır.
+3. **Denetim İzleri ve Bildirim E-Postası:**
+   - `writeAuditLog === true` ise `AuditLog` tablosuna `AUTO_NO_SHOW_PENALTY` veya `AUTO_NO_SHOW_BANNED` kaydı düşer.
+   - `sendNoShowWarningEmail` ile öğrenciye kaçıncı uyarısını aldığını (`1/3`, `2/3` veya `3/3 Ban`) bildiren kurumsal HTML e-posta ve uygulama içi bildirim gönderir.
+4. **Banlanan Öğrencinin Bugünkü ve Gelecekteki Randevularının İptali:**
+   - Öğrenci 3/3 uyarıyla banlandığında, `reservationDate: { gte: todayDate }` filtresiyle bugünün ilerleyen saatlerindeki ve gelecekteki tüm `PENDING` / `CONFIRMED` randevuları otomatik olarak `CANCELLED` yapılır.
 
 ## 4. Bağlantılı Olduğu Dosyalar
 
 - `backend/src/lib/lifecycle.js`
 - `backend/src/app/api/admin/manage/handlers.js`
-- `backend/src/app/api/profile/route.js`
 - `backend/src/lib/emailService.js`
+```
