@@ -10,6 +10,7 @@ import { useSession } from 'next-auth/react';
 import { useTranslation } from 'react-i18next';
 import Navbar from '../components/Navbar';
 import api from '../api';
+import { getIstanbulNowInfo, toDateStr } from '../utils/dateUtils';
 
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
@@ -46,13 +47,6 @@ const PURPOSE_PRESETS_EN = [
   'Software / Design Development',
 ];
 
-const toDateStr = (d) => {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-};
-
 function ReserveForm() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -75,15 +69,42 @@ function ReserveForm() {
   });
   const [initLoading, setInitLoading] = useState(true);
 
-  const today = toDateStr(new Date());
+  const { todayStr: today, nowMinutes } = useMemo(() => getIstanbulNowInfo(), []);
   const initialDate = searchParams.get('date') || today;
   const roomIdParam = searchParams.get('roomId') || '';
+
+  // StudyRooms sayfasından gelen ön-seçili saat parametreleri
+  const preselectStartParam = searchParams.get('start');
+  const preselectEndParam = searchParams.get('end');
+
+  const parsedInitialStart =
+    preselectStartParam !== null && Number.isInteger(Number(preselectStartParam))
+      ? Number(preselectStartParam)
+      : null;
+  const parsedInitialEnd =
+    preselectEndParam !== null && Number.isInteger(Number(preselectEndParam))
+      ? Number(preselectEndParam)
+      : null;
 
   const [formData, setFormData] = useState({
     roomId: roomIdParam,
     date: initialDate,
-    startTime: null,
-    endTime: null,
+    startTime:
+      parsedInitialStart !== null &&
+      parsedInitialEnd !== null &&
+      parsedInitialStart >= 0 &&
+      parsedInitialEnd <= 24 &&
+      parsedInitialEnd > parsedInitialStart
+        ? parsedInitialStart
+        : null,
+    endTime:
+      parsedInitialStart !== null &&
+      parsedInitialEnd !== null &&
+      parsedInitialStart >= 0 &&
+      parsedInitialEnd <= 24 &&
+      parsedInitialEnd > parsedInitialStart
+        ? parsedInitialEnd
+        : null,
     purpose: '',
     participants: [],
   });
@@ -105,7 +126,7 @@ function ReserveForm() {
 
     api.get('/reserve/init')
       .then((res) => {
-        const foundRoom = res.data.rooms.find(r => r.id === roomIdParam);
+        const foundRoom = res.data.rooms.find((r) => r.id === roomIdParam);
         setRoom(foundRoom || null);
         if (res.data.rules) setRules((prev) => ({ ...prev, ...res.data.rules }));
         setInitLoading(false);
@@ -161,37 +182,57 @@ function ReserveForm() {
   };
 
   const occupiedBlocks = useMemo(
-    () => occupiedSlots.map((s) => {
-      const endDt = new Date(s.endTime);
-      const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-      return {
-        startHour: new Date(s.startTime).getUTCHours(),
-        endHour: endH,
-      };
-    }),
+    () =>
+      occupiedSlots.map((s) => {
+        const endDt = new Date(s.endTime);
+        const endH =
+          endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59
+            ? 24
+            : endDt.getUTCHours();
+        return {
+          startHour: new Date(s.startTime).getUTCHours(),
+          endHour: endH,
+        };
+      }),
     [occupiedSlots]
   );
 
-  const isSlotOccupied = useCallback((hour) => {
-    return occupiedBlocks.some((b) => hour >= b.startHour && hour < b.endHour);
-  }, [occupiedBlocks]);
+  const isSlotOccupied = useCallback(
+    (hour) => occupiedBlocks.some((b) => hour >= b.startHour && hour < b.endHour),
+    [occupiedBlocks]
+  );
 
-  const nowMinutes = useMemo(() => {
-    const now = new Date();
-    return now.getHours() * 60 + now.getMinutes();
-  }, []);
   const isToday = formData.date === today;
-  const isSlotPast = useCallback((hour) => isToday && (hour + 1) * 60 <= nowMinutes, [isToday, nowMinutes]);
-
-  const { startTime: selectedStart, endTime: selectedEnd } = formData;
-  const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
-  const hasSelection = selectedStart !== null && selectedEnd !== null;
-  const selectionDuration = hasSelection ? selectedEnd - selectedStart : 0;
+  const isSlotPast = useCallback(
+    (hour) => isToday && (hour + 1) * 60 <= nowMinutes,
+    [isToday, nowMinutes]
+  );
 
   const maxDuration = rules.maxDurationHours ?? 3;
   const minRequiredPeople = rules.minParticipants ?? 2;
   const checkinToleranceMins = rules.checkinToleranceMinutes ?? 15;
   const cancelLockMins = rules.cancelLockMinutes ?? 60;
+
+  // URL'den ön-seçili gelen saat aralığı doluysa veya maksimum süreyi aşıyorsa güvenli şekilde temizle
+  useEffect(() => {
+    if (availLoading || formData.startTime === null || formData.endTime === null) return;
+    const dur = formData.endTime - formData.startTime;
+    if (dur <= 0 || dur > maxDuration) {
+      updateForm({ startTime: null, endTime: null });
+      return;
+    }
+    for (let h = formData.startTime; h < formData.endTime; h++) {
+      if (isSlotOccupied(h) || isSlotPast(h)) {
+        updateForm({ startTime: null, endTime: null });
+        return;
+      }
+    }
+  }, [availLoading, formData.startTime, formData.endTime, maxDuration, isSlotOccupied, isSlotPast]);
+
+  const { startTime: selectedStart, endTime: selectedEnd } = formData;
+  const hours = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
+  const hasSelection = selectedStart !== null && selectedEnd !== null;
+  const selectionDuration = hasSelection ? selectedEnd - selectedStart : 0;
 
   const handleSlotClick = (hour) => {
     if (isSlotOccupied(hour) || isSlotPast(hour)) return;
@@ -695,7 +736,6 @@ function ReserveForm() {
                 </Alert>
               )}
 
-              {/* ÇALIŞMA AMACI / KONUSU */}
               <Box>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
                   <DescriptionOutlinedIcon sx={{ fontSize: 20, color: 'primary.main' }} />
@@ -737,7 +777,6 @@ function ReserveForm() {
                 </Box>
               </Box>
 
-              {/* Dinamik Oda Kapasitesi Gösterimi */}
               <Box>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
                   <Typography sx={{ fontWeight: 600, fontSize: '0.95rem' }}>{t('rfRoomCapacity')}</Typography>
@@ -788,12 +827,13 @@ function ReserveForm() {
                     sx={{ '& .MuiOutlinedInput-root': { borderRadius: 2 } }}
                   />
                   <Button
-                    variant="outlined"
+                    variant="contained"
                     onClick={addEmail}
-                    startIcon={<PersonAddIcon sx={{ fontSize: '20px !important' }} />}
+                    disabled={totalPeople >= effectiveMax}
+                    startIcon={<PersonAddIcon sx={{ fontSize: '18px !important' }} />}
                     sx={{
-                      borderRadius: 2, fontWeight: 600, px: 3, whiteSpace: 'nowrap',
-                      borderColor: 'grey.300', color: 'text.primary',
+                      px: 3, py: 1, borderRadius: 2, fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0,
+                      bgcolor: 'text.primary', '&:hover': { bgcolor: 'grey.800' },
                     }}
                   >
                     {t('rfAdd')}
@@ -801,206 +841,114 @@ function ReserveForm() {
                 </Box>
               </Box>
 
-              <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 2, overflow: 'hidden' }}>
-                <Box sx={{ bgcolor: 'action.hover', px: 2.5, py: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-                  <Typography sx={{ fontSize: '0.8rem', fontWeight: 600, color: 'text.secondary' }}>
-                    {t('rfCurrentAttendees', { count: totalPeople })}
-                  </Typography>
-                </Box>
+              <Box>
+                <Typography sx={{ fontSize: '0.68rem', fontWeight: 700, color: 'text.disabled', textTransform: 'uppercase', letterSpacing: '0.06em', mb: 1.5 }}>
+                  {t('rfParticipantsList')} ({totalPeople})
+                </Typography>
 
-                <Box sx={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2,
-                  borderBottom: '1px solid', borderColor: 'divider',
-                }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Avatar sx={{
-                      width: 40, height: 40,
-                      bgcolor: alpha(theme.palette.primary.main, 0.1),
-                      color: 'primary.main', fontWeight: 700, fontSize: '0.8rem',
-                    }}>
-                      {session?.user?.name?.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                    </Avatar>
-                    <Box>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <Box sx={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    p: 1.5, borderRadius: 2, bgcolor: alpha(theme.palette.primary.main, 0.04),
+                    border: '1px solid', borderColor: alpha(theme.palette.primary.main, 0.12),
+                  }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: '0.8rem', fontWeight: 700 }}>
+                        {session?.user?.name?.[0]?.toUpperCase() || 'U'}
+                      </Avatar>
+                      <Box>
                         <Typography sx={{ fontSize: '0.85rem', fontWeight: 600 }}>
-                          {session?.user?.name} ({currentLang === 'tr' ? 'Siz' : 'You'})
+                          {session?.user?.name} ({t('rfYou')})
                         </Typography>
-                        <Chip label={t('rfOrganizer')} size="small" sx={{ bgcolor: 'primary.main', color: '#fff', fontWeight: 600, height: 20, fontSize: '0.65rem' }} />
+                        <Typography sx={{ fontSize: '0.72rem', color: 'text.secondary' }}>
+                          {session?.user?.email}
+                        </Typography>
                       </Box>
-                      <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', wordBreak: 'break-all' }}>{session?.user?.email}</Typography>
                     </Box>
+                    <Chip label={t('rfOrganizer')} size="small" color="primary" variant="outlined" sx={{ fontWeight: 600, fontSize: '0.65rem' }} />
                   </Box>
-                </Box>
 
-                {effectiveParticipants.map((email) => {
-                  const initials = email.split('@')[0].slice(0, 2).toUpperCase();
-                  return (
-                    <Box
-                      key={email}
-                      sx={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2,
-                        borderBottom: '1px solid', borderColor: 'divider',
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                        <Avatar sx={{
-                          width: 40, height: 40,
-                          bgcolor: 'grey.100', color: 'text.secondary',
-                          fontWeight: 700, fontSize: '0.8rem',
-                        }}>
-                          {initials}
+                  {effectiveParticipants.map((email) => (
+                    <Box key={email} sx={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      p: 1.5, borderRadius: 2, bgcolor: 'background.default',
+                      border: '1px solid', borderColor: 'divider',
+                    }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                        <Avatar sx={{ width: 32, height: 32, bgcolor: 'grey.300', color: 'text.primary', fontSize: '0.8rem', fontWeight: 600 }}>
+                          {email[0].toUpperCase()}
                         </Avatar>
-                        <Box>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-                            <Typography sx={{ fontSize: '0.85rem', fontWeight: 500 }}>{email.split('@')[0]}</Typography>
-                            <Chip
-                              label={t('rfParticipant')}
-                              size="small" variant="outlined"
-                              sx={{ height: 20, fontSize: '0.65rem', borderColor: 'divider', color: 'text.secondary' }}
-                            />
-                          </Box>
-                          <Typography sx={{ fontSize: '0.78rem', color: 'text.secondary', wordBreak: 'break-all' }}>{email}</Typography>
-                        </Box>
+                        <Typography sx={{ fontSize: '0.85rem', fontWeight: 500 }}>{email}</Typography>
                       </Box>
-                      <IconButton
-                        onClick={() => {
-                          if (email === pendingTypedEmail) setEmailInput('');
-                          else removeEmail(email);
-                        }}
-                        sx={{ color: 'text.disabled', '&:hover': { color: 'error.main' } }}
-                      >
-                        <CloseIcon />
+                      <IconButton size="small" onClick={() => removeEmail(email)} sx={{ color: 'text.disabled', '&:hover': { color: 'error.main' } }}>
+                        <CloseIcon sx={{ fontSize: 18 }} />
                       </IconButton>
                     </Box>
-                  );
-                })}
+                  ))}
+                </Box>
               </Box>
 
-              {/* GÜNCELLENMİŞ ZORUNLU REZERVASYON, İPTAL VE KAPI QR YOKLAMA KURALLARI (TR & EN) */}
-              <Box
-                sx={{
-                  p: { xs: 2, sm: 2.5 },
-                  borderRadius: 2.5,
-                  bgcolor: alpha(theme.palette.warning.main, 0.06),
-                  border: '1px solid',
-                  borderColor: rulesConfirmed ? 'success.main' : alpha(theme.palette.warning.main, 0.35),
-                }}
-              >
+              <Box sx={{
+                p: 2.5, borderRadius: 2.5,
+                bgcolor: alpha(theme.palette.warning.main, 0.06),
+                border: '1px solid', borderColor: alpha(theme.palette.warning.main, 0.25),
+              }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                  <GavelIcon color={rulesConfirmed ? 'success' : 'warning'} fontSize="small" />
-                  <Typography sx={{ fontWeight: 800, fontSize: '0.92rem' }}>
-                    {isEn
-                      ? 'Mandatory Reservation, Cancellation & Door QR Check-In Rules'
-                      : 'Zorunlu Rezervasyon, İptal ve Kapı QR Yoklama Kuralları'}
+                  <GavelIcon sx={{ fontSize: 18, color: 'warning.dark' }} />
+                  <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: 'warning.dark' }}>
+                    {isEn ? 'Booking & Kiosk Attendance Rules' : 'Rezervasyon ve Kiosk Yoklama Kuralları'}
                   </Typography>
                 </Box>
-
-                <Box component="ul" sx={{ m: 0, pl: 2.5, mb: 1.5, color: 'text.secondary', fontSize: '0.82rem', lineHeight: 1.75 }}>
-                  <li>
-                    {isEn ? (
-                      <>
-                        <strong>30-Minute Invitation Approval Window:</strong> At least one of the friend(s) you invited{minRequiredPeople > 2 ? ` (minimum ${minRequiredPeople - 1} invited participants)` : ''} must accept the invitation within <strong>30 minutes</strong>; otherwise, the reservation is automatically cancelled.
-                      </>
-                    ) : (
-                      <>
-                        <strong>30 Dakika Davet Onay Süresi:</strong> Davet ettiğiniz arkadaşınız veya arkadaşlarınızdan en az birisi{minRequiredPeople > 2 ? ` (en az ${minRequiredPeople - 1} davetli)` : ''} <strong>30 dakika içinde</strong> daveti kabul etmesi gerekir; aksi halde randevu otomatik iptal edilir.
-                      </>
-                    )}
-                  </li>
-                  <li>
-                    {isEn ? (
-                      <>
-                        <strong>Last {cancelLockMins === 60 ? '1-Hour (60 Minutes)' : `${cancelLockMins}-Minute`} Cancellation Lock:</strong> Cancellations are locked and cannot be performed within <strong>{cancelLockMins === 60 ? '1 hour (60 minutes)' : `${cancelLockMins} minutes`}</strong> prior to the reservation start time.
-                      </>
-                    ) : (
-                      <>
-                        <strong>Son {cancelLockMins === 60 ? '1 Saat' : `${cancelLockMins} Dakika`} İptal Kilidi:</strong> Randevu başlangıç saatine <strong>{cancelLockMins === 60 ? '1 saat (60 dakika)' : `${cancelLockMins} dakika`}</strong> kala iptal işlemi kilitlenir ve iptal yapılamaz.
-                      </>
-                    )}
-                  </li>
-                  <li>
-                    {isEn ? (
-                      <>
-                        <strong>±{checkinToleranceMins} Minute Door QR Check-In Requirement:</strong> Between <strong>{checkinToleranceMins} minutes before and {checkinToleranceMins} minutes after</strong> the reservation start time, at least <strong>{minRequiredPeople} group members</strong> must scan and confirm the door QR code from their own phones (with Campus Wi-Fi and GPS enabled) to activate the room check-in. Furthermore, each member must confirm from their own personal device. Any member who fails to confirm will receive a No-Show penalty.
-                      </>
-                    ) : (
-                      <>
-                        <strong>±{checkinToleranceMins} Dakika Kapı QR Yoklama Zorunluluğu:</strong> Randevu başlangıcından <strong>{checkinToleranceMins} dakika öncesi ile {checkinToleranceMins} dakika sonrası</strong> arasında odayı check-in hale getirebilmek için <strong>en az {minRequiredPeople} grup üyesinin</strong> (Kampüs Wi-Fi ve GPS açıkken) kapıdaki QR kodu kendi telefonundan okutup onaylaması zorunludur. Ayrıca her bir üyenin kendi cihazından onay vermesi gerekmektedir. Onay vermeyen her üye gelmeme cezası alacaktır.
-                      </>
-                    )}
-                  </li>
-                  <li>
-                    {isEn ? (
-                      <>
-                        <strong>No-Show & Ban Penalty Policy:</strong> A <strong>1/3 No-Show warning</strong> is issued for reservations without door QR confirmation; accounts reaching <strong>3/3 warnings</strong> are suspended from making or joining reservations for <strong>30 days</strong>.
-                      </>
-                    ) : (
-                      <>
-                        <strong>Gelmeme (No-Show) ve Ban Ceza Kuralı:</strong> Kapı QR onayı yapılmayan randevularda <strong>1/3 No-Show uyarısı</strong> işlenir; <strong>3/3 uyarıya</strong> ulaşan hesaplar <strong>30 gün boyunca</strong> rezervasyonlara kapatılır.
-                      </>
-                    )}
-                  </li>
-                </Box>
-
+                <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', lineHeight: 1.6, mb: 1.5 }}>
+                  {isEn
+                    ? `All participants must approve their invitation before the session starts and scan the Kiosk QR code within ${checkinToleranceMins} minutes. Cancellations are locked ${cancelLockMins} minutes before start time.`
+                    : `Tüm katılımcılar ders başlamadan önce daveti onaylamalı ve ilk ${checkinToleranceMins} dakika içinde Kiosk QR kodunu okutmalıdır. Başlangıca ${cancelLockMins} dakika kala iptal kilidi devreye girer.`}
+                </Typography>
                 <FormControlLabel
                   control={
                     <Checkbox
                       checked={rulesConfirmed}
                       onChange={(e) => setRulesConfirmed(e.target.checked)}
-                      color="success"
+                      color="primary"
+                      size="small"
                     />
                   }
                   label={
-                    <Typography sx={{ fontSize: '0.84rem', fontWeight: 700, color: 'text.primary' }}>
+                    <Typography sx={{ fontSize: '0.8rem', fontWeight: 600 }}>
                       {isEn
-                        ? 'I have read and accept the mandatory reservation, cancellation, door QR check-in, and No-Show ban rules above.'
-                        : 'Yukarıdaki zorunlu rezervasyon, son 1 saat iptal kilidi, ±15 dk kapı QR yoklama ve 3/3 No-Show ban kurallarını okudum, kabul ediyorum.'}
+                        ? 'I have read and accept the reservation & attendance rules.'
+                        : 'Rezervasyon ve Kiosk yoklama kurallarını okudum, kabul ediyorum.'}
                     </Typography>
                   }
                 />
               </Box>
-            </Box>
 
-            <Box sx={{
-              p: { xs: 2.5, md: 4 }, borderTop: '1px solid', borderColor: 'divider',
-              bgcolor: 'action.hover',
-              display: 'flex', flexDirection: { xs: 'column-reverse', sm: 'row' }, justifyContent: 'space-between', alignItems: 'center', gap: 2,
-            }}>
-              <Button
-                variant="outlined"
-                onClick={() => setStep(1)}
-                sx={{
-                  width: { xs: '100%', sm: 'auto' }, px: 3, py: 1.25, borderRadius: 2,
-                  borderColor: 'grey.300', color: 'text.primary', fontWeight: 600,
-                }}
-              >
-                {t('rfBack')}
-              </Button>
-              <Button
-                variant="contained"
-                disabled={!isCountValid || !rulesConfirmed || submitting}
-                onClick={handleSubmit}
-                endIcon={submitting ? <CircularProgress size={16} color="inherit" /> : <ArrowForwardIcon sx={{ fontSize: '20px !important' }} />}
-                sx={{
-                  width: { xs: '100%', sm: 'auto' },
-                  px: 4, py: 1.25, borderRadius: 2, fontWeight: 700,
-                }}
-              >
-                {submitting ? t('rfSubmitting') : t('rfConfirm')}
-              </Button>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1.5, pt: 1 }}>
+                <Button
+                  variant="outlined"
+                  onClick={() => setStep(1)}
+                  sx={{ px: 3, py: 1.25, borderRadius: 2, fontWeight: 600 }}
+                >
+                  {t('rfBackToTime')}
+                </Button>
+                <Button
+                  variant="contained"
+                  disabled={!isCountValid || !rulesConfirmed || submitting}
+                  onClick={handleSubmit}
+                  endIcon={submitting ? <CircularProgress size={16} color="inherit" /> : <ArrowForwardIcon />}
+                  sx={{ px: 4, py: 1.25, borderRadius: 2, fontWeight: 700 }}
+                >
+                  {submitting ? t('rfSubmitting') : t('rfConfirmBooking')}
+                </Button>
+              </Box>
             </Box>
           </Card>
         </Box>
       )}
 
-      <Snackbar
-        open={snackOpen}
-        autoHideDuration={3000}
-        onClose={() => setSnackOpen(false)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="success" variant="filled" onClose={() => setSnackOpen(false)}>
-          {t('rfSuccess')}
+      <Snackbar open={snackOpen} autoHideDuration={3000} onClose={() => setSnackOpen(false)}>
+        <Alert severity="success" sx={{ width: '100%' }}>
+          {t('rfSuccessMessage')}
         </Alert>
       </Snackbar>
     </Box>

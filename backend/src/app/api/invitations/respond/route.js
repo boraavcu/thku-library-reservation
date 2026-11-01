@@ -5,6 +5,7 @@ import prisma from "@/lib/db";
 import {
   runReservationLifecycleChecks,
   handleParticipantAcceptedEmails,
+  sendReservationCancelledEmails,
 } from "@/lib/lifecycle";
 
 const DEFAULT_MIN = 2;
@@ -27,7 +28,7 @@ export async function POST(request) {
 
     const user = await prisma.user.findUnique({
       where: { email: session.user.email.trim().toLowerCase() },
-      select: { id: true, email: true, isBanned: true },
+      select: { id: true, email: true, fullName: true, isBanned: true },
     });
 
     if (user?.isBanned && action === "ACCEPT") {
@@ -104,14 +105,13 @@ export async function POST(request) {
         );
       }
 
-      const resStartH = new Date(participant.reservation.startTime).getUTCHours();
-      const resEndDt = new Date(participant.reservation.endTime);
-      const resEndH =
-        resEndDt.getUTCHours() === 23 && resEndDt.getUTCMinutes() >= 59
-          ? 24
-          : resEndDt.getUTCHours();
+      const startDt = new Date(participant.reservation.startTime);
+      const endDt = new Date(participant.reservation.endTime);
+      const startTotalMins = startDt.getUTCHours() * 60 + startDt.getUTCMinutes();
+      const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+      const endTotalMins = endH * 60 + (endH === 24 ? 0 : endDt.getUTCMinutes());
 
-      if (resStartH < 8) {
+      if (startTotalMins < 8 * 60) {
         const prevDayObj = new Date(new Date(targetDate).getTime() - 24 * 60 * 60 * 1000);
         const prevNight = await prisma.reservation.findFirst({
           where: {
@@ -137,7 +137,7 @@ export async function POST(request) {
         }
       }
 
-      if (resEndH > 21) {
+      if (endTotalMins > 21 * 60) {
         const nextDayObj = new Date(new Date(targetDate).getTime() + 24 * 60 * 60 * 1000);
         const nextMorning = await prisma.reservation.findFirst({
           where: {
@@ -174,6 +174,12 @@ export async function POST(request) {
       },
     });
 
+    const minRule = await prisma.reservationRule.findFirst({
+      where: { ruleName: "MIN_PARTICIPANTS", isActive: true },
+      select: { ruleValue: true },
+    });
+    const minP = Math.max(2, minRule?.ruleValue?.value ?? DEFAULT_MIN);
+
     if (action === "ACCEPT") {
       const acceptedCount = await prisma.reservationParticipant.count({
         where: {
@@ -182,13 +188,6 @@ export async function POST(request) {
         },
       });
 
-      const minRule = await prisma.reservationRule.findFirst({
-        where: { ruleName: "MIN_PARTICIPANTS", isActive: true },
-        select: { ruleValue: true },
-      });
-      const minP = Math.max(2, minRule?.ruleValue?.value ?? DEFAULT_MIN);
-
-      // Organizatör (1) + Kabul Eden Davetliler (acceptedCount)
       const totalConfirmed = 1 + acceptedCount;
 
       if (totalConfirmed >= minP) {
@@ -200,9 +199,6 @@ export async function POST(request) {
           data: { status: "CONFIRMED" },
         });
 
-        // Tam 2. kişi onayladığında (totalConfirmed === minP) veya PENDING -> CONFIRMED geçişi olduğunda
-        // Kütüphane Müdürüne ve organizatöre mail gönderilir.
-        // Diğer kişiler onayladığında (totalConfirmed > minP) müdüre tekrar mail gitmez.
         const isInitialConfirmation =
           transitionResult.count === 1 || totalConfirmed === minP;
 
@@ -211,6 +207,38 @@ export async function POST(request) {
           acceptingUserId: user.id,
           isInitialConfirmation,
         }).catch((err) => console.error("Background email error:", err));
+      }
+    } else if (action === "REJECT") {
+      // Davet reddedildiğinde geriye kalan maksimum potansiyel katılımcı sayısını kontrol et
+      const [acceptedCount, pendingCount] = await Promise.all([
+        prisma.reservationParticipant.count({
+          where: { reservationId: participant.reservationId, status: "ACCEPTED" },
+        }),
+        prisma.reservationParticipant.count({
+          where: { reservationId: participant.reservationId, status: "PENDING" },
+        }),
+      ]);
+
+      const maxPotentialPeople = 1 + acceptedCount + pendingCount;
+
+      if (maxPotentialPeople < minP && participant.reservation.status === "PENDING") {
+        const cancelReasonText = `Davet edilen katılımcı (${user.email}) daveti reddettiği ve minimum ${minP} kişilik grup şartı sağlanamadığı için otomatik iptal edildi.`;
+
+        await prisma.reservation.update({
+          where: { id: participant.reservationId },
+          data: {
+            status: "CANCELLED",
+            cancelledAt: new Date(),
+            cancellationReason: cancelReasonText,
+          },
+        });
+
+        sendReservationCancelledEmails({
+          reservationId: participant.reservationId,
+          cancelledByEmail: user.email,
+          reason: cancelReasonText,
+          wasConfirmed: false,
+        }).catch((err) => console.error("Reject auto-cancel email error:", err));
       }
     }
 

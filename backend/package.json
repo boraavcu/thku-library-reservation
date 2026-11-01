@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "node prisma/seed.js"
+    "seed": "node prisma/seed.cjs"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"

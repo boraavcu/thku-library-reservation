@@ -3,48 +3,20 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import redis from "@/lib/redis";
-import crypto from "crypto";
-import { sendKioskCheckInEmailToStaff, getReservationKioskWindow } from "@/lib/lifecycle";
+import { sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
+import { getIstanbulTimeDetails, getReservationKioskWindow } from "@/lib/timeUtils";
+import {
+  MAX_DISTANCE_METERS,
+  DEVICE_LOCK_TTL,
+  getCrossIncognitoSignature,
+  calculateDistanceMeters,
+  verifyCampusNetworkAndVpn,
+  checkDeviceLockForReservation,
+  sealDeviceLockForReservation,
+} from "@/lib/kioskSecurity";
 
 const DEFAULT_TOLERANCE_MINUTES = 15;
 const DEFAULT_MIN_CHECKIN_PARTICIPANTS = 2;
-const DEVICE_LOCK_TTL = 14400;
-
-// THKÜ Türkkuşu Kampüsü Kütüphane Koordinatları (1 KM Sabit Yarıçap)
-const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
-const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.69035341292343);
-const MAX_DISTANCE_METERS = Number(process.env.LIBRARY_RADIUS_METERS || 1000);
-
-function getClientIp(request) {
-  const forwarded = request.headers.get("x-forwarded-for");
-  if (forwarded) return forwarded.split(",")[0].trim();
-  return request.headers.get("x-real-ip") || "127.0.0.1";
-}
-
-function getCrossIncognitoSignature(request) {
-  const ip = getClientIp(request);
-  const ua = request.headers.get("user-agent") || "no-ua";
-  const hwFp = request.headers.get("x-hardware-fp") || "no-hw";
-  const netType = request.headers.get("x-net-type") || "unknown";
-  const headerDeviceId = request.headers.get("x-device-id") || "no-dev-id";
-
-  const ipUaHash = crypto.createHash("sha256").update(`${ip}|${ua}`).digest("hex").substring(0, 20);
-  const hwLockHash = crypto.createHash("sha256").update(`${ip}|${hwFp}|${ua}`).digest("hex").substring(0, 20);
-
-  return { ip, hwLockHash, ipUaHash, headerDeviceId, netType };
-}
-
-function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(R * c);
-}
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
@@ -55,23 +27,13 @@ export async function POST(request) {
   const currentUserId = session.user.id;
 
   try {
-    const { ip, hwLockHash, ipUaHash, headerDeviceId, netType } = getCrossIncognitoSignature(request);
+    const signature = getCrossIncognitoSignature(request);
     const body = await request.json();
     const { personalSessionToken, lat, lng } = body;
 
-    if (netType === "cellular") {
-      return NextResponse.json(
-        { error: "Mobil Veri bağlantısı tespit edildi. Yalnızca Kampüs Wi-Fi (eduroam / THKU-802.1x) üzerinden onay verilebilir." },
-        { status: 403 }
-      );
-    }
-
-    const vpnPrefix = process.env.CAMPUS_VPN_PREFIX || "10.254.";
-    if (ip.startsWith(vpnPrefix)) {
-      return NextResponse.json(
-        { error: "Güvenlik Kuralı: VPN bağlantısı üzerinden oda giriş onayı verilemez." },
-        { status: 403 }
-      );
+    const networkCheck = await verifyCampusNetworkAndVpn(signature.ip, signature.netType);
+    if (!networkCheck.allowed) {
+      return NextResponse.json({ error: networkCheck.reason }, { status: 403 });
     }
 
     if (process.env.ENFORCE_CAMPUS_GPS !== "false") {
@@ -81,7 +43,7 @@ export async function POST(request) {
           { status: 403 }
         );
       }
-      const dist = calculateDistanceMeters(lat, lng, LIBRARY_LAT, LIBRARY_LNG);
+      const dist = calculateDistanceMeters(lat, lng);
       if (dist > MAX_DISTANCE_METERS) {
         return NextResponse.json(
           { error: `Kütüphane binası sınırları dışındasınız (${dist}m). Uzaktan onay verilemez.` },
@@ -105,23 +67,14 @@ export async function POST(request) {
     );
 
     const now = new Date();
-    const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
-    const todayDate = new Date(`${todayStr}T00:00:00Z`);
+    const { todayDate, totalMins: nowTotalMinutes } = getIstanbulTimeDetails(now);
+    const yesterdayDate = new Date(todayDate.getTime() - 24 * 60 * 60 * 1000);
+    const tomorrowDate = new Date(todayDate.getTime() + 24 * 60 * 60 * 1000);
+    const nowEpochMins = Math.floor(todayDate.getTime() / 60000) + nowTotalMinutes;
 
-    const trTimeParts = new Intl.DateTimeFormat("en-GB", {
-      timeZone: "Europe/Istanbul",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(now);
-
-    const currentHour = Number(trTimeParts.find((p) => p.type === "hour").value);
-    const currentMinute = Number(trTimeParts.find((p) => p.type === "minute").value);
-    const nowTotalMinutes = currentHour * 60 + currentMinute;
-
-    const todayReservations = await prisma.reservation.findMany({
+    const candidateReservations = await prisma.reservation.findMany({
       where: {
-        reservationDate: todayDate,
+        reservationDate: { in: [yesterdayDate, todayDate, tomorrowDate] },
         status: { in: ["CONFIRMED", "CHECKED_IN"] },
         OR: [
           { userId: currentUserId },
@@ -140,39 +93,39 @@ export async function POST(request) {
           include: { user: { select: { id: true, email: true } } },
         },
       },
-      orderBy: { startTime: "asc" },
+      orderBy: [{ reservationDate: "asc" }, { startTime: "asc" }],
     });
 
-    const reservation = todayReservations.find((r) => {
+    const reservation = candidateReservations.find((r) => {
+      const resDateStr = new Date(r.reservationDate).toISOString().split("T")[0];
+      const resDayEpochMins = Math.floor(new Date(`${resDateStr}T00:00:00Z`).getTime() / 60000);
       const { minAllowed, maxAllowed } = getReservationKioskWindow(
         r,
-        todayStr,
+        resDateStr,
         toleranceMinutes
       );
-      return nowTotalMinutes >= minAllowed && nowTotalMinutes <= maxAllowed;
+      const minEpochMins = resDayEpochMins + minAllowed;
+      const maxEpochMins = resDayEpochMins + maxAllowed;
+      return nowEpochMins >= minEpochMins && nowEpochMins <= maxEpochMins;
     });
 
     if (!reservation) {
       return NextResponse.json(
-        { error: `Şu anki saat diliminde (±${toleranceMinutes} dk başlangıç penceresi içinde) onaylanabilecek bir randevunuz bulunamadı.` },
+        {
+          error: `Şu anki saat diliminde (±${toleranceMinutes} dk başlangıç penceresi içinde) onaylanabilecek bir randevunuz bulunamadı.`,
+        },
         { status: 400 }
       );
     }
 
-    const cookieName = `thku_checkin_lock_${reservation.id}`;
-    const cookieOwner = request.cookies.get(cookieName)?.value;
-    const deviceKey = `kiosk:device_lock:${reservation.id}:${headerDeviceId}`;
-    const hwKey = `kiosk:hw_lock:${reservation.id}:${hwLockHash}`;
-    const ipUaKey = `kiosk:ipua_lock:${reservation.id}:${ipUaHash}`;
+    const { isLockedByAnotherUser, cookieName, keys } = await checkDeviceLockForReservation(
+      request,
+      reservation.id,
+      currentUserId,
+      signature
+    );
 
-    const [deviceOwner, hwOwner, ipUaOwner] = await Promise.all([
-      redis.get(deviceKey),
-      redis.get(hwKey),
-      redis.get(ipUaKey),
-    ]);
-
-    const lockedOwner = cookieOwner || deviceOwner || hwOwner || ipUaOwner;
-    if (lockedOwner && lockedOwner !== currentUserId) {
+    if (isLockedByAnotherUser) {
       return NextResponse.json(
         {
           error:
@@ -180,6 +133,22 @@ export async function POST(request) {
         },
         { status: 403 }
       );
+    }
+
+    const checkedSetKey = `kiosk:checked_users:${reservation.id}`;
+    const existingCheckedUsers = await redis.smembers(checkedSetKey);
+
+    // Kullanıcı zaten yoklama vermişse (çift tıklama koruması) hata fırlatmadan mevcut durumu dön
+    if (existingCheckedUsers.includes(currentUserId)) {
+      const totalGroupMembers = 1 + reservation.participants.length;
+      return NextResponse.json({
+        success: true,
+        reservationId: reservation.id,
+        room: reservation.room,
+        checkedCount: existingCheckedUsers.length,
+        totalCount: totalGroupMembers,
+        message: "Yoklama kaydınız zaten alınmış.",
+      });
     }
 
     const personalOtpKey = `kiosk:personal_otp:${reservation.id}:${currentUserId}`;
@@ -193,14 +162,8 @@ export async function POST(request) {
     }
 
     await redis.del(personalOtpKey);
+    await sealDeviceLockForReservation(keys, currentUserId);
 
-    await Promise.all([
-      redis.set(deviceKey, currentUserId, "EX", DEVICE_LOCK_TTL),
-      redis.set(hwKey, currentUserId, "EX", DEVICE_LOCK_TTL),
-      redis.set(ipUaKey, currentUserId, "EX", DEVICE_LOCK_TTL),
-    ]);
-
-    const checkedSetKey = `kiosk:checked_users:${reservation.id}`;
     await redis.sadd(checkedSetKey, currentUserId);
     await redis.expire(checkedSetKey, DEVICE_LOCK_TTL);
 
@@ -217,7 +180,7 @@ export async function POST(request) {
         newData: {
           room: roomTitle,
           checkedInBy: session.user.email,
-          deviceSignature: hwLockHash,
+          deviceSignature: signature.hwLockHash || signature.headerDeviceId || "cookie-only",
           progress: `${checkedUserIds.length}/${totalGroupMembers}`,
         },
       },

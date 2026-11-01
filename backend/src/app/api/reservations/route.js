@@ -1,17 +1,20 @@
 import {
   runReservationLifecycleChecks,
   sendReservationCancelledEmails,
+  sendReservationInvitationEmails,
 } from "@/lib/lifecycle";
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import redis from "@/lib/redis";
 import { checkRulesAcceptance } from "@/middleware/checkRulesAcceptance";
 
 const DEFAULT_MIN = 2;
 const DEFAULT_MAX = 8;
 const DEFAULT_MAX_HOURS = 3;
 const DEFAULT_MAX_ADVANCE_DAYS = 1;
+const DEFAULT_DAILY_RELEASE_HOUR = 8;
 const DEFAULT_CANCEL_LOCK_MINUTES = 60;
 const EXCLUDED_STATUSES = ["CANCELLED", "NO_SHOW"];
 
@@ -39,7 +42,11 @@ export async function POST(request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let lockKey = null;
+
   try {
+    await runReservationLifecycleChecks();
+
     const body = await request.json();
     const { roomId, reservationDate, startTime, endTime, purpose, participantEmails = [] } = body;
 
@@ -85,7 +92,13 @@ export async function POST(request) {
       where: {
         isActive: true,
         ruleName: {
-          in: ["MIN_PARTICIPANTS", "MAX_PARTICIPANTS", "MAX_DURATION_HOURS", "MAX_ADVANCE_DAYS"],
+          in: [
+            "MIN_PARTICIPANTS",
+            "MAX_PARTICIPANTS",
+            "MAX_DURATION_HOURS",
+            "MAX_ADVANCE_DAYS",
+            "DAILY_RELEASE_HOUR",
+          ],
         },
       },
       select: { ruleName: true, ruleValue: true },
@@ -95,6 +108,7 @@ export async function POST(request) {
     const maxP = Math.min(roomRecord.capacity || DEFAULT_MAX, rulesMap.MAX_PARTICIPANTS?.value ?? DEFAULT_MAX);
     const maxDurationHours = rulesMap.MAX_DURATION_HOURS?.value ?? DEFAULT_MAX_HOURS;
     const maxAdvanceDays = rulesMap.MAX_ADVANCE_DAYS?.value ?? DEFAULT_MAX_ADVANCE_DAYS;
+    const dailyReleaseHour = Number(rulesMap.DAILY_RELEASE_HOUR?.value ?? DEFAULT_DAILY_RELEASE_HOUR);
 
     const totalParticipants = cleanedEmails.length + 1;
     if (totalParticipants < minP || totalParticipants > maxP) {
@@ -106,7 +120,7 @@ export async function POST(request) {
 
     const dateObj = new Date(reservationDate + "T00:00:00Z");
 
-    const { dateStr: todayTrStr } = getIstanbulNow();
+    const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
     const todayUtcObj = new Date(todayTrStr + "T00:00:00Z");
     const diffDays = Math.round((dateObj.getTime() - todayUtcObj.getTime()) / (24 * 60 * 60 * 1000));
 
@@ -119,6 +133,14 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+    if (diffDays === maxAdvanceDays && maxAdvanceDays > 0 && curH < dailyReleaseHour) {
+      return NextResponse.json(
+        {
+          error: `Yeni gün rezervasyon kotaları sabah saat ${String(dailyReleaseHour).padStart(2, "0")}:00 itibarıyla açılmaktadır.`,
+        },
+        { status: 400 }
+      );
+    }
 
     const startObj = new Date(`1970-01-01T${startTime}:00Z`);
     const endObj =
@@ -127,9 +149,23 @@ export async function POST(request) {
         : new Date(`1970-01-01T${endTime}:00Z`);
 
     const startHourNum = startObj.getUTCHours();
+    const startMinNum = startObj.getUTCMinutes();
     const endHourNum = endTime === "24:00" ? 24 : endObj.getUTCHours();
+    const endMinNum = endTime === "24:00" ? 0 : endObj.getUTCMinutes();
 
-    const durationHours = endHourNum - startHourNum;
+    const startTotalMins = startHourNum * 60 + startMinNum;
+    const endTotalMins = endHourNum * 60 + endMinNum;
+    const nowTotalMins = curH * 60 + curM;
+
+    // Bugün için seçilen saat dilimi tamamen geçmişse engelle (Walk-In için devam eden saat dilimine izin verilir)
+    if (diffDays === 0 && endTotalMins <= nowTotalMins) {
+      return NextResponse.json(
+        { error: "Seçilen saat dilimi sona ermiştir. Geçmiş bir saate rezervasyon yapılamaz." },
+        { status: 400 }
+      );
+    }
+
+    const durationHours = (endTotalMins - startTotalMins) / 60;
     if (durationHours <= 0 || durationHours > maxDurationHours) {
       return NextResponse.json(
         { error: `Rezervasyon süresi günde en fazla ${maxDurationHours} saat olabilir (Uzatma yapılamaz).` },
@@ -214,7 +250,7 @@ export async function POST(request) {
       );
     }
 
-    if (startHourNum < 8) {
+    if (startTotalMins < 8 * 60) {
       const prevDayObj = new Date(dateObj.getTime() - 24 * 60 * 60 * 1000);
       const nightThreshold = new Date("1970-01-01T21:00:00Z");
 
@@ -242,7 +278,7 @@ export async function POST(request) {
       }
     }
 
-    if (endHourNum > 21) {
+    if (endTotalMins > 21 * 60) {
       const nextDayObj = new Date(dateObj.getTime() + 24 * 60 * 60 * 1000);
       const morningThreshold = new Date("1970-01-01T08:00:00Z");
 
@@ -268,6 +304,20 @@ export async function POST(request) {
           { status: 400 }
         );
       }
+    }
+
+    // Aynı anda aynı odaya gelen rezervasyon isteklerinde yarış durumunu (Double Booking) önleyen Redis kilidi
+    lockKey = `lock:room_booking:${roomId}:${reservationDate}`;
+    try {
+      const acquired = await redis.set(lockKey, creator.id, "NX", "EX", 5);
+      if (!acquired) {
+        return NextResponse.json(
+          { error: "Bu oda için şu an başka bir işlem yapılıyor. Lütfen birkaç saniye sonra tekrar deneyiniz." },
+          { status: 409 }
+        );
+      }
+    } catch {
+      // Redis kapalıysa DB kontrolü ile devam et
     }
 
     const overlapping = await prisma.reservation.findFirst({
@@ -344,10 +394,19 @@ export async function POST(request) {
       },
     });
 
+    // Davet edilen öğrencilere bildirim ve kurumsal davet e-postasını arka planda gönder
+    sendReservationInvitationEmails(reservation.id).catch((err) =>
+      console.error("Invitation email trigger error:", err)
+    );
+
     return NextResponse.json(reservation, { status: 201 });
   } catch (error) {
     console.error("Reservation create error:", error);
     return NextResponse.json({ error: "Sunucu hatası" }, { status: 500 });
+  } finally {
+    if (lockKey) {
+      redis.del(lockKey).catch(() => {});
+    }
   }
 }
 
@@ -452,7 +511,7 @@ export async function PATCH(request) {
     }
 
     let newEndObj = reservation.endTime;
-    if (curH >= origStartH && curH < origEndH) {
+    if (nowTotalMins >= startTotalMins && nowTotalMins < endTotalMins) {
       newEndObj = new Date(Date.UTC(1970, 0, 1, curH, curM, 0));
     }
 

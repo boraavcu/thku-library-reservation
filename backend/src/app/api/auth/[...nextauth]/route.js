@@ -4,6 +4,7 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/db";
 
 const STUDENT_EMAIL_REGEX = /^s(\d+)@stu\.thk\.edu\.tr$/i;
+const ALLOWED_DOMAINS = ["@stu.thk.edu.tr", "@thk.edu.tr"];
 
 function extractStudentNumber(email) {
   const match = email?.match(STUDENT_EMAIL_REGEX);
@@ -111,26 +112,29 @@ export const authOptions = {
         const targetEmail = credentials?.email?.trim().toLowerCase();
         const selectedDemo = DEMO_USERS[targetEmail] || DEMO_USERS["s250444902@stu.thk.edu.tr"];
 
-        for (const demo of Object.values(DEMO_USERS)) {
-          await prisma.user.upsert({
-            where: { email: demo.email },
-            update: {
-              fullName: demo.fullName,
-              department: demo.department,
-              isActive: true,
-            },
-            create: {
-              email: demo.email,
-              fullName: demo.fullName,
-              studentNumber: demo.studentNumber,
-              department: demo.department,
-              role: demo.role,
-              acceptedAgreementVersion: "v1.0",
-              isActive: true,
-              lastLoginAt: new Date(),
-            },
-          });
-        }
+        // Tüm demo kullanıcılarını paralel olarak hızlıca senkronize et (mevcut rolleri ezmeden)
+        await Promise.all(
+          Object.values(DEMO_USERS).map((demo) =>
+            prisma.user.upsert({
+              where: { email: demo.email },
+              update: {
+                fullName: demo.fullName,
+                department: demo.department,
+                isActive: true,
+              },
+              create: {
+                email: demo.email,
+                fullName: demo.fullName,
+                studentNumber: demo.studentNumber,
+                department: demo.department,
+                role: demo.role,
+                acceptedAgreementVersion: "v1.0",
+                isActive: true,
+                lastLoginAt: new Date(),
+              },
+            })
+          )
+        );
 
         const dbUser = await prisma.user.findUnique({
           where: { email: selectedDemo.email },
@@ -158,11 +162,21 @@ export const authOptions = {
         return true;
       }
 
+      const normalizedEmail = user.email.trim().toLowerCase();
+      const isAllowedDomain = ALLOWED_DOMAINS.some((domain) =>
+        normalizedEmail.endsWith(domain)
+      );
+
+      if (!isAllowedDomain) {
+        console.warn(`⛔ Yetkisiz domain giriş denemesi engellendi: ${normalizedEmail}`);
+        return false;
+      }
+
       try {
-        const studentNumber = extractStudentNumber(user.email);
+        const studentNumber = extractStudentNumber(normalizedEmail);
 
         await prisma.user.upsert({
-          where: { email: user.email },
+          where: { email: normalizedEmail },
           update: {
             lastLoginAt: new Date(),
             avatarUrl: user.image || null,
@@ -170,7 +184,7 @@ export const authOptions = {
             ...(studentNumber && { studentNumber }),
           },
           create: {
-            email: user.email,
+            email: normalizedEmail,
             fullName: user.name || "İsimsiz Kullanıcı",
             avatarUrl: user.image || null,
             studentNumber,
@@ -188,7 +202,7 @@ export const authOptions = {
     },
 
     async jwt({ token, user, trigger, session }) {
-      const lookupEmail = user?.email || token?.email;
+      const lookupEmail = (user?.email || token?.email)?.trim()?.toLowerCase();
 
       if (lookupEmail) {
         let dbUser = await prisma.user.findUnique({
@@ -198,6 +212,7 @@ export const authOptions = {
             fullName: true,
             role: true,
             studentNumber: true,
+            department: true,
             avatarUrl: true,
             acceptedAgreementVersion: true,
             penaltyPoints: true,
@@ -217,6 +232,7 @@ export const authOptions = {
               fullName: true,
               role: true,
               studentNumber: true,
+              department: true,
               avatarUrl: true,
               acceptedAgreementVersion: true,
               penaltyPoints: true,
@@ -244,6 +260,7 @@ export const authOptions = {
           token.name = dbUser.fullName;
           token.role = dbUser.role;
           token.studentNumber = dbUser.studentNumber;
+          token.department = dbUser.department;
           token.avatarUrl = dbUser.avatarUrl;
           token.acceptedAgreementVersion = dbUser.acceptedAgreementVersion;
           token.penaltyPoints = dbUser.penaltyPoints;
@@ -270,6 +287,7 @@ export const authOptions = {
         session.user.name = token.name;
         session.user.role = token.role;
         session.user.studentNumber = token.studentNumber;
+        session.user.department = token.department || null;
         session.user.image = token.avatarUrl;
         session.user.acceptedAgreementVersion = token.acceptedAgreementVersion;
         session.user.penaltyPoints = token.penaltyPoints ?? 0;
