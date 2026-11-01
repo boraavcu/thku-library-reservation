@@ -1,8 +1,4 @@
-&lt;div align=&quot;center&quot;&gt;
-
-#  THKÜ 7/24 Kütüphane Grup Çalışma Odaları Rezervasyon ve Kiosk Yoklama Sistemi
-
-**Türk Hava Kurumu Üniversitesi (THKÜ) Kütüphane ve Dokümantasyon Daire Başkanlığı & Bilgi İşlem Müdürlüğü** için geliştirilmiş; **Microsoft Entra ID (Azure AD) SSO**, **4 Katmanlı Fiziksel Kiosk Kapı QR Güvenliği**, **Adil No-Show Ceza Motoru** ve **Canlı Yoğunluk Analitiği** barındıran tam otonom Full-Stack Rezervasyon Platformu.
+# 🏛️ THKÜ 7/24 Kütüphane Grup Çalışma Odaları Rezervasyon ve Kiosk Yoklama Sistemi
 
 [](https://nextjs.org/)
 [](https://react.dev/)
@@ -12,9 +8,13 @@
 [](https://next-auth.js.org/)
 [](#)
 
-[🇹🇷 Kurumsal Sistem Mimarisi (TR)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md) • [🇬🇧 System Architecture (EN)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md) • [📘 Backend Kod Dokümanları (29 Modül)](https://www.google.com/search?q=./backend/docs/README.md) • [📗 Frontend Kod Dokümanları (21 Modül)](https://www.google.com/search?q=./frontend/docs/README.md)
+**Türk Hava Kurumu Üniversitesi (THKÜ) Kütüphane ve Dokümantasyon Daire Başkanlığı & Bilgi İşlem Müdürlüğü** için geliştirilmiş; **Microsoft Entra ID (Azure AD) SSO**, **4 Katmanlı Fiziksel Kiosk Kapı QR Güvenliği**, **Adil No-Show Ceza Motoru** ve **Canlı Yoğunluk Analitiği** barındıran tam otonom Full-Stack Rezervasyon Platformu.
 
-&lt;/div&gt;
+> 📌 **Hızlı Dokümantasyon Bağlantıları:**
+> - [🇹🇷 Kurumsal Sistem Mimarisi (TR)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md)
+> - [🇬🇧 System Architecture (EN)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md)
+> - [📘 Backend Kod Dokümanları (29 Modül)](https://www.google.com/search?q=./backend/docs/README.md)
+> - [📗 Frontend Kod Dokümanları (21 Modül)](https://www.google.com/search?q=./frontend/docs/README.md)
 
 ---
 
@@ -222,6 +222,4 @@ Projedeki her bir kaynak kod dosyasının iş mantığı, güvenlik kontrolleri 
 
 ---
 
-&lt;div align=&quot;center&quot;&gt;
-  &lt;sub&gt;© 2026 Türk Hava Kurumu Üniversitesi — Kütüphane ve Dokümantasyon Daire Başkanlığı &amp; Bilgi İşlem Müdürlüğü.&lt;br/&gt;Geliştirici: &lt;b&gt;Bora Avcu&lt;/b&gt;&lt;/sub&gt;
-&lt;/div&gt;
+© 2026 **Türk Hava Kurumu Üniversitesi** — Kütüphane ve Dokümantasyon Daire Başkanlığı & Bilgi İşlem Müdürlüğü | Geliştirici: **Bora Avcu**
