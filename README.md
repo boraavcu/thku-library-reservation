@@ -11,10 +11,10 @@
 **Türk Hava Kurumu Üniversitesi (THKÜ) Kütüphane ve Dokümantasyon Daire Başkanlığı & Bilgi İşlem Müdürlüğü** için geliştirilmiş; **Microsoft Entra ID (Azure AD) SSO**, **4 Katmanlı Fiziksel Kiosk Kapı QR Güvenliği**, **Adil No-Show Ceza Motoru** ve **Canlı Yoğunluk Analitiği** barındıran tam otonom Full-Stack Rezervasyon Platformu.
 
 >  **Hızlı Dokümantasyon Bağlantıları:**
-> - [🇹🇷 Kurumsal Sistem Mimarisi (TR)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md)
-> - [🇬🇧 System Architecture (EN)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md)
-> - [📘 Backend Kod Dokümanları (29 Modül)](https://www.google.com/search?q=./backend/docs/README.md)
-> - [📗 Frontend Kod Dokümanları (21 Modül)](https://www.google.com/search?q=./frontend/docs/README.md)
+> - [🇹🇷 Kurumsal Sistem Mimarisi (TR)](./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md)
+> - [🇬🇧 System Architecture (EN)](./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md)
+> - [📘 Backend Kod Dokümanları (29 Modül)](./backend/docs/README.md)
+> - [📗 Frontend Kod Dokümanları (21 Modül)](/frontend/docs/README.md)
 
 ---
 
@@ -214,11 +214,11 @@ Giriş ekranındaki **"Demo Hızlı Giriş (Güvenli Mail Modu)"** panelinden te
 Projedeki her bir kaynak kod dosyasının iş mantığı, güvenlik kontrolleri ve bağımlılıkları `# Context:` standardında ayrı ayrı belgelendirilmiştir:
 
 - **Genel Mimari Rehberler:**
-  - [🇹🇷 Kurumsal Sistem Mimarisi ve Mühendislik Dokümantasyonu (TR)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md)
-  - [🇬🇧 Enterprise System Architecture \& Engineering Documentation (EN)](https://www.google.com/search?q=./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md)
+  - [🇹🇷 Kurumsal Sistem Mimarisi ve Mühendislik Dokümantasyonu (TR)](./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md)
+  - [🇬🇧 Enterprise System Architecture \& Engineering Documentation (EN)](./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md)
 - **Bileşen Düzeyinde Kod Dokümanları:**
-  - [📘 Backend Teknik Dokümantasyon Rehberi (backend/docs/ — 29 Dosya)](https://www.google.com/search?q=./backend/docs/README.md)
-  - [📗 Frontend Teknik Dokümantasyon Rehberi (frontend/docs/ — 21 Dosya)](https://www.google.com/search?q=./frontend/docs/README.md)
+  - [📘 Backend Teknik Dokümantasyon Rehberi (backend/docs/ — 29 Dosya)](./backend/docs/README.md)
+  - [📗 Frontend Teknik Dokümantasyon Rehberi (frontend/docs/ — 21 Dosya)](./frontend/docs/README.md)
 
 ---
 
