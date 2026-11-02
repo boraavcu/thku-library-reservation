@@ -1,6 +1,6 @@
 import prisma from "@/lib/db";
 import nodemailer from "nodemailer";
-import { fmtTimeUTC, fmtDateUTC } from "@/lib/timeUtils";
+import { fmtTimeUTC, fmtDateUTC, escapeHtml } from "@/lib/timeUtils";
 
 const THKU_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 export const ALLOWED_DIRECTOR_EMAIL = process.env.DIRECTOR_EMAIL || "boraa-35@hotmail.com";
@@ -21,7 +21,9 @@ function createFreshTransporter() {
     port: smtpPort,
     secure: smtpPort === 465,
     auth: { user: smtpUser, pass: smtpPass },
-    tls: { rejectUnauthorized: false },
+    tls: {
+      rejectUnauthorized: process.env.SMTP_ALLOW_SELF_SIGNED === "true" ? false : true,
+    },
   });
 }
 
@@ -44,10 +46,10 @@ export function buildCorporateEmailHtml({
       (d) => `
       <tr>
         <td style="padding: 10px 14px; border-bottom: 1px solid #E2E8F0; color: #64748B; font-size: 13px; font-weight: 600; width: 38%;">
-          ${d.label}
+          ${escapeHtml(d.label)}
         </td>
         <td style="padding: 10px 14px; border-bottom: 1px solid #E2E8F0; color: #0F172A; font-size: 14px; font-weight: 700;">
-          ${d.value}
+          ${escapeHtml(d.value)}
         </td>
       </tr>`
     )
@@ -58,7 +60,7 @@ export function buildCorporateEmailHtml({
       ? `
       <div style="margin-top: 22px;">
         <div style="font-size: 13px; font-weight: 700; color: #0F172A; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 10px;">
-          ${participantsTitle || "Katılımcı Listesi"}
+          ${escapeHtml(participantsTitle || "Katılımcı Listesi")}
         </div>
         <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 8px; padding: 12px 16px;">
           ${participantsList
@@ -80,10 +82,10 @@ export function buildCorporateEmailHtml({
       ? `
       <div style="margin-top: 22px; background-color: #FFFBEB; border-left: 4px solid #F59E0B; border-radius: 6px; padding: 14px 16px;">
         <div style="font-size: 13px; font-weight: 700; color: #92400E; margin-bottom: 6px;">
-          ${rulesTitle || "Önemli Hatırlatmalar"}
+          ${escapeHtml(rulesTitle || "Önemli Hatırlatmalar")}
         </div>
         <ul style="margin: 0; padding-left: 18px; color: #78350F; font-size: 13px; line-height: 1.6;">
-          ${rulesList.map((r) => `<li style="margin-bottom: 4px;">${r}</li>`).join("")}
+          ${rulesList.map((r) => `<li style="margin-bottom: 4px;">${escapeHtml(r)}</li>`).join("")}
         </ul>
       </div>`
       : "";
@@ -118,14 +120,14 @@ export function buildCorporateEmailHtml({
             <td style="padding: 28px 30px;">
               <div style="margin-bottom: 14px;">
                 <span style="display: inline-block; background-color: ${badgeBg}; color: ${badgeColor}; font-size: 11px; font-weight: 800; padding: 5px 12px; border-radius: 999px; letter-spacing: 0.05em; text-transform: uppercase;">
-                  ${badgeText}
+                  ${escapeHtml(badgeText)}
                 </span>
               </div>
               <h2 style="margin: 0 0 14px 0; color: #0F172A; font-size: 20px; font-weight: 800; line-height: 1.3;">
-                ${title}
+                ${escapeHtml(title)}
               </h2>
               <p style="margin: 0 0 12px 0; color: #1E293B; font-size: 14px; font-weight: 600;">
-                ${greeting}
+                ${escapeHtml(greeting)}
               </p>
               <p style="margin: 0 0 20px 0; color: #475569; font-size: 14px; line-height: 1.6;">
                 ${leadText}
@@ -145,7 +147,7 @@ export function buildCorporateEmailHtml({
           <tr>
             <td style="background-color: #F8FAFC; border-top: 1px solid #E2E8F0; padding: 18px 30px; text-align: center;">
               <div style="color: #64748B; font-size: 12px; line-height: 1.5;">
-                ${footerNote}
+                ${escapeHtml(footerNote)}
               </div>
               <div style="color: #94A3B8; font-size: 11px; margin-top: 6px; font-weight: 600;">
                 © ${new Date().getFullYear()} Türk Hava Kurumu Üniversitesi • Türkkuşu Kampüsü, Etimesgut / Ankara
@@ -256,7 +258,7 @@ export async function sendReservationInvitationEmails(reservationId) {
         badgeBg: "#FEF3C7",
         title: `${roomLabel} Çalışma Odası Grup Daveti`,
         greeting: `Sayın ${invitee.fullName},`,
-        leadText: `<strong>${res.user.fullName}</strong> (${res.user.email}) sizi grup çalışma odası rezervasyonuna davet etti. Odanın kesinleşmesi için <strong>30 dakika içinde</strong> öğrenci portalına giriş yaparak daveti onaylamanız gerekmektedir.`,
+        leadText: `<strong>${escapeHtml(res.user.fullName)}</strong> (${escapeHtml(res.user.email)}) sizi grup çalışma odası rezervasyonuna davet etti. Odanın kesinleşmesi için <strong>30 dakika içinde</strong> öğrenci portalına giriş yaparak daveti onaylamanız gerekmektedir.`,
         details: [
           { label: "Çalışma Odası", value: roomLabel },
           { label: "Tarih", value: dateStr },
@@ -321,7 +323,7 @@ export async function handleParticipantAcceptedEmails({
     ];
 
     const formattedParticipants = allGroupPeople.map(
-      (m) => `<strong>${m.fullName}</strong> (${m.email}) — <span style="color:#0284C7;">${m.statusLabel}</span>`
+      (m) => `<strong>${escapeHtml(m.fullName)}</strong> (${escapeHtml(m.email)}) — <span style="color:#0284C7;">${escapeHtml(m.statusLabel)}</span>`
     );
 
     if (isInitialConfirmation) {
@@ -374,7 +376,7 @@ export async function handleParticipantAcceptedEmails({
           badgeBg: "#DCFCE7",
           title: "Çalışma Odası Rezervasyonunuz Onaylandı",
           greeting: `Sayın ${member.fullName},`,
-          leadText: `${roomLabel} çalışma odası için oluşturulan grup rezervasyonunuz yeterli katılımcı onayına ulaşarak kesinleşmiştir.`,
+          leadText: `${escapeHtml(roomLabel)} çalışma odası için oluşturulan grup rezervasyonunuz yeterli katılımcı onayına ulaşarak kesinleşmiştir.`,
           details: [
             { label: "Çalışma Odası", value: roomLabel },
             { label: "Tarih", value: dateStr },
@@ -420,7 +422,7 @@ export async function handleParticipantAcceptedEmails({
         badgeBg: "#DBEAFE",
         title: "Çalışma Grubu Katılımınız Kaydedildi",
         greeting: `Sayın ${acceptingParticipant.fullName},`,
-        leadText: `${roomLabel} çalışma odasındaki onaylı grup randevusuna katılımınız başarıyla kaydedilmiştir.`,
+        leadText: `${escapeHtml(roomLabel)} çalışma odasındaki onaylı grup randevusuna katılımınız başarıyla kaydedilmiştir.`,
         details: [
           { label: "Çalışma Odası", value: roomLabel },
           { label: "Tarih", value: dateStr },
@@ -472,7 +474,7 @@ export async function sendReservationCancelledEmails({
     const roomLabel = `${res.room.roomNumber} - ${res.room.name}`;
 
     const allMembers = [res.user, ...res.participants.map((p) => p.user)];
-    const formattedParticipants = allMembers.map((m) => `<strong>${m.fullName}</strong> (${m.email})`);
+    const formattedParticipants = allMembers.map((m) => `<strong>${escapeHtml(m.fullName)}</strong> (${escapeHtml(m.email)})`);
 
     if (wasConfirmed) {
       const directorCancelHtml = buildCorporateEmailHtml({
@@ -565,7 +567,7 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds
 
     const formattedCheckInList = allMembers.map((m) => {
       const hasVerified = checkedUserIds.includes(m.id);
-      return `<strong>${m.fullName}</strong> (${m.email}) — <span style="color:${
+      return `<strong>${escapeHtml(m.fullName)}</strong> (${escapeHtml(m.email)}) — <span style="color:${
         hasVerified ? "#15803D" : "#D97706"
       }; font-weight:700;">${hasVerified ? "Kapı QR Onayladı ✓" : "Bekleniyor..."}</span>`;
     });
@@ -576,7 +578,7 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds
       badgeBg: "#DCFCE7",
       title: `${roomLabel} Odası Kullanıma Açıldı`,
       greeting: "Sayın Kütüphane Müdürü,",
-      leadText: `${roomLabel} çalışma odasındaki randevu için Kapı QR kodu en az 2 grup üyesi tarafından onaylanmış ve oda kullanımı resmen başlamıştır.`,
+      leadText: `${escapeHtml(roomLabel)} çalışma odasındaki randevu için Kapı QR kodu en az 2 grup üyesi tarafından onaylanmış ve oda kullanımı resmen başlamıştır.`,
       details: [
         { label: "Çalışma Odası", value: roomLabel },
         { label: "Tarih & Saat", value: `${dateStr} | ${timeStr}` },
@@ -630,8 +632,8 @@ export async function sendNoShowWarningEmail({
         : "Rezervasyona Gelmeme (No-Show) Uyarısı",
       greeting: `Sayın ${user.fullName},`,
       leadText: isBanned
-        ? `${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir. Dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız rezervasyonlara kapatılmıştır.`
-        : `${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir.`,
+        ? `${escapeHtml(dateStr)} tarihli ${escapeHtml(roomLabel)} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir. Dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız rezervasyonlara kapatılmıştır.`
+        : `${escapeHtml(dateStr)} tarihli ${escapeHtml(roomLabel)} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir.`,
       details: [
         { label: "İlgili Oda", value: roomLabel },
         { label: "Rezervasyon Tarihi", value: dateStr },

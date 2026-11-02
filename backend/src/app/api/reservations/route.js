@@ -9,29 +9,14 @@ import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import redis from "@/lib/redis";
 import { checkRulesAcceptance } from "@/middleware/checkRulesAcceptance";
+import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
+import {
+  getActiveReservationRules,
+  validateDailyQuotaForUsers,
+  validateNightToMorningRuleForUsers,
+} from "@/lib/reservationPolicy";
 
-const DEFAULT_MIN = 2;
-const DEFAULT_MAX = 8;
-const DEFAULT_MAX_HOURS = 3;
-const DEFAULT_MAX_ADVANCE_DAYS = 1;
-const DEFAULT_DAILY_RELEASE_HOUR = 8;
-const DEFAULT_CANCEL_LOCK_MINUTES = 60;
 const EXCLUDED_STATUSES = ["CANCELLED", "NO_SHOW"];
-
-function getIstanbulNow() {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
-  const timeParts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Istanbul",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-
-  const hour = Number(timeParts.find((p) => p.type === "hour").value);
-  const minute = Number(timeParts.find((p) => p.type === "minute").value);
-  return { dateStr, hour, minute };
-}
 
 export async function POST(request) {
   const rulesCheck = await checkRulesAcceptance(request);
@@ -64,9 +49,15 @@ export async function POST(request) {
     }
 
     if (creator.isBanned) {
-      const banDateStr = creator.banUntil ? new Date(creator.banUntil).toLocaleDateString("tr-TR") : "Kalıcı (Süresiz)";
+      const banDateStr = creator.banUntil
+        ? new Date(creator.banUntil).toLocaleDateString("tr-TR")
+        : "Kalıcı (Süresiz)";
       return NextResponse.json(
-        { error: `Hesabınız (${banDateStr} tarihine kadar) askıya alınmıştır. Sebep: ${creator.banReason || "Kural ihlali"}` },
+        {
+          error: `Hesabınız (${banDateStr} tarihine kadar) askıya alınmıştır. Sebep: ${
+            creator.banReason || "Kural ihlali"
+          }`,
+        },
         { status: 403 }
       );
     }
@@ -88,40 +79,26 @@ export async function POST(request) {
       ),
     ];
 
-    const rulesRows = await prisma.reservationRule.findMany({
-      where: {
-        isActive: true,
-        ruleName: {
-          in: [
-            "MIN_PARTICIPANTS",
-            "MAX_PARTICIPANTS",
-            "MAX_DURATION_HOURS",
-            "MAX_ADVANCE_DAYS",
-            "DAILY_RELEASE_HOUR",
-          ],
-        },
-      },
-      select: { ruleName: true, ruleValue: true },
-    });
-    const rulesMap = Object.fromEntries(rulesRows.map((r) => [r.ruleName, r.ruleValue]));
-    const minP = Math.max(2, rulesMap.MIN_PARTICIPANTS?.value ?? DEFAULT_MIN);
-    const maxP = Math.min(roomRecord.capacity || DEFAULT_MAX, rulesMap.MAX_PARTICIPANTS?.value ?? DEFAULT_MAX);
-    const maxDurationHours = rulesMap.MAX_DURATION_HOURS?.value ?? DEFAULT_MAX_HOURS;
-    const maxAdvanceDays = rulesMap.MAX_ADVANCE_DAYS?.value ?? DEFAULT_MAX_ADVANCE_DAYS;
-    const dailyReleaseHour = Number(rulesMap.DAILY_RELEASE_HOUR?.value ?? DEFAULT_DAILY_RELEASE_HOUR);
+    const rules = await getActiveReservationRules();
+    const minP = rules.minParticipants;
+    const maxP = Math.min(roomRecord.capacity || rules.maxParticipants, rules.maxParticipants);
+    const maxDurationHours = rules.maxDurationHours;
+    const maxAdvanceDays = rules.maxAdvanceDays;
+    const dailyReleaseHour = rules.dailyReleaseHour;
 
     const totalParticipants = cleanedEmails.length + 1;
     if (totalParticipants < minP || totalParticipants > maxP) {
       return NextResponse.json(
-        { error: `Toplam katılımcı sayısı en az ${minP}, en fazla ${maxP} kişi olmalıdır. Şu an: ${totalParticipants}` },
+        {
+          error: `Toplam katılımcı sayısı en az ${minP}, en fazla ${maxP} kişi olmalıdır. Şu an: ${totalParticipants}`,
+        },
         { status: 400 }
       );
     }
 
     const dateObj = new Date(reservationDate + "T00:00:00Z");
 
-    const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
-    const todayUtcObj = new Date(todayTrStr + "T00:00:00Z");
+    const { todayDate: todayUtcObj, hour: curH, totalMins: nowTotalMins } = getIstanbulTimeDetails();
     const diffDays = Math.round((dateObj.getTime() - todayUtcObj.getTime()) / (24 * 60 * 60 * 1000));
 
     if (diffDays < 0) {
@@ -148,14 +125,10 @@ export async function POST(request) {
         ? new Date("1970-01-01T23:59:59Z")
         : new Date(`1970-01-01T${endTime}:00Z`);
 
-    const startHourNum = startObj.getUTCHours();
-    const startMinNum = startObj.getUTCMinutes();
-    const endHourNum = endTime === "24:00" ? 24 : endObj.getUTCHours();
-    const endMinNum = endTime === "24:00" ? 0 : endObj.getUTCMinutes();
-
-    const startTotalMins = startHourNum * 60 + startMinNum;
-    const endTotalMins = endHourNum * 60 + endMinNum;
-    const nowTotalMins = curH * 60 + curM;
+    const { startTotalMins, endTotalMins } = parseReservationMinutesUTC({
+      startTime: startObj,
+      endTime: endObj,
+    });
 
     // Bugün için seçilen saat dilimi tamamen geçmişse engelle (Walk-In için devam eden saat dilimine izin verilir)
     if (diffDays === 0 && endTotalMins <= nowTotalMins) {
@@ -193,7 +166,9 @@ export async function POST(request) {
       const bannedParticipant = foundUsers.find((u) => u.isBanned);
       if (bannedParticipant) {
         return NextResponse.json(
-          { error: `Davet ettiğiniz ${bannedParticipant.email} kullanıcısının rezervasyon yasağı (ban) bulunmaktadır.` },
+          {
+            error: `Davet ettiğiniz ${bannedParticipant.email} kullanıcısının rezervasyon yasağı (ban) bulunmaktadır.`,
+          },
           { status: 400 }
         );
       }
@@ -203,107 +178,23 @@ export async function POST(request) {
 
     const allGroupUserIds = [creator.id, ...participantUsers.map((u) => u.id)];
 
-    const existingGroupBookingToday = await prisma.reservation.findFirst({
-      where: {
-        reservationDate: dateObj,
-        status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-        OR: [
-          { userId: { in: allGroupUserIds } },
-          {
-            participants: {
-              some: {
-                userId: { in: allGroupUserIds },
-                status: "ACCEPTED",
-              },
-            },
-          },
-        ],
-      },
-      include: {
-        user: { select: { email: true, fullName: true } },
-        participants: {
-          where: { userId: { in: allGroupUserIds }, status: "ACCEPTED" },
-          include: { user: { select: { email: true, fullName: true } } },
-        },
-      },
+    const quotaCheck = await validateDailyQuotaForUsers({
+      userIds: allGroupUserIds,
+      creatorId: creator.id,
+      reservationDateObj: dateObj,
     });
-
-    if (existingGroupBookingToday) {
-      const isCreatorBusy =
-        existingGroupBookingToday.userId === creator.id ||
-        existingGroupBookingToday.participants.some((p) => p.userId === creator.id);
-
-      if (isCreatorBusy) {
-        return NextResponse.json(
-          { error: "Aynı gün içinde (organizatör veya katılımcı olarak) yalnızca 1 adet rezervasyon hakkınız bulunmaktadır." },
-          { status: 400 }
-        );
-      }
-
-      const busyMember = allGroupUserIds.includes(existingGroupBookingToday.userId)
-        ? existingGroupBookingToday.user.email
-        : existingGroupBookingToday.participants[0]?.user?.email;
-
-      return NextResponse.json(
-        { error: `Grubunuzdaki ${busyMember} öğrencisinin seçilen tarihte zaten aktif bir rezervasyonu bulunmaktadır.` },
-        { status: 400 }
-      );
+    if (!quotaCheck.valid) {
+      return NextResponse.json({ error: quotaCheck.error }, { status: 400 });
     }
 
-    if (startTotalMins < 8 * 60) {
-      const prevDayObj = new Date(dateObj.getTime() - 24 * 60 * 60 * 1000);
-      const nightThreshold = new Date("1970-01-01T21:00:00Z");
-
-      const prevNightBooking = await prisma.reservation.findFirst({
-        where: {
-          reservationDate: prevDayObj,
-          status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-          endTime: { gt: nightThreshold },
-          OR: [
-            { userId: { in: allGroupUserIds } },
-            { participants: { some: { userId: { in: allGroupUserIds }, status: "ACCEPTED" } } },
-          ],
-        },
-        select: { id: true },
-      });
-
-      if (prevNightBooking) {
-        return NextResponse.json(
-          {
-            error:
-              "Kütüphane kuralları gereği bir önceki gece 21:00 - 24:00 saatleri arasında randevusu bulunan kullanıcılar, ertesi gün 00:00 - 08:00 saatleri arasına randevu alamazlar.",
-          },
-          { status: 400 }
-        );
-      }
-    }
-
-    if (endTotalMins > 21 * 60) {
-      const nextDayObj = new Date(dateObj.getTime() + 24 * 60 * 60 * 1000);
-      const morningThreshold = new Date("1970-01-01T08:00:00Z");
-
-      const nextMorningBooking = await prisma.reservation.findFirst({
-        where: {
-          reservationDate: nextDayObj,
-          status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-          startTime: { lt: morningThreshold },
-          OR: [
-            { userId: { in: allGroupUserIds } },
-            { participants: { some: { userId: { in: allGroupUserIds }, status: "ACCEPTED" } } },
-          ],
-        },
-        select: { id: true },
-      });
-
-      if (nextMorningBooking) {
-        return NextResponse.json(
-          {
-            error:
-              "Ertesi gün 00:00 - 08:00 saatleri arasında randevusu bulunan kullanıcılar, bir önceki gece 21:00 - 24:00 saatleri arasına randevu alamazlar.",
-          },
-          { status: 400 }
-        );
-      }
+    const nightToMorningCheck = await validateNightToMorningRuleForUsers({
+      userIds: allGroupUserIds,
+      reservationDateObj: dateObj,
+      startTotalMins,
+      endTotalMins,
+    });
+    if (!nightToMorningCheck.valid) {
+      return NextResponse.json({ error: nightToMorningCheck.error }, { status: 400 });
     }
 
     // Aynı anda aynı odaya gelen rezervasyon isteklerinde yarış durumunu (Double Booking) önleyen Redis kilidi
@@ -337,14 +228,32 @@ export async function POST(request) {
       );
     }
 
-    await prisma.reservation.deleteMany({
+    // Geçmiş CANCELLED/NO_SHOW kayıtlarını silmek yerine (analitik ve PenaltyHistory FK bütünlüğünü korumak için)
+    // startTime saniyesini kaydırarak unique_user_time kısıtlaması çakışmasını önle
+    const existingInactive = await prisma.reservation.findMany({
       where: {
         userId: creator.id,
         reservationDate: dateObj,
         startTime: startObj,
         status: { in: EXCLUDED_STATUSES },
       },
+      select: { id: true },
     });
+
+    if (existingInactive.length > 0) {
+      await Promise.all(
+        existingInactive.map((oldRes, idx) =>
+          prisma.reservation.update({
+            where: { id: oldRes.id },
+            data: {
+              startTime: new Date(
+                startObj.getTime() + (((Date.now() + idx) % 50) + 1) * 1000
+              ),
+            },
+          })
+        )
+      );
+    }
 
     const initialStatus = "PENDING";
 
@@ -487,32 +396,26 @@ export async function PATCH(request) {
       );
     }
 
-    const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
-    const resDateStr = new Date(reservation.reservationDate).toISOString().split("T")[0];
-    const origStartH = new Date(reservation.startTime).getUTCHours();
-    const origStartM = new Date(reservation.startTime).getUTCMinutes();
-    const endDt = new Date(reservation.endTime);
-    const origEndH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-    const origEndM = origEndH === 24 ? 0 : endDt.getUTCMinutes();
-
-    const nowTotalMins = curH * 60 + curM;
-    const startTotalMins = origStartH * 60 + origStartM;
-    const endTotalMins = origEndH * 60 + origEndM;
-
-    const isHappeningNow =
-      reservation.status === "CHECKED_IN" ||
-      (resDateStr === todayTrStr && nowTotalMins >= startTotalMins && nowTotalMins < endTotalMins);
-
-    if (!isStaff && !isHappeningNow) {
+    // No-Show cezasını atlatmayı önlemek için öğrenci yalnızca kapı QR Check-In yapılmış odayı erken boşaltabilir
+    if (!isStaff && reservation.status !== "CHECKED_IN") {
       return NextResponse.json(
-        { error: "Odayı erken boşaltma işlemi yalnızca randevu saatiniz başladıktan sonra (randevu sırasında) yapılabilir." },
+        {
+          error:
+            "Odayı erken boşaltma işlemi yalnızca Kiosk QR ile giriş (Check-In) yapılmış aktif rezervasyonlar için kullanılabilir.",
+        },
         { status: 400 }
       );
     }
 
+    const { totalMins: nowTotalMins } = getIstanbulTimeDetails();
+    const { startTotalMins, endTotalMins } = parseReservationMinutesUTC(reservation);
+
     let newEndObj = reservation.endTime;
-    if (nowTotalMins >= startTotalMins && nowTotalMins < endTotalMins) {
-      newEndObj = new Date(Date.UTC(1970, 0, 1, curH, curM, 0));
+    if (nowTotalMins < endTotalMins) {
+      const effectiveMins = Math.max(startTotalMins, nowTotalMins);
+      const effH = Math.floor(effectiveMins / 60);
+      const effM = effectiveMins % 60;
+      newEndObj = new Date(Date.UTC(1970, 0, 1, effH, effM, 0));
     }
 
     const updated = await prisma.reservation.update({
@@ -588,27 +491,26 @@ export async function DELETE(request) {
 
     if (!isStaff && reservation.status === "CHECKED_IN") {
       return NextResponse.json(
-        { error: "Giriş (Check-in) yapılmış rezervasyon iptal edilemez; 'Odayı Erken Boşalt' butonunu kullanabilirsiniz." },
+        {
+          error:
+            "Giriş (Check-in) yapılmış rezervasyon iptal edilemez; 'Odayı Erken Boşalt' butonunu kullanabilirsiniz.",
+        },
         { status: 400 }
       );
     }
 
     if (!isStaff) {
-      const lockRule = await prisma.reservationRule.findFirst({
-        where: { ruleName: "CANCEL_LOCK_MINUTES", isActive: true },
-        select: { ruleValue: true },
-      });
-      const cancelLockMins = Number(lockRule?.ruleValue?.value ?? DEFAULT_CANCEL_LOCK_MINUTES);
+      const rules = await getActiveReservationRules();
+      const cancelLockMins = rules.cancelLockMinutes;
 
-      const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
+      const { dateStr: todayTrStr, totalMins: nowTotalMins } = getIstanbulTimeDetails();
       const resDateStr = new Date(reservation.reservationDate).toISOString().split("T")[0];
-      const startH = new Date(reservation.startTime).getUTCHours();
-      const startM = new Date(reservation.startTime).getUTCMinutes();
+      const { startTotalMins } = parseReservationMinutesUTC(reservation);
 
       const nowEpochMins =
-        Math.floor(new Date(todayTrStr + "T00:00:00Z").getTime() / 60000) + curH * 60 + curM;
+        Math.floor(new Date(todayTrStr + "T00:00:00Z").getTime() / 60000) + nowTotalMins;
       const resStartEpochMins =
-        Math.floor(new Date(resDateStr + "T00:00:00Z").getTime() / 60000) + startH * 60 + startM;
+        Math.floor(new Date(resDateStr + "T00:00:00Z").getTime() / 60000) + startTotalMins;
 
       const minsRemaining = resStartEpochMins - nowEpochMins;
 

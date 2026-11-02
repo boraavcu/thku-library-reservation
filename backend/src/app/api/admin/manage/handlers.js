@@ -8,6 +8,10 @@ import {
   sendNoShowWarningEmail,
 } from "@/lib/emailService";
 import { applyNoShowPenaltiesForUsers } from "@/lib/penaltyService";
+import {
+  getActiveReservationRules,
+  cancelOrRemoveBannedUserReservations,
+} from "@/lib/reservationPolicy";
 
 function requireAdminOrSuper(currentRole, customMsg) {
   if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
@@ -52,11 +56,15 @@ export const ADMIN_ACTION_HANDLERS = {
     if (denied) return denied;
 
     const { roomNumber, name, capacity } = payload;
+    if (!roomNumber?.trim() || !name?.trim()) {
+      return NextResponse.json({ error: "Oda kodu ve oda adı boş bırakılamaz." }, { status: 400 });
+    }
+
     const created = await prisma.room.create({
       data: {
         roomNumber: roomNumber.trim().toUpperCase(),
         name: name.trim(),
-        capacity: Number(capacity) || 8,
+        capacity: Math.max(2, Number(capacity) || 8),
         isActive: true,
       },
     });
@@ -175,12 +183,15 @@ export const ADMIN_ACTION_HANDLERS = {
         },
       });
     } else if (op === "EARLY_FINISH") {
-      const { hour, minute, totalMins } = getIstanbulTimeDetails();
+      const { totalMins } = getIstanbulTimeDetails();
       const { startTotalMins, endTotalMins } = parseReservationMinutesUTC(target);
 
       let newEndTime = target.endTime;
-      if (totalMins >= startTotalMins && totalMins < endTotalMins) {
-        newEndTime = new Date(Date.UTC(1970, 0, 1, hour, minute, 0));
+      if (totalMins < endTotalMins) {
+        const effectiveMins = Math.max(startTotalMins, totalMins);
+        const effH = Math.floor(effectiveMins / 60);
+        const effM = effectiveMins % 60;
+        newEndTime = new Date(Date.UTC(1970, 0, 1, effH, effM, 0));
       }
 
       await prisma.reservation.update({
@@ -227,17 +238,37 @@ export const ADMIN_ACTION_HANDLERS = {
         wasConfirmed,
       }).catch((err) => console.error("Admin cancel email error:", err));
     } else if (op === "MARK_NO_SHOW") {
+      if (target.penaltyApplied) {
+        return NextResponse.json(
+          { error: "Bu rezervasyon için No-Show cezası zaten uygulanmış." },
+          { status: 400 }
+        );
+      }
+
       const checkedSetKey = `kiosk:checked_users:${reservationId}`;
-      const checkedUserIds = await redis.smembers(checkedSetKey);
+      let checkedUserIds = [];
+      try {
+        checkedUserIds = await redis.smembers(checkedSetKey);
+      } catch {
+        checkedUserIds = [];
+      }
 
       const allApprovedUsers = [target.user, ...target.participants.map((p) => p.user)];
       const absentUsers = allApprovedUsers.filter((u) => !checkedUserIds.includes(u.id));
-      const usersToPenalize = absentUsers.length > 0 ? absentUsers : allApprovedUsers;
+
+      if (absentUsers.length === 0) {
+        return NextResponse.json(
+          { error: "Tüm grup üyeleri kapı QR onayını tamamladığı için No-Show uygulanamaz." },
+          { status: 400 }
+        );
+      }
+
+      const { minParticipants } = await getActiveReservationRules();
 
       await prisma.reservation.update({
         where: { id: reservationId },
         data:
-          checkedUserIds.length < 2
+          checkedUserIds.length < minParticipants
             ? { status: "NO_SHOW", noShow: true, penaltyApplied: true }
             : { penaltyApplied: true },
       });
@@ -246,7 +277,7 @@ export const ADMIN_ACTION_HANDLERS = {
       const dateStr = fmtDateUTC(target.reservationDate);
 
       const { autoBannedEmails, penalizedCount } = await applyNoShowPenaltiesForUsers({
-        usersToPenalize,
+        usersToPenalize: absentUsers,
         reservationId,
         roomLabel,
         dateStr,
@@ -359,19 +390,10 @@ export const ADMIN_ACTION_HANDLERS = {
         },
       });
 
-      const { todayDate } = getIstanbulTimeDetails();
-
-      await prisma.reservation.updateMany({
-        where: {
-          userId: targetUserId,
-          status: { in: ["PENDING", "CONFIRMED"] },
-          reservationDate: { gte: todayDate },
-        },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: new Date(),
-          cancellationReason: `Kullanıcı idare tarafından (${durationLabel}) banlandığı için iptal edildi.`,
-        },
+      await cancelOrRemoveBannedUserReservations({
+        userId: targetUserId,
+        userEmail: bannedUser.email,
+        reasonText: `Kullanıcı (${bannedUser.email}) idare tarafından (${durationLabel}) banlandığı için`,
       });
 
       await sendNoShowWarningEmail({

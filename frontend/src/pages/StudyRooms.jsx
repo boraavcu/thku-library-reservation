@@ -4,7 +4,7 @@ import {
   Box, Typography, Card, TextField, Button, Chip, Slider,
   CircularProgress, InputAdornment
 } from '@mui/material';
-import { useTheme, alpha } from '@mui/material/styles';
+import { alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
 import { useTranslation } from 'react-i18next';
 import Navbar from '../components/Navbar';
@@ -21,9 +21,9 @@ import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
 
 /**
- * Odanın seçilen [rangeStart, rangeEnd] saat aralığında en az requiredDuration (1, 2 veya 3 saat)
- * uzunluğunda kesintisiz, dolu olmayan ve geçmişte kalmamış bir zaman dilimi olup olmadığını kontrol eder.
- */
+  * Odanın seçilen [rangeStart, rangeEnd] saat aralığında en az requiredDuration (1, 2 veya 3 saat)
+  * uzunluğunda kesintisiz, dolu olmayan ve geçmişte kalmamış bir zaman dilimi olup olmadığını kontrol eder.
+  */
 function hasContinuousAvailableSlot(room, selectedDate, todayStr, nowMinutes, timeRange, requiredDuration) {
   if (!room.isActive) return false;
 
@@ -60,7 +60,6 @@ function hasContinuousAvailableSlot(room, selectedDate, todayStr, nowMinutes, ti
 
 function StudyRooms() {
   const navigate = useNavigate();
-  const theme = useTheme();
   const { data: session, status: authStatus } = useSession();
   const { t, i18n } = useTranslation();
   const currentLang = i18n.language?.substring(0, 2) || 'tr';
@@ -367,16 +366,18 @@ function StudyRooms() {
                       <Button
                         variant="contained"
                         fullWidth
-                        disabled={!room.isActive || isBanned}
-                        endIcon={!isBanned ? <ArrowForwardIcon /> : null}
-                        onClick={() => !isBanned && navigate(`/reserve/new?roomId=${room.id}&date=${selectedDate}`)}
+                        disabled={!canBook || isBanned}
+                        endIcon={canBook && !isBanned ? <ArrowForwardIcon /> : null}
+                        onClick={() => canBook && !isBanned && navigate(`/reserve/new?roomId=${room.id}&date=${selectedDate}`)}
                         sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 2, py: 1 }}
                       >
                         {isBanned
                           ? isEn ? 'Account Suspended' : 'Hesap Askıda'
                           : !room.isActive
                             ? isEn ? 'Unavailable' : 'Kullanım Dışı'
-                            : t('srBookNow', isEn ? 'Select Room' : 'Odayı Seç')}
+                            : !canBook
+                              ? isEn ? 'Fully Booked' : 'Tüm Saatler Dolu'
+                              : t('srBookNow', isEn ? 'Select Room' : 'Odayı Seç')}
                       </Button>
                     </Card>
                   );

@@ -106,38 +106,55 @@ export const authOptions = {
         email: { label: "Email", type: "text" },
       },
       async authorize(credentials) {
-        if (process.env.ENABLE_DEMO_LOGIN === "false") {
+        const isDemoAllowed =
+          process.env.ENABLE_DEMO_LOGIN === "true" ||
+          (process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO_LOGIN !== "false");
+
+        if (!isDemoAllowed) {
           throw new Error("Demo girişi canlı ortamda devre dışı bırakılmıştır.");
         }
+
         const targetEmail = credentials?.email?.trim().toLowerCase();
-        const selectedDemo = DEMO_USERS[targetEmail] || DEMO_USERS["s250444902@stu.thk.edu.tr"];
+        const selectedDemo = targetEmail ? DEMO_USERS[targetEmail] : null;
 
-        // Tüm demo kullanıcılarını paralel olarak hızlıca senkronize et (mevcut rolleri ezmeden)
-        await Promise.all(
-          Object.values(DEMO_USERS).map((demo) =>
-            prisma.user.upsert({
-              where: { email: demo.email },
-              update: {
-                fullName: demo.fullName,
-                department: demo.department,
-                isActive: true,
-              },
-              create: {
-                email: demo.email,
-                fullName: demo.fullName,
-                studentNumber: demo.studentNumber,
-                department: demo.department,
-                role: demo.role,
-                acceptedAgreementVersion: "v1.0",
-                isActive: true,
-                lastLoginAt: new Date(),
-              },
-            })
-          )
-        );
+        if (!selectedDemo) {
+          throw new Error("Geçersiz demo kullanıcı e-postası.");
+        }
 
-        const dbUser = await prisma.user.findUnique({
+        // Eksik demo kullanıcılarını tek sorguda oluştur (grup daveti testleri için)
+        await prisma.user.createMany({
+          data: Object.values(DEMO_USERS).map((demo) => ({
+            email: demo.email,
+            fullName: demo.fullName,
+            studentNumber: demo.studentNumber,
+            department: demo.department,
+            role: demo.role,
+            acceptedAgreementVersion: "v1.0",
+            isActive: true,
+            lastLoginAt: new Date(),
+          })),
+          skipDuplicates: true,
+        });
+
+        // Yalnızca giriş yapan demo kullanıcısını güncelle ve getir
+        const dbUser = await prisma.user.upsert({
           where: { email: selectedDemo.email },
+          update: {
+            fullName: selectedDemo.fullName,
+            department: selectedDemo.department,
+            isActive: true,
+            lastLoginAt: new Date(),
+          },
+          create: {
+            email: selectedDemo.email,
+            fullName: selectedDemo.fullName,
+            studentNumber: selectedDemo.studentNumber,
+            department: selectedDemo.department,
+            role: selectedDemo.role,
+            acceptedAgreementVersion: "v1.0",
+            isActive: true,
+            lastLoginAt: new Date(),
+          },
         });
 
         return {

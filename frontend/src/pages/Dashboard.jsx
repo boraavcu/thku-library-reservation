@@ -111,6 +111,7 @@ function Dashboard() {
         severity: action === 'ACCEPT' ? 'success' : 'info',
       });
       await Promise.all([fetchInvitations(), fetchActiveReservations()]);
+      window.dispatchEvent(new Event('notificationsUpdated'));
     } catch (err) {
       setSnack({
         open: true,

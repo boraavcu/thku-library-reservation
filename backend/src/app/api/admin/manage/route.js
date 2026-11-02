@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import redis from "@/lib/redis";
-import { getIstanbulTimeDetails } from "@/lib/timeUtils";
+import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 import { ADMIN_ACTION_HANDLERS } from "./handlers";
 
@@ -27,10 +27,6 @@ export async function GET() {
     const days365Ago = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
 
     await Promise.all([
-      prisma.room.updateMany({
-        where: { roomNumber: "R103", name: "Uçantürk" },
-        data: { name: "Hürkuş" },
-      }),
       prisma.auditLog.deleteMany({ where: { createdAt: { lt: days365Ago } } }),
       prisma.adminAction.deleteMany({ where: { createdAt: { lt: days365Ago } } }),
     ]);
@@ -105,21 +101,29 @@ export async function GET() {
         : Promise.resolve(0),
     ]);
 
-    const reservations = await Promise.all(
-      rawReservations.map(async (r) => {
-        let checkedInUsers = [];
-        try {
-          checkedInUsers = await redis.smembers(`kiosk:checked_users:${r.id}`);
-        } catch {
-          checkedInUsers = [];
+    // N+1 Redis sorgusu yerine tek bir Redis Pipeline ile 250 rezervasyonun Check-In verisini çek
+    let pipelineResults = [];
+    if (rawReservations.length > 0) {
+      try {
+        const pipeline = redis.pipeline();
+        for (const r of rawReservations) {
+          pipeline.smembers(`kiosk:checked_users:${r.id}`);
         }
-        return {
-          ...r,
-          checkedInUsers,
-          checkedInCount: checkedInUsers.length,
-        };
-      })
-    );
+        pipelineResults = await pipeline.exec();
+      } catch {
+        pipelineResults = [];
+      }
+    }
+
+    const reservations = rawReservations.map((r, idx) => {
+      const tuple = pipelineResults[idx];
+      const checkedInUsers = Array.isArray(tuple?.[1]) ? tuple[1] : [];
+      return {
+        ...r,
+        checkedInUsers,
+        checkedInCount: checkedInUsers.length,
+      };
+    });
 
     const penaltyCountMap = {};
     for (const p of activeNoShowPenalties) {
@@ -164,11 +168,9 @@ export async function GET() {
     const validReservations = reservations.filter((r) => !["CANCELLED", "NO_SHOW"].includes(r.status));
 
     for (const r of validReservations) {
-      const sH = new Date(r.startTime).getUTCHours();
-      const sM = new Date(r.startTime).getUTCMinutes();
-      const endDt = new Date(r.endTime);
-      const eH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-      const durationH = Math.max(1, eH - sH);
+      const { startH: sH, endH: eH, startTotalMins: startMins, endTotalMins: endMins } =
+        parseReservationMinutesUTC(r);
+      const durationH = Math.max(1, (endMins - startMins) / 60);
 
       totalDurationHoursSum += durationH;
       const acceptedMembersCount = 1 + (r.participants || []).filter((p) => p.status === "ACCEPTED").length;
@@ -176,7 +178,7 @@ export async function GET() {
 
       if (r.room?.id && roomUsageMap[r.room.id]) {
         roomUsageMap[r.room.id].count += 1;
-        roomUsageMap[r.room.id].hoursBooked += durationH;
+        roomUsageMap[r.room.id].hoursBooked += Math.round(durationH);
       }
 
       for (let h = sH; h < eH; h++) {
@@ -197,10 +199,10 @@ export async function GET() {
 
       const rDateStr = new Date(r.reservationDate).toISOString().split("T")[0];
       if (rDateStr === todayIsoStr) {
-        const startMins = sH * 60 + sM;
-        const endMins = eH * 60;
-
-        if (r.status === "CHECKED_IN" || (nowTotalMins >= startMins && nowTotalMins < endMins)) {
+        if (
+          r.status === "CHECKED_IN" ||
+          (r.status === "CONFIRMED" && nowTotalMins >= startMins && nowTotalMins < endMins)
+        ) {
           activeNowRooms += 1;
         }
 

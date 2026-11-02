@@ -47,9 +47,9 @@ function getReservationTimingState(res) {
     endH * 60 +
     endM;
 
+  // No-Show cezasını atlatmayı önlemek için öğrenci yalnızca kapı QR Check-In yapılmış odayı erken boşaltabilir
   const isHappeningNow =
-    ['CONFIRMED', 'CHECKED_IN'].includes(res.status) &&
-    nowEpochMins >= resStartEpochMins &&
+    res.status === 'CHECKED_IN' &&
     nowEpochMins < resEndEpochMins;
 
   const hasStarted = nowEpochMins >= resStartEpochMins || res.status === 'CHECKED_IN';
@@ -74,7 +74,6 @@ export default function MyBookings() {
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
   const fetchAllData = useCallback(() => {
-    setLoading(true);
     Promise.all([
       api.get('/reservations').catch(() => ({ data: [] })),
       api.get('/invitations').catch(() => ({ data: [] })),
@@ -107,6 +106,7 @@ export default function MyBookings() {
         severity: 'info',
       });
       fetchAllData();
+      window.dispatchEvent(new Event('notificationsUpdated'));
     } catch (err) {
       setSnack({ open: true, message: err.response?.data?.error || 'İptal edilemedi.', severity: 'error' });
     }
@@ -135,6 +135,7 @@ export default function MyBookings() {
         severity: action === 'ACCEPT' ? 'success' : 'info',
       });
       fetchAllData();
+      window.dispatchEvent(new Event('notificationsUpdated'));
     } catch (err) {
       setSnack({
         open: true,
@@ -230,7 +231,7 @@ export default function MyBookings() {
                     const roomCapacity = res.room?.capacity || 8;
 
                     const { isHappeningNow, hasStarted, cancelLocked } = getReservationTimingState(res);
-                    const showOrganizerActions = tab === 0 && isOrganizer && ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(res.status);
+                    const showOrganizerActions = tab === 0 && isOrganizer && ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(res.status) && (isHappeningNow || !hasStarted);
 
                     return (
                       <Card key={res.id} sx={{ p: 2.5, flexShrink: 0, borderLeft: `4px solid ${theme.palette[statusColor].main}`, display: 'flex', flexDirection: 'column', gap: 1.5 }}>

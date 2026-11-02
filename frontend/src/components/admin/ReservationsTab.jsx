@@ -245,9 +245,12 @@ export default function ReservationsTab({ reservations = [], rooms = [], isEn, r
                           size="small"
                           variant="outlined"
                           color="warning"
+                          disabled={Boolean(r.penaltyApplied)}
                           onClick={() => runAction('RESERVATION_OP', { reservationId: r.id, op: 'MARK_NO_SHOW' }, 'Kiosk onayı vermeyenlere No-Show uyarısı (1/3) işlendi.')}
                         >
-                          {isEn ? 'Issue No-Show Warning' : 'No-Show Uyarısı Ver'}
+                          {r.penaltyApplied
+                            ? isEn ? 'No-Show Applied' : 'No-Show İşlendi'
+                            : isEn ? 'Issue No-Show Warning' : 'No-Show Uyarısı Ver'}
                         </Button>
                       )}
 

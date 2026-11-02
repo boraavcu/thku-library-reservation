@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Typography, Container, Card, TextField, Button, Chip,
@@ -30,6 +30,7 @@ import GavelIcon from '@mui/icons-material/Gavel';
 const HOUR_START = 0;
 const HOUR_END = 24;
 const SLOT_HEIGHT = 56;
+const EMAIL_FORMAT_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const PURPOSE_PRESETS_TR = [
   'Vize / Final Sınav Hazırlığı',
@@ -55,6 +56,7 @@ function ReserveForm() {
   const { t, i18n } = useTranslation();
   const currentLang = i18n.language?.substring(0, 2) || 'tr';
   const isEn = currentLang === 'en';
+  const redirectTimerRef = useRef(null);
 
   const [step, setStep] = useState(1);
   const [room, setRoom] = useState(null);
@@ -117,6 +119,12 @@ function ReserveForm() {
   const [apiError, setApiError] = useState(null);
   const [missingEmails, setMissingEmails] = useState([]);
   const [snackOpen, setSnackOpen] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (authStatus === 'loading') return;
@@ -257,24 +265,26 @@ function ReserveForm() {
     updateForm({ endTime: potentialEndHour });
   };
 
+  const maxCapacity = room?.capacity || rules.maxParticipants || 8;
+  const effectiveMax = Math.min(rules.maxParticipants || 8, maxCapacity);
+
   const pendingTypedEmail = emailInput.trim().toLowerCase();
   const hasValidTypedEmail =
-    pendingTypedEmail.includes('@') &&
+    EMAIL_FORMAT_REGEX.test(pendingTypedEmail) &&
     pendingTypedEmail !== session?.user?.email?.toLowerCase() &&
-    !formData.participants.includes(pendingTypedEmail);
+    !formData.participants.includes(pendingTypedEmail) &&
+    formData.participants.length + 1 < effectiveMax;
 
   const effectiveParticipants = hasValidTypedEmail
     ? [...formData.participants, pendingTypedEmail]
     : formData.participants;
 
   const totalPeople = effectiveParticipants.length + 1;
-  const maxCapacity = room?.capacity || rules.maxParticipants || 8;
-  const effectiveMax = Math.min(rules.maxParticipants || 8, maxCapacity);
   const isCountValid = totalPeople >= minRequiredPeople && totalPeople <= effectiveMax;
 
   const addEmail = () => {
     const email = emailInput.trim().toLowerCase();
-    if (!email || !email.includes('@')) return;
+    if (!email || !EMAIL_FORMAT_REGEX.test(email)) return;
     if (email === session?.user?.email?.toLowerCase()) return;
     if (formData.participants.includes(email)) return;
     if (formData.participants.length + 1 >= effectiveMax) return;
@@ -283,6 +293,10 @@ function ReserveForm() {
   };
 
   const removeEmail = (email) => {
+    if (email === pendingTypedEmail && !formData.participants.includes(email)) {
+      setEmailInput('');
+      return;
+    }
     updateForm({ participants: formData.participants.filter((e) => e !== email) });
   };
 
@@ -301,7 +315,7 @@ function ReserveForm() {
         participantEmails: effectiveParticipants,
       });
       setSnackOpen(true);
-      setTimeout(() => navigate('/dashboard'), 1500);
+      redirectTimerRef.current = setTimeout(() => navigate('/dashboard'), 1500);
     } catch (err) {
       const data = err.response?.data;
       if (err.response?.status === 409) setApiError(t('rfOverlap'));
@@ -365,11 +379,13 @@ function ReserveForm() {
                 <Box sx={{ p: 0.5, bgcolor: alpha('#3b82f6', 0.1), borderRadius: 1, color: 'primary.main', display: 'flex', flexShrink: 0 }}>
                   <InfoOutlinedIcon sx={{ fontSize: 16 }} />
                 </Box>
-                <Typography
-                  variant="caption"
-                  sx={{ color: 'text.secondary', lineHeight: 1.6 }}
-                  dangerouslySetInnerHTML={{ __html: t('rfReservationPolicy', { hours: maxDuration }) }}
-                />
+                <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
+                  {isEn ? (
+                    <>Reservations: Mon-Sun. Max <strong>{maxDuration} hours</strong> per booking.</>
+                  ) : (
+                    <>Rezervasyonlar: Ptesi-Pazar. Rezervasyon başına maks. <strong>{maxDuration} saat</strong>.</>
+                  )}
+                </Typography>
               </Box>
             </Box>
           </Box>
@@ -687,11 +703,13 @@ function ReserveForm() {
                   <Typography sx={{ fontSize: { xs: '1.35rem', md: '1.75rem' }, fontWeight: 700, letterSpacing: '-0.02em', mb: 1 }}>
                     {t('rfParticipantsTitle')}
                   </Typography>
-                  <Typography
-                    variant="body2"
-                    sx={{ color: 'text.secondary', lineHeight: 1.6 }}
-                    dangerouslySetInnerHTML={{ __html: t('rfParticipantsSubtitle', { room: `${room.roomNumber} - ${room.name}` }) }}
-                  />
+                  <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.6 }}>
+                    {isEn ? (
+                      <>Manage attendees for your study session in <strong>{room.roomNumber} - {room.name}</strong>.</>
+                    ) : (
+                      <><strong>{room.roomNumber} - {room.name}</strong> odasındaki çalışma oturumu için katılımcıları yönetin.</>
+                    )}
+                  </Typography>
                 </Box>
                 <Chip
                   label={t('rfStepIndicator', { current: 2, total: 2 })}
@@ -829,7 +847,7 @@ function ReserveForm() {
                   <Button
                     variant="contained"
                     onClick={addEmail}
-                    disabled={totalPeople >= effectiveMax}
+                    disabled={formData.participants.length + 1 >= effectiveMax}
                     startIcon={<PersonAddIcon sx={{ fontSize: '18px !important' }} />}
                     sx={{
                       px: 3, py: 1, borderRadius: 2, fontWeight: 500, whiteSpace: 'nowrap', flexShrink: 0,

@@ -3,21 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
-
-function getIstanbulNow() {
-  const now = new Date();
-  const dateStr = now.toLocaleDateString("en-CA", { timeZone: "Europe/Istanbul" });
-  const timeParts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/Istanbul",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-
-  const hour = Number(timeParts.find((p) => p.type === "hour").value);
-  const minute = Number(timeParts.find((p) => p.type === "minute").value);
-  return { dateStr, hour, minute };
-}
+import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
@@ -37,9 +23,8 @@ export async function GET() {
       return NextResponse.json([]);
     }
 
-    const { dateStr: todayTrStr, hour: curH, minute: curM } = getIstanbulNow();
-    const todayDateObj = new Date(`${todayTrStr}T00:00:00Z`);
-    const nowTotalMins = curH * 60 + curM;
+    const { dateStr: todayTrStr, todayDate: todayDateObj, totalMins: nowTotalMins } =
+      getIstanbulTimeDetails();
 
     const reservations = await prisma.reservation.findMany({
       where: {
@@ -74,14 +59,7 @@ export async function GET() {
       if (resDateStr > todayTrStr) return true;
       if (resDateStr < todayTrStr) return false;
 
-      const endDt = new Date(res.endTime);
-      const endH =
-        endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59
-          ? 24
-          : endDt.getUTCHours();
-      const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
-      const endTotalMins = endH * 60 + endM;
-
+      const { endTotalMins } = parseReservationMinutesUTC(res);
       return endTotalMins > nowTotalMins;
     });
 

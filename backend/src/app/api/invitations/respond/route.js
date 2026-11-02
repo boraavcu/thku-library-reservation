@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
+import {
+  getActiveReservationRules,
+  validateDailyQuotaForUsers,
+  validateNightToMorningRuleForUsers,
+} from "@/lib/reservationPolicy";
 import {
   runReservationLifecycleChecks,
   handleParticipantAcceptedEmails,
   sendReservationCancelledEmails,
 } from "@/lib/lifecycle";
 
-const DEFAULT_MIN = 2;
 const INVITATION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function POST(request) {
@@ -42,7 +47,9 @@ export async function POST(request) {
       where: { id: participantId },
       include: {
         reservation: {
-          include: { room: { select: { roomNumber: true, name: true } } },
+          include: {
+            room: { select: { roomNumber: true, name: true, capacity: true } },
+          },
         },
       },
     });
@@ -51,9 +58,20 @@ export async function POST(request) {
       return NextResponse.json({ error: "Davet bulunamadı." }, { status: 404 });
     }
 
-    if (participant.reservation.status === "CANCELLED") {
+    if (["CANCELLED", "NO_SHOW", "COMPLETED"].includes(participant.reservation.status)) {
       return NextResponse.json(
-        { error: "Bu rezervasyon (30 dakikalık onay süresi dolduğu veya iptal edildiği için) artık geçerli değil." },
+        { error: "Bu rezervasyon artık aktif veya geçerli değil." },
+        { status: 400 }
+      );
+    }
+
+    const { dateStr: todayTrStr, totalMins: nowTotalMins } = getIstanbulTimeDetails();
+    const resDateStr = new Date(participant.reservation.reservationDate).toISOString().split("T")[0];
+    const { startTotalMins, endTotalMins } = parseReservationMinutesUTC(participant.reservation);
+
+    if (resDateStr < todayTrStr || (resDateStr === todayTrStr && endTotalMins <= nowTotalMins)) {
+      return NextResponse.json(
+        { error: "Bu rezervasyonun saat dilimi sona erdiği için davete yanıt verilemez." },
         { status: 400 }
       );
     }
@@ -78,89 +96,54 @@ export async function POST(request) {
       return NextResponse.json({ error: "Bu davete zaten yanıt verilmiş." }, { status: 400 });
     }
 
-    if (action === "ACCEPT") {
-      const targetDate = participant.reservation.reservationDate;
+    const rules = await getActiveReservationRules();
+    const minP = rules.minParticipants;
+    const maxP = Math.min(
+      participant.reservation.room?.capacity || rules.maxParticipants,
+      rules.maxParticipants
+    );
 
-      const existingBookingOnDate = await prisma.reservation.findFirst({
+    if (action === "ACCEPT") {
+      const currentAcceptedCount = await prisma.reservationParticipant.count({
         where: {
-          id: { not: participant.reservationId },
-          reservationDate: targetDate,
-          status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-          OR: [
-            { userId: user.id },
-            {
-              participants: {
-                some: { userId: user.id, status: "ACCEPTED" },
-              },
-            },
-          ],
+          reservationId: participant.reservationId,
+          status: "ACCEPTED",
         },
-        select: { id: true },
       });
 
-      if (existingBookingOnDate) {
+      if (1 + currentAcceptedCount >= maxP) {
         return NextResponse.json(
-          { error: "Bu tarihte zaten aktif bir rezervasyonunuz bulunduğu için ikinci bir gruba katılamazsınız (Günlük 1 Rezervasyon Kuralı)." },
+          { error: `Oda maksimum kapasitesine (${maxP} kişi) ulaştığı için daveti kabul edemezsiniz.` },
           { status: 400 }
         );
       }
 
-      const startDt = new Date(participant.reservation.startTime);
-      const endDt = new Date(participant.reservation.endTime);
-      const startTotalMins = startDt.getUTCHours() * 60 + startDt.getUTCMinutes();
-      const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-      const endTotalMins = endH * 60 + (endH === 24 ? 0 : endDt.getUTCMinutes());
+      const targetDate = participant.reservation.reservationDate;
 
-      if (startTotalMins < 8 * 60) {
-        const prevDayObj = new Date(new Date(targetDate).getTime() - 24 * 60 * 60 * 1000);
-        const prevNight = await prisma.reservation.findFirst({
-          where: {
-            reservationDate: prevDayObj,
-            status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-            endTime: { gt: new Date("1970-01-01T21:00:00Z") },
-            OR: [
-              { userId: user.id },
-              { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
-            ],
+      const quotaCheck = await validateDailyQuotaForUsers({
+        userIds: [user.id],
+        creatorId: user.id,
+        reservationDateObj: targetDate,
+        excludeReservationId: participant.reservationId,
+      });
+      if (!quotaCheck.valid) {
+        return NextResponse.json(
+          {
+            error:
+              "Bu tarihte zaten aktif bir rezervasyonunuz bulunduğu için ikinci bir gruba katılamazsınız (Günlük 1 Rezervasyon Kuralı).",
           },
-          select: { id: true },
-        });
-
-        if (prevNight) {
-          return NextResponse.json(
-            {
-              error:
-                "Bir önceki gece 21:00 - 24:00 saatleri arasında randevunuz bulunduğu için ertesi gün 00:00 - 08:00 arasındaki bir gruba katılamazsınız.",
-            },
-            { status: 400 }
-          );
-        }
+          { status: 400 }
+        );
       }
 
-      if (endTotalMins > 21 * 60) {
-        const nextDayObj = new Date(new Date(targetDate).getTime() + 24 * 60 * 60 * 1000);
-        const nextMorning = await prisma.reservation.findFirst({
-          where: {
-            reservationDate: nextDayObj,
-            status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "COMPLETED"] },
-            startTime: { lt: new Date("1970-01-01T08:00:00Z") },
-            OR: [
-              { userId: user.id },
-              { participants: { some: { userId: user.id, status: "ACCEPTED" } } },
-            ],
-          },
-          select: { id: true },
-        });
-
-        if (nextMorning) {
-          return NextResponse.json(
-            {
-              error:
-                "Ertesi gün 00:00 - 08:00 saatleri arasında randevunuz bulunduğu için bir önceki gece 21:00 - 24:00 arasındaki gruba katılamazsınız.",
-            },
-            { status: 400 }
-          );
-        }
+      const nightToMorningCheck = await validateNightToMorningRuleForUsers({
+        userIds: [user.id],
+        reservationDateObj: targetDate,
+        startTotalMins,
+        endTotalMins,
+      });
+      if (!nightToMorningCheck.valid) {
+        return NextResponse.json({ error: nightToMorningCheck.error }, { status: 400 });
       }
     }
 
@@ -173,12 +156,6 @@ export async function POST(request) {
         joinedAt: new Date(),
       },
     });
-
-    const minRule = await prisma.reservationRule.findFirst({
-      where: { ruleName: "MIN_PARTICIPANTS", isActive: true },
-      select: { ruleValue: true },
-    });
-    const minP = Math.max(2, minRule?.ruleValue?.value ?? DEFAULT_MIN);
 
     if (action === "ACCEPT") {
       const acceptedCount = await prisma.reservationParticipant.count({

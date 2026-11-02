@@ -6,6 +6,7 @@ import {
   parseReservationMinutesUTC,
   fmtTimeUTC,
   fmtDateUTC,
+  escapeHtml,
 } from "@/lib/timeUtils";
 import {
   ALLOWED_DIRECTOR_EMAIL,
@@ -18,10 +19,9 @@ import {
   sendNoShowWarningEmail,
 } from "@/lib/emailService";
 import { applyNoShowPenaltiesForUsers } from "@/lib/penaltyService";
+import { getActiveReservationRules } from "@/lib/reservationPolicy";
 
 const INVITATION_TIMEOUT_MS = 30 * 60 * 1000;
-const DEFAULT_TOLERANCE_MINUTES = 15;
-const DEFAULT_MIN_PARTICIPANTS = 2;
 
 export {
   ALLOWED_DIRECTOR_EMAIL,
@@ -97,7 +97,7 @@ export async function runReservationLifecycleChecks() {
         badgeBg: "#FEE2E2",
         title: "Rezervasyon Talebiniz Onay Süresi Dolduğu İçin İptal Edildi",
         greeting: `Sayın ${stale.user.fullName},`,
-        leadText: `${roomLabel} çalışma odası için oluşturduğunuz rezervasyon talebi, gönderilen grup davetiyeleri 30 dakika içinde onaylanmadığı için sistem tarafından otomatik olarak iptal edilmiştir.`,
+        leadText: `${escapeHtml(roomLabel)} çalışma odası için oluşturduğunuz rezervasyon talebi, gönderilen grup davetiyeleri 30 dakika içinde onaylanmadığı için sistem tarafından otomatik olarak iptal edilmiştir.`,
         details: [
           { label: "Çalışma Odası", value: roomLabel },
           { label: "Tarih", value: fmtDateUTC(stale.reservationDate) },
@@ -116,16 +116,10 @@ export async function runReservationLifecycleChecks() {
     }
 
     // 2. KAPI QR (KİOSK) SÜRESİ, SON 2 SAAT HATIRLATMA VE SÜRESİ BİTEN RANDEVULARI COMPLETED YAPMA
-    const rulesRows = await prisma.reservationRule.findMany({
-      where: {
-        isActive: true,
-        ruleName: { in: ["CHECKIN_TOLERANCE_MINUTES", "MIN_PARTICIPANTS"] },
-      },
-      select: { ruleName: true, ruleValue: true },
-    });
-    const rulesMap = Object.fromEntries(rulesRows.map((r) => [r.ruleName, r.ruleValue?.value]));
-    const toleranceMinutes = Number(rulesMap.CHECKIN_TOLERANCE_MINUTES ?? DEFAULT_TOLERANCE_MINUTES);
-    const minRequiredPeople = Math.max(2, Number(rulesMap.MIN_PARTICIPANTS ?? DEFAULT_MIN_PARTICIPANTS));
+    const {
+      checkinToleranceMinutes: toleranceMinutes,
+      minParticipants: minRequiredPeople,
+    } = await getActiveReservationRules();
 
     const { todayDate: todayDateObj, totalMins: nowMins } = getIstanbulTimeDetails(now);
     const yesterdayDateObj = new Date(todayDateObj.getTime() - 24 * 60 * 60 * 1000);
@@ -191,7 +185,7 @@ export async function runReservationLifecycleChecks() {
               badgeBg: "#FEF3C7",
               title: "Çalışma Odası Randevunuza Son 2 Saat Kaldı",
               greeting: `Sayın ${member.fullName},`,
-              leadText: `${roomLabel} çalışma odasındaki grup randevunuzun başlamasına 2 saatten az süre kalmıştır.`,
+              leadText: `${escapeHtml(roomLabel)} çalışma odasındaki grup randevunuzun başlamasına 2 saatten az süre kalmıştır.`,
               details: [
                 { label: "Çalışma Odası", value: roomLabel },
                 { label: "Tarih", value: fmtDateUTC(res.reservationDate) },
@@ -277,7 +271,7 @@ export async function runReservationLifecycleChecks() {
               badgeBg: "#E0F2FE",
               title: "Randevunuz Diğer Katılımcılar Gelmediği İçin İptal Edildi",
               greeting: `Sayın ${verifiedMember.fullName},`,
-              leadText: `${roomLabel} çalışma odası için kapı QR yoklama onayınız zamanında alınmıştır. Ancak grubunuzdaki diğer katılımcılar +${toleranceMinutes} dakikalık süre içinde onay vermediği için randevu otomatik iptal edilmiştir. Kendi yoklamanızı yaptığınız için tarafınıza herhangi bir No-Show cezası İŞLENMEMİŞTİR.`,
+              leadText: `${escapeHtml(roomLabel)} çalışma odası için kapı QR yoklama onayınız zamanında alınmıştır. Ancak grubunuzdaki diğer katılımcılar +${toleranceMinutes} dakikalık süre içinde onay vermediği için randevu otomatik iptal edilmiştir. Kendi yoklamanızı yaptığınız için tarafınıza herhangi bir No-Show cezası İŞLENMEMİŞTİR.`,
               details: [
                 { label: "Çalışma Odası", value: roomLabel },
                 { label: "Tarih & Saat", value: `${dateStr} | ${timeRangeStr}` },
@@ -306,7 +300,7 @@ export async function runReservationLifecycleChecks() {
 
           const attendanceSummary = allApprovedUsers.map((u) => {
             const didCheck = checkedUserIds.includes(u.id);
-            return `<strong>${u.fullName}</strong> (${u.email}) — <span style="color:${
+            return `<strong>${escapeHtml(u.fullName)}</strong> (${escapeHtml(u.email)}) — <span style="color:${
               didCheck ? "#15803D" : "#B91C1C"
             }; font-weight:700;">${
               didCheck ? "Kapı QR Okuttu ✓ (Ceza Yok)" : "Okutmadı ✗ (No-Show Uyarısı İşlendi)"
@@ -319,7 +313,7 @@ export async function runReservationLifecycleChecks() {
             badgeBg: "#FEE2E2",
             title: `${roomLabel} Randevusu Kiosk Onayı Tamamlanmadığı İçin İptal Edildi`,
             greeting: "Sayın Kütüphane Müdürü,",
-            leadText: `${roomLabel} çalışma odasının ${dateStr} (${timeRangeStr}) tarihli randevusunda +${toleranceMinutes} dakikalık yoklama süresi dolmuş olup, en az ${minRequiredPeople} katılımcı kapı QR onayı vermediği için randevu sistem tarafından otomatik iptal edilmiş ve oda diğer öğrencilerin kullanımına açılmıştır.`,
+            leadText: `${escapeHtml(roomLabel)} çalışma odasının ${escapeHtml(dateStr)} (${escapeHtml(timeRangeStr)}) tarihli randevusunda +${toleranceMinutes} dakikalık yoklama süresi dolmuş olup, en az ${minRequiredPeople} katılımcı kapı QR onayı vermediği için randevu sistem tarafından otomatik iptal edilmiş ve oda diğer öğrencilerin kullanımına açılmıştır.`,
             details: [
               { label: "Çalışma Odası", value: `${roomLabel} (Tekrar Müsait Duruma Çekildi)` },
               { label: "Tarih & Saat", value: `${dateStr} | ${timeRangeStr}` },

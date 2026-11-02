@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box, Typography, Avatar, IconButton, Badge, Button,
@@ -46,7 +46,7 @@ export default function Navbar() {
   const [notifAnchor, setNotifAnchor] = useState(null);
   const [invitations, setInvitations] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
-  const [readIds, setReadIds] = useState([]);
+  const [localReadIds, setLocalReadIds] = useState([]);
   const [selectedNotif, setSelectedNotif] = useState(null);
 
   const userRole = session?.user?.role;
@@ -62,31 +62,38 @@ export default function Navbar() {
 
   const storageKey = session?.user?.email ? `thku_read_notifs_${session.user.email}` : 'thku_read_notifs';
 
-  useEffect(() => {
+  const readIds = useMemo(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      setReadIds(Array.isArray(saved) ? saved : []);
+      const base = Array.isArray(saved) ? saved : [];
+      return Array.from(new Set([...base, ...localReadIds]));
     } catch {
-      setReadIds([]);
+      return localReadIds;
     }
-  }, [storageKey]);
+  }, [storageKey, localReadIds]);
 
-  const fetchNotifications = () => {
+  const fetchNotifications = useCallback(() => {
     if (!session?.user?.acceptedAgreementVersion) return;
     if (!isAdminOrSuper) {
       api.get('/invitations').then(r => setInvitations(r.data || [])).catch(() => {});
     }
     api.get('/announcements').then(r => setAnnouncements(r.data || [])).catch(() => {});
-  };
+  }, [session?.user?.acceptedAgreementVersion, isAdminOrSuper]);
 
   useEffect(() => {
     fetchNotifications();
-  }, [session, location.pathname]);
+  }, [fetchNotifications, location.pathname]);
+
+  useEffect(() => {
+    const handleNotifRefresh = () => fetchNotifications();
+    window.addEventListener('notificationsUpdated', handleNotifRefresh);
+    return () => window.removeEventListener('notificationsUpdated', handleNotifRefresh);
+  }, [fetchNotifications]);
 
   const markAsRead = (id) => {
     if (!readIds.includes(id)) {
       const updated = [...readIds, id];
-      setReadIds(updated);
+      setLocalReadIds(updated);
       localStorage.setItem(storageKey, JSON.stringify(updated));
     }
   };
@@ -97,7 +104,7 @@ export default function Navbar() {
       ...announcements.map(a => `ann_${a.id}`),
     ];
     const updated = Array.from(new Set([...readIds, ...allIds]));
-    setReadIds(updated);
+    setLocalReadIds(updated);
     localStorage.setItem(storageKey, JSON.stringify(updated));
   };
 
@@ -123,6 +130,7 @@ export default function Navbar() {
       await api.post('/invitations/respond', { participantId, action });
       setSelectedNotif(null);
       fetchNotifications();
+      window.dispatchEvent(new Event('notificationsUpdated'));
       navigate('/bookings');
     } catch {
       setSelectedNotif(null);

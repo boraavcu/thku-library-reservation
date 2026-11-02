@@ -58,7 +58,6 @@ export default function AdminPanel() {
   const isSuperAdmin = userRole === 'SUPER_ADMIN';
 
   const fetchData = useCallback(() => {
-    setLoading(true);
     api.get('/admin/manage')
       .then((res) => setData(res.data))
       .catch(() => setSnack({ open: true, message: 'Yönetim verileri yüklenemedi.', severity: 'error' }))

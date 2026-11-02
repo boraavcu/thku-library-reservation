@@ -1,6 +1,6 @@
 import prisma from "@/lib/db";
 import { sendNoShowWarningEmail } from "@/lib/emailService";
-import { getIstanbulTimeDetails } from "@/lib/timeUtils";
+import { cancelOrRemoveBannedUserReservations } from "@/lib/reservationPolicy";
 
 /**
  * Hem otonom lifecycle motoru hem de Admin "MARK_NO_SHOW" operasyonu tarafından
@@ -16,8 +16,6 @@ export async function applyNoShowPenaltiesForUsers({
   writeAuditLog = true,
 }) {
   const autoBannedEmails = [];
-  const now = new Date();
-  const { todayDate } = getIstanbulTimeDetails(now);
 
   for (const member of usersToPenalize) {
     const desc =
@@ -90,18 +88,11 @@ export async function applyNoShowPenaltiesForUsers({
 
     if (shouldBan) {
       autoBannedEmails.push(member.email);
-      await prisma.reservation.updateMany({
-        where: {
-          userId: member.id,
-          status: { in: ["PENDING", "CONFIRMED"] },
-          reservationDate: { gte: todayDate },
-        },
-        data: {
-          status: "CANCELLED",
-          cancelledAt: now,
-          cancellationReason:
-            "Kullanıcı 3. No-Show uyarısına ulaşıp banlandığı için otomatik iptal edildi.",
-        },
+      await cancelOrRemoveBannedUserReservations({
+        userId: member.id,
+        userEmail: member.email,
+        reasonText:
+          "Kullanıcı 3. No-Show uyarısına ulaşıp banlandığı için otomatik iptal edildi.",
       });
     }
   }

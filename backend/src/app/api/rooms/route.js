@@ -3,6 +3,7 @@ import prisma from "@/lib/db";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 import { checkRulesAcceptance } from "@/middleware/checkRulesAcceptance";
 import { getIstanbulTimeDetails } from "@/lib/timeUtils";
+import { getActiveReservationRules } from "@/lib/reservationPolicy";
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -13,21 +14,13 @@ export async function GET(request) {
   try {
     runReservationLifecycleChecks().catch(() => {});
 
-    // Eski R103 ismi ("Uçantürk") kalmışsa otomatik "Hürkuş" olarak düzelt
-    await prisma.room
-      .updateMany({
-        where: { roomNumber: "R103", name: "Uçantürk" },
-        data: { name: "Hürkuş" },
-      })
-      .catch(() => {});
-
     const { searchParams } = new URL(request.url);
     const dateParam = searchParams.get("date");
     const { dateStr: todayStr } = getIstanbulTimeDetails();
     const targetDateStr = dateParam && DATE_REGEX.test(dateParam) ? dateParam : todayStr;
     const targetDateUtc = new Date(`${targetDateStr}T00:00:00.000Z`);
 
-    const [rooms, activeReservations, advanceRule] = await Promise.all([
+    const [rooms, activeReservations, rules] = await Promise.all([
       prisma.room.findMany({
         where: { isActive: true },
         orderBy: { roomNumber: "asc" },
@@ -46,13 +39,10 @@ export async function GET(request) {
         },
         orderBy: { startTime: "asc" },
       }),
-      prisma.reservationRule.findFirst({
-        where: { ruleName: "MAX_ADVANCE_DAYS", isActive: true },
-        select: { ruleValue: true },
-      }),
+      getActiveReservationRules(),
     ]);
 
-    const maxAdvanceDays = Number(advanceRule?.ruleValue?.value ?? 1);
+    const maxAdvanceDays = rules.maxAdvanceDays;
 
     const slotsByRoom = new Map();
     for (const r of activeReservations) {

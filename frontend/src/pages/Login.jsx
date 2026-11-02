@@ -94,6 +94,10 @@ const DEMO_ACCOUNTS = [
   },
 ];
 
+const isDemoLoginEnabled =
+  import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true' ||
+  (import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_LOGIN !== 'false');
+
 const Login = () => {
   const { t, i18n } = useTranslation();
   const [loadingEmail, setLoadingEmail] = useState(null);
@@ -236,7 +240,7 @@ const Login = () => {
             </Typography>
           </Box>
 
-          {import.meta.env.VITE_ENABLE_DEMO_LOGIN !== 'false' && (
+          {isDemoLoginEnabled && (
             <>
               <Divider sx={{ my: 0.5 }}>
                 <Chip

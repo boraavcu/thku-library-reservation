@@ -22,16 +22,22 @@ export function getCrossIncognitoSignature(request) {
   const netType = request.headers.get("x-net-type") || "unknown";
   const headerDeviceId = request.headers.get("x-device-id") || "no-dev-id";
 
-  // Yalnızca gerçek donanım parmak izi (x-hardware-fp) geldiğinde hwLockHash üret
+  // Kampüs NAT ağında aynı model telefonların birbirini yanlışlıkla engellememesi için
+  // yerel IP veya cihaz imzası ile donanım parmak izini birleştir
+  const validDevId = headerDeviceId !== "no-dev-id" ? headerDeviceId : null;
   const hwLockHash =
-    hwFp !== "no-hw"
-      ? crypto.createHash("sha256").update(`${ip}|${hwFp}|${ua}`).digest("hex").substring(0, 20)
+    hwFp !== "no-hw" && validDevId
+      ? crypto
+          .createHash("sha256")
+          .update(`${validDevId}|${hwFp}|${ua}`)
+          .digest("hex")
+          .substring(0, 20)
       : null;
 
   return {
     ip,
     hwLockHash,
-    headerDeviceId: headerDeviceId !== "no-dev-id" ? headerDeviceId : null,
+    headerDeviceId: validDevId,
     netType,
   };
 }
@@ -79,15 +85,20 @@ export async function verifyCampusNetworkAndVpn(ip, netType) {
     }
 
     try {
-      const targetQueryIp =
-        ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.")
-          ? ""
-          : ip;
+      const isPrivateOrLocal =
+        ip === "127.0.0.1" || ip === "::1" || ip.startsWith("192.168.") || ip.startsWith("10.");
+      const targetQueryIp = isPrivateOrLocal ? "" : ip;
 
       const res = await fetch(
         `http://ip-api.com/json/${targetQueryIp}?fields=status,query,isp,org,mobile,proxy,hosting`,
         { signal: AbortSignal.timeout(3000) }
       );
+
+      // Rate-limit (429) durumunda yerel geliştirme/kampüs iç ağında bloklama yapma
+      if (res.status === 429 && isPrivateOrLocal) {
+        return { allowed: true };
+      }
+
       const netInfo = await res.json();
 
       if (netInfo?.status === "success") {

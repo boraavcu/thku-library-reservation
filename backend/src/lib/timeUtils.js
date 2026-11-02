@@ -1,5 +1,6 @@
 /**
- * Tüm Backend uç noktaları için merkezi Europe/Istanbul saat dilimi ve UTC zaman hesaplama yardımcıları.
+ * Tüm Backend uç noktaları için merkezi Europe/Istanbul saat dilimi, UTC zaman hesaplama
+ * ve HTML güvenlik (escape) yardımcıları.
  */
 
 export function getIstanbulTimeDetails(dateInput = new Date()) {
@@ -93,4 +94,17 @@ export function getReservationKioskWindow(reservation, todayTrStr, toleranceMinu
     minAllowed: startTotalMins - toleranceMinutes,
     maxAllowed: startTotalMins + toleranceMinutes,
   };
+}
+
+/**
+ * E-posta ve bildirim şablonlarında HTML/XSS enjeksiyonunu önleyen yardımcı fonksiyon.
+ */
+export function escapeHtml(input) {
+  if (input === null || input === undefined) return "";
+  return String(input)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
