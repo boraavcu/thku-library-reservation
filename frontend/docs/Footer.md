@@ -18,7 +18,7 @@
    - **Kullanım Kuralları (`Terms of Use & Rules`):** Tıklandığında kullanıcıyı `/rules?view=true` (salt okunur sözleşme görünümü) sayfasına yönlendirir.
    - **Portal Bağlantısı:** Kullanıcının rolü yetkiliyse (`isStaff`) **"Yönetim Merkezi (` /admin `)"**, öğrenciyse **"Çalışma Odası Portalı (` /dashboard `)"** olarak dinamik isim alır ve ilgili sayfaya yönlendirir.
 3. **Sağ Blok (Geliştirici İmza Rozeti):**
-   - `<Chip component="a" href="[https://www.linkedin.com/in/bora-avcu-b75a26204/](https://www.linkedin.com/in/bora-avcu-b75a26204/)" target="_blank">` yapısıyla **"Developed By: Bora Avcu"** rozetini sunar ve tıklandığında yeni sekmede geliştiricinin LinkedIn profilini açar.
+   - `<Chip component="a" href="https://www.linkedin.com/in/bora-avcu-b75a26204/" target="_blank">` yapısıyla **"Developed By: Bora Avcu"** rozetini sunar ve tıklandığında yeni sekmede geliştiricinin LinkedIn profilini açar.
 
 ##  4. Bağlantılı Olduğu Dosyalar
 

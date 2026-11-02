@@ -1,6 +1,3 @@
-## 3. `backend/docs/PenaltyService.md`
-
-```markdown
 # Context: penaltyService.js
 
 ## 1. Dosyanın Amacı ve Mimari Rolü
@@ -9,9 +6,9 @@
 
 ## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `PenaltyHistory`, `User`, `Reservation`, `AuditLog`)
+- **Veritabanı ORM:** `@/lib/db` (Prisma Client — `PenaltyHistory`, `User`, `AuditLog`)
 - **E-Posta Servisi:** `@/lib/emailService` (`sendNoShowWarningEmail`)
-- **Zaman Modülü:** `@/lib/timeUtils` (`getIstanbulTimeDetails`)
+- **Rezervasyon Politikası:** `@/lib/reservationPolicy` (`cancelOrRemoveBannedUserReservations`)
 
 ## 3. Çekirdek Fonksiyonlar ve İş Mantığı (`applyNoShowPenaltiesForUsers`)
 
@@ -24,12 +21,12 @@ Kapı QR kodunu süresi içinde okutmayan (`usersToPenalize`) her grup üyesi i�
 3. **Denetim İzleri ve Bildirim E-Postası:**
    - `writeAuditLog === true` ise `AuditLog` tablosuna `AUTO_NO_SHOW_PENALTY` veya `AUTO_NO_SHOW_BANNED` kaydı düşer.
    - `sendNoShowWarningEmail` ile öğrenciye kaçıncı uyarısını aldığını (`1/3`, `2/3` veya `3/3 Ban`) bildiren kurumsal HTML e-posta ve uygulama içi bildirim gönderir.
-4. **Banlanan Öğrencinin Bugünkü ve Gelecekteki Randevularının İptali:**
-   - Öğrenci 3/3 uyarıyla banlandığında, `reservationDate: { gte: todayDate }` filtresiyle bugünün ilerleyen saatlerindeki ve gelecekteki tüm `PENDING` / `CONFIRMED` randevuları otomatik olarak `CANCELLED` yapılır.
+4. **Banlanan Öğrencinin Bugünkü ve Gelecekteki Randevularının Düşürülmesi (`cancelOrRemoveBannedUserReservations`):**
+   - Öğrenci 3/3 uyarıyla banlandığında, `@/lib/reservationPolicy` içindeki `cancelOrRemoveBannedUserReservations` çağrılır: öğrencinin organizatör olduğu gelecek randevular iptal edilir, davetli olduğu gruplardan ise diğer masum öğrencileri mağdur etmeden çıkarılır (grup minimum kişi sayısının altına düşerse randevu iptal edilir).
 
 ## 4. Bağlantılı Olduğu Dosyalar
 
 - `backend/src/lib/lifecycle.js`
+- `backend/src/lib/reservationPolicy.js`
 - `backend/src/app/api/admin/manage/handlers.js`
 - `backend/src/lib/emailService.js`
-```

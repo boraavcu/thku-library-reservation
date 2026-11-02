@@ -15,7 +15,7 @@ function getOrCreateDeviceId() {
   }
 }
 
-// Gizli Sekmede (Incognito) bile asla değişmeyen Donanım Parmak İzi (GPU + Ekran + CPU + Saat Dilimi)
+// Gizli Sekmede (Incognito) ve farklı yakınlaştırma (zoom) seviyelerinde asla değişmeyen Donanım Parmak İzi
 function getHardwareFingerprint() {
   try {
     let gpuRenderer = 'unknown-gpu';
@@ -28,13 +28,17 @@ function getHardwareFingerprint() {
       }
     }
 
+    const screenW = window.screen?.width || 0;
+    const screenH = window.screen?.height || 0;
+    const maxDim = Math.max(screenW, screenH);
+    const minDim = Math.min(screenW, screenH);
+
     const rawTraits = [
       navigator.platform || '',
       navigator.hardwareConcurrency || '',
-      navigator.deviceMemory || '',
-      `${ window.screen?.width || 0 }x${ window.screen?.height || 0 }x${ window.screen?.colorDepth || 0 }`,
-      window.devicePixelRatio || 1,
+      `${maxDim}x${minDim}x${window.screen?.colorDepth || 24}`,
       Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      navigator.maxTouchPoints || 0,
       gpuRenderer,
     ].join('|');
 
@@ -44,7 +48,7 @@ function getHardwareFingerprint() {
       hash ^= rawTraits.charCodeAt(i);
       hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
     }
-    return `hw_${ (hash >>> 0).toString(16) }`;
+    return `hw_${(hash >>> 0).toString(16)}`;
   } catch {
     return 'hw_fallback';
   }

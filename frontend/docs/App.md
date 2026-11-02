@@ -13,7 +13,7 @@
 ##  3. İş Mantığı ve Rotalar (Routing & Event Listeners)
 
 ### A. Alt Alan Adı (Subdomain) Güvenlik Kontrolü
-- Kullanıcı `panel.library.thk.edu.tr` üzerinden giriş yaptıysa ancak rolü `['ADMIN', 'LIBRARIAN', 'SUPER_ADMIN']` değilse (yani öğrenciyse), `window.location.href = '[https://library.thk.edu.tr](https://library.thk.edu.tr)'` ile otomatik olarak öğrenci portalına yönlendirilir.
+- Kullanıcı `panel.library.thk.edu.tr` üzerinden giriş yaptıysa ancak rolü `['ADMIN', 'LIBRARIAN', 'SUPER_ADMIN']` değilse (yani öğrenciyse), `window.location.href = 'https://library.thk.edu.tr'` ile otomatik olarak öğrenci portalına yönlendirilir.
 
 ### B. Dinamik Sözleşme Güncelleme Dinleyicisi (`rulesRejected`)
 - Yönetici yeni bir sözleşme versiyonu yayınladığında backend middleware'i (`checkRulesAcceptance.js`) `403` döndürür. `App.jsx` içindeki `rulesRejected` dinleyicisi oturumdaki `acceptedAgreementVersion` değerini sıfırlayarak kullanıcıyı anında `/rules` sayfasına yönlendirir.

@@ -1,6 +1,8 @@
+# Context: db.js
+
 ## 1. Dosyanın Amacı ve Mimari Rolü
 
-`db.js`, PostgreSQL veritabanı ile uygulama arasındaki iletişimi sağlayan **Prisma Client Singleton** sağlayıcısıdır. Next.js'in geliştirme ortamındaki sıcak modül yeniden yükleme (Hot Module Replacement - HMR) süreçlerinde her sayfa isteğinde yeni bir bağlantı havuzu açılmasını ve veritabanı bağlantı sınırının (`too many connections`) tükenmesini engeller.
+`backend/src/lib/db.js`, PostgreSQL veritabanı ile uygulama arasındaki iletişimi sağlayan **Prisma Client Singleton** sağlayıcısıdır. Next.js'in geliştirme ortamındaki sıcak modül yeniden yükleme (Hot Module Replacement - HMR) süreçlerinde her sayfa isteğinde yeni bir bağlantı havuzu açılmasını ve veritabanı bağlantı sınırının (`too many connections`) tükenmesini engeller.
 
 ## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 

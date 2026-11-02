@@ -8,9 +8,11 @@
 
 1. Yanıt süresini geciktirmemek için `runReservationLifecycleChecks().catch(() => {})` fonksiyonunu arka planda asenkron olarak tetikler.
 2. `prisma.reservationParticipant.findMany` ile kullanıcıya ait `status: "PENDING"` olan ve bağlı olduğu rezervasyonu iptal edilmemiş (`status: { in: ["PENDING", "CONFIRMED"] }`) davetleri çeker.
-3. `Europe/Istanbul` saat dilimine göre randevunun bitiş saati henüz geçmemiş olanları filtreleyerek oda ve organizatör bilgileriyle birlikte döndürür.
+3. `@/lib/timeUtils` (`getIstanbulTimeDetails` ve `parseReservationMinutesUTC`) üzerinden Türkiye saat dilimine (`Europe/Istanbul`) göre randevunun bitiş saati henüz geçmemiş olanları (`endTotalMins > nowTotalMins`) filtreleyerek oda ve organizatör bilgileriyle birlikte döndürür.
 
 ##  3. Bağlantılı Olduğu Dosyalar
 
 - `frontend/src/pages/Dashboard.jsx`, `MyBookings.jsx` ve `components/Navbar.jsx`
 - `backend/src/app/api/invitations/respond/route.js`
+- `backend/src/lib/timeUtils.js`
+- `backend/src/lib/lifecycle.js`

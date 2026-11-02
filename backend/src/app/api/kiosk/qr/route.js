@@ -15,6 +15,7 @@ import {
   calculateDistanceMeters,
   verifyCampusNetworkAndVpn,
   checkDeviceLockForReservation,
+  sealDeviceLockForReservation,
 } from "@/lib/kioskSecurity";
 
 const PERSONAL_OTP_TTL = 600;
@@ -187,7 +188,7 @@ export async function GET(request) {
       });
     }
 
-    const { isLockedByAnotherUser } = await checkDeviceLockForReservation(
+    const { isLockedByAnotherUser, keys } = await checkDeviceLockForReservation(
       request,
       matchedReservation.id,
       userId,
@@ -205,6 +206,10 @@ export async function GET(request) {
     const checkedSetKey = `kiosk:checked_users:${matchedReservation.id}`;
     const checkedUserIds = await redis.smembers(checkedSetKey);
     const alreadyCheckedIn = checkedUserIds.includes(userId);
+
+    if (alreadyCheckedIn) {
+      await sealDeviceLockForReservation(keys, userId);
+    }
 
     const otpKey = `kiosk:personal_otp:${matchedReservation.id}:${userId}`;
     let personalSessionToken = await redis.get(otpKey);

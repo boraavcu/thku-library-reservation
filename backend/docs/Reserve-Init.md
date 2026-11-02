@@ -7,15 +7,16 @@
 ##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
 - **Web Çatısı:** `next/server` (`NextResponse`)
+- **Oturum Doğrulama:** `next-auth` (`getServerSession`, `authOptions`)
 - **Veritabanı ORM:** `@/lib/db` (Prisma Client)
+- **Rezervasyon Politikası:** `@/lib/reservationPolicy` (`getActiveReservationRules`)
 
 ##  3. İş Mantığı ve Dinamik Kural Eşlemesi (`Promise.all`)
 
 1. **Paralel Veri Çekimi:**
    - `prisma.room.findMany({ where: { isActive: true }, orderBy: { roomNumber: "asc" } })` ile kullanıma açık odalar çekilir.
-   - `prisma.reservationRule.findMany({ where: { isActive: true } })` ile veritabanındaki aktif kurallar çekilir.
-2. **7 Dinamik Kuralın Normalizasyonu ve Varsayılan (Fallback) Değerler:**
-   Veritabanındaki JSON (`ruleValue.value`) değerleri okunarak arayüzün doğrudan kullanabileceği şu nesneye dönüştürülür:
+   - `getActiveReservationRules()` ile veritabanındaki 7 aktif kural tek merkezden okunur.
+2. **Döndürülen 7 Dinamik Kural (`rules`):**
    - `maxDurationHours`: Maksimum rezervasyon süresi (Varsayılan: `3` saat)
    - `maxAdvanceDays`: Kaç gün sonrasına randevu alınabileceği (Varsayılan: `1` gün)
    - `minParticipants`: Minimum grup üyesi sayısı (Varsayılan: `2` kişi)
@@ -28,4 +29,5 @@
 
 - `frontend/src/pages/StudyRooms.jsx`
 - `frontend/src/pages/ReserveForm.jsx`
-- `backend/src/app/api/admin/manage/route.js` (`UPDATE_RULE` aksiyonu)
+- `backend/src/lib/reservationPolicy.js`
+- `backend/src/app/api/admin/manage/handlers.js` (`UPDATE_RULE` aksiyonu)

@@ -7,12 +7,13 @@
 ##  2. İş Mantığı ve Saat Dilimi Filtrelemesi
 
 1. İlk olarak `await runReservationLifecycleChecks()` fonksiyonunu çalıştırarak süresi dolmuş davetleri veya Kiosk onay süresi geçmiş randevuları temizler.
-2. Kullanıcının organizatör (`userId`) veya reddetmemiş katılımcı (`status: { not: "REJECTED" }`) olduğu, durumu `["PENDING", "CONFIRMED", "CHECKED_IN"]` olan randevuları çeker.
-3. Türkiye saat dilimine (`Europe/Istanbul`) göre:
-   - Gelecek günlere ait (`resDateStr > todayStr`) randevuları,
-   - Veya bugüne ait olup bitiş saati henüz geçmemiş (`endMinutes > nowMinutes`, `23:59` gece yarısı bitişleri `1440` dk olarak hesaba katılarak) randevuları filtreler ve tarihe/saate göre sıralı döndürür.
+2. Kullanıcının organizatör (`userId`) veya onaylı katılımcı (`status: "ACCEPTED"`) olduğu, durumu `["PENDING", "CONFIRMED", "CHECKED_IN"]` olan randevuları çeker.
+3. `@/lib/timeUtils` (`getIstanbulTimeDetails` ve `parseReservationMinutesUTC`) ile Türkiye saat dilimine (`Europe/Istanbul`) göre:
+   - Gelecek günlere ait (`resDateStr > todayTrStr`) randevuları,
+   - Veya bugüne ait olup bitiş saati henüz geçmemiş (`endTotalMins > nowTotalMins`, `23:59` gece yarısı bitişleri `1440` dk olarak hesaba katılarak) randevuları filtreler ve tarihe/saate göre sıralı döndürür.
 
 ##  3. Bağlantılı Olduğu Dosyalar
 
 - `frontend/src/pages/Dashboard.jsx`
+- `backend/src/lib/timeUtils.js`
 - `backend/src/lib/lifecycle.js`

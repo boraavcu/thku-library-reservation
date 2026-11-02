@@ -23,7 +23,7 @@
 <p align="center">
   <a href="./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md"><img src="https://img.shields.io/badge/%F0%9F%93%91_Sistem_Mimarisi-T%C3%BCrk%C3%A7e_(TR)-0F172A?style=flat-square" alt="Sistem Mimarisi TR" /></a>
   <a href="./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md"><img src="https://img.shields.io/badge/%F0%9F%8C%90_System_Architecture-English_(EN)-0F172A?style=flat-square" alt="System Architecture EN" /></a>
-  <a href="./backend/docs/README.md"><img src="https://img.shields.io/badge/%E2%9A%99%EF%B8%8F_Backend_Dok%C3%BCmanlar%C4%B1-29_Mod%C3%BCl-1E3A8A?style=flat-square" alt="Backend Docs" /></a>
+  <a href="./backend/docs/README.md"><img src="https://img.shields.io/badge/%E2%9A%99%EF%B8%8F_Backend_Dok%C3%BCmanlar%C4%B1-30_Mod%C3%BCl-1E3A8A?style=flat-square" alt="Backend Docs" /></a>
   <a href="./frontend/docs/README.md"><img src="https://img.shields.io/badge/%F0%9F%92%BB_Frontend_Dok%C3%BCmanlar%C4%B1-21_Mod%C3%BCl-047857?style=flat-square" alt="Frontend Docs" /></a>
 </p>
 
@@ -37,8 +37,8 @@
 
 | Modül / Özellik | Teknik Çözüm ve İş Kuralı Özeti |
 | :--- | :--- |
-| ** 7/24 Kesintisiz Hizmet & Dinamik Kurallar** | 4 grup çalışma odası (`R101 - Atatürk`, `R102 - Gökçen`, `R103 - Hürkuş`, `R104 - İstikbal`) 00:00 – 24:00 saatleri arasında hizmet verir. 7 temel kural (`Min/Max Katılımcı`, `Maksimum Süre`, `İleri Tarih Sınırı`, `Sabah Kota Saati`, `Kiosk Toleransı`, `İptal Kilidi`) Yönetim Panelinden canlı olarak değiştirilebilir. |
-| ** 4 Katmanlı Fiziksel Kiosk QR Güvenliği** | **1)** Kapıdaki imzalı A4 QR parametresi, **2)** Kampüs Wi-Fi (`eduroam`) doğrulaması ve Hücresel Veri (`4G/5G`) / VPN engeli, **3)** Haversine formülüyle kütüphane merkezli **1000m GPS yarıçapı** kontrolü, **4)** Gizli sekme (Incognito) korumalı **WebGL GPU + Cookie/LocalStorage + Eduroam NAT uyumlu IP/UA** 4 saatlik Redis cihaz kilidi. |
+| ** 7/24 Kesintisiz Hizmet & Dinamik Kurallar** | 4 grup çalışma odası (`R101 - Atatürk`, `R102 - Gökçen`, `R103 - Hürkuş`, `R104 - İstikbal`) 00:00 – 24:00 saatleri arasında hizmet verir. 7 temel kural (`Min/Max Katılımcı`, `Maksimum Süre`, `İleri Tarih Sınırı`, `Sabah Kota Saati`, `Kiosk Toleransı`, `İptal Kilidi`) `reservationPolicy.js` üzerinden Yönetim Panelinden canlı olarak değiştirilebilir. |
+| ** 4 Katmanlı Fiziksel Kiosk QR Güvenliği** | **1)** Kapıdaki imzalı A4 QR parametresi, **2)** Kampüs Wi-Fi (`eduroam`) doğrulaması ve Hücresel Veri (`4G/5G`) / VPN engeli, **3)** Haversine formülüyle kütüphane merkezli **1000m GPS yarıçapı** kontrolü, **4)** Gizli sekme (Incognito) korumalı **WebGL GPU + Cookie/LocalStorage + IP/UA** 4 saatlik Redis cihaz kilidi. |
 | ** Adil No-Show Cezası & 3/3 Otomatik Ban** | Grup davetleri **30 dk** içinde onaylanmazsa randevu düşer. Başlangıçtan **±15 dk** içinde en az 2 üye kapı QR kodunu okutmazsa oda `NO_SHOW` olur ve anında boşa çıkar. Kapıda QR okutan öğrenciye (`verifiedUsers`) **ceza yazılmaz**; yalnızca gelmeyenlere (`absentUsers`) `1/3` uyarı işlenir. `3/3` olan öğrenci **30 gün** otomatik banlanır. |
 | ** Boşa Düşen Odayı Anında Tutma (`Walk-In`)** | İlk grup gelmediği veya `Odayı Erken Boşalt` (`EARLY_CHECKOUT`) yaptığı için ara dakikada (örn. `16:20`'de) boşa düşen bir odayı aynı saat dilimi (`16:00 – 18:00`) için tutan yeni gruba, oluşturulma anından itibaren özel **15 dakikalık (`16:20 – 16:35`)** Kiosk onay penceresi tanımlanır. |
 
@@ -64,8 +64,9 @@ thku-library-reservation/
 │   │   │   ├── db.js                    # Prisma Client Singleton
 │   │   │   ├── redis.js                 # Redis İstemci Singleton
 │   │   │   ├── timeUtils.js             # Merkezi Türkiye Saati (Europe/Istanbul) ve Kiosk Pencere Motoru
-│   │   │   ├── kioskSecurity.js         # 4 Katmanlı GPS, Kampüs Wi-Fi ve WebGL Cihaz Kilidi Motoru
-│   │   │   ├── emailService.js          # Nodemailer SMTP, EmailQueue ve Kurumsal HTML Şablon Motoru
+│   │   │   ├── reservationPolicy.js     # 7 Dinamik Kural, Günlük Kota, Gece/Sabah Kuralı ve Ban Randevu Politikası
+│   │   │   ├── kioskSecurity.js         # 4 Katmanlı GPS, Kampüs Wi-Fi ve Gizli Sekme Korumalı Cihaz Kilidi Motoru
+│   │   │   ├── emailService.js          # Nodemailer SMTP, EmailQueue ve XSS Korumalı Kurumsal HTML Şablon Motoru
 │   │   │   ├── penaltyService.js        # Adil No-Show (1/3 -> 3/3) ve 30 Gün Otomatik Ban Motoru
 │   │   │   └── lifecycle.js             # 30 Saniyelik Otonom Zamanlayıcı ve Durum Makinesi
 │   │   ├── middleware/
@@ -74,13 +75,13 @@ thku-library-reservation/
 │   │   └── app/api/                     # RESTful API Uç Noktaları
 │   │       ├── admin/manage/            # route.js (Analitik GET) & handlers.js (8 İdari Aksiyon POST)
 │   │       ├── auth/[...nextauth]/      # Azure AD SSO, Demo Giriş ve Otomatik Ban Açma (Auto-Unban)
-│   │       ├── kiosk/qr/                # Kiosk Ön Doğrulama ve 15 Dakikalık OTP Jeton Üretimi
+│   │       ├── kiosk/qr/                # Kiosk Ön Doğrulama ve 10 Dakikalık OTP Jeton Üretimi
 │   │       ├── checkin/validate/        # Kiosk Yoklama Onayı ve 2. Kişide Oda Açılışı
-│   │       ├── reservations/            # Randevu Oluşturma, Erken Boşaltma ve İptal Kilidi
+│   │       ├── reservations/            # Randevu Oluşturma (Serializable Tx), Erken Boşaltma ve İptal Kilidi
 │   │       ├── invitations/             # Grup Daveti Listeleme ve Kabul/Red (PENDING -> CONFIRMED)
 │   │       ├── rooms/                   # Gerçek Zamanlı Oda ve Saat Dilimi Müsaitlik Sorguları
 │   │       └── ...                      # agreements, announcements, dashboard, profile, reserve, user
-│   └── docs/                            # 29 Backend Dosyasının Bileşen Düzeyinde Teknik Dokümanı
+│   └── docs/                            # 30 Backend Dosyasının Bileşen Düzeyinde Teknik Dokümanı
 │
 └── frontend/                            # React 19 + Vite 7 + Material-UI v7 İstemci Uygulaması
     ├── src/
@@ -214,7 +215,7 @@ Geliştirme modunda (`ENABLE_DEMO_LOGIN="true"`) giriş ekranındaki **Demo Hız
 
 ---
 
-##  5. Kapsamlı Teknik Dokümantasyon İndeksi (50 Modül)
+##  5. Kapsamlı Teknik Dokümantasyon İndeksi (51 Modül)
 
 Projedeki her bir kaynak kod dosyasının iş mantığı, güvenlik kontrolleri ve bağımlılıkları `# Context:` standardında ayrı ayrı belgelendirilmiştir:
 
@@ -222,7 +223,7 @@ Projedeki her bir kaynak kod dosyasının iş mantığı, güvenlik kontrolleri 
 | :--- | :--- | :---: | :---: |
 | **Kurumsal Sistem Mimarisi (TR)** | Uçtan uca mimari vizyon, güvenlik katmanları, veritabanı şeması ve iş akışları | Türkçe | [📄 Dokümanı Aç](./docs/THKU_LIBRARY_RESERVATION_SYSTEM_TR.md) |
 | **Enterprise System Architecture (EN)** | End-to-end system architecture, security layers, database schema & workflows | English | [📄 Open Document](./docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md) |
-| **Backend Kod Dokümanları (29 Modül)** | `src/lib/*`, `src/app/api/*`, `middleware`, `schema.prisma` ve `seed.cjs` analizleri | Türkçe | [📘 İndeksi Aç](./backend/docs/README.md) |
+| **Backend Kod Dokümanları (30 Modül)** | `src/lib/*` (`reservationPolicy.js` dahil), `src/app/api/*`, `middleware`, `schema.prisma` ve `seed.cjs` analizleri | Türkçe | [📘 İndeksi Aç](./backend/docs/README.md) |
 | **Frontend Kod Dokümanları (21 Modül)** | `src/pages/*`, `src/components/admin/*`, `src/utils/*`, `api.js` ve `i18n.js` analizleri | Türkçe | [📗 İndeksi Aç](./frontend/docs/README.md) |
 
 ---

@@ -1,6 +1,3 @@
-## 5. `backend/docs/Admin-Set-role.md`
-
-```markdown
 # Context: admin/set-role/route.js
 
 ## 1. Dosyanın Amacı ve Mimari Rolü
@@ -22,4 +19,3 @@
 
 - `backend/src/app/api/auth/[...nextauth]/route.js`
 - `frontend/src/components/admin/UsersTab.jsx`
-```
