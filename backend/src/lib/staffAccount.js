@@ -57,9 +57,12 @@ async function emailTaken(email) {
   return rows.length > 0;
 }
 
-export async function createStaffAccount({ adminId, fullName, email, department, role }) {
+export async function createStaffAccount({ adminId, fullName, email, department, role, phone }) {
   const normalized = normalizeEmail(email);
   if (!isExactThkStaffEmail(normalized)) {
+    if (/[ıİğĞüÜşŞöÖçÇ]/.test(email)) {
+      return failure(400, "E-posta adresinde Türkçe karakter (ı, ğ, ü, ş, ö, ç) kullanılamaz. Lütfen standart İngilizce karakterler (ör. 'kullanici') kullanınız.");
+    }
     return failure(400, "Yalnızca tam thk.edu.tr adresi kabul edilir. stu.thk.edu.tr ve diğer alt alan adları kullanılamaz.");
   }
   if (!STAFF_ROLES.includes(role)) {
@@ -73,6 +76,7 @@ export async function createStaffAccount({ adminId, fullName, email, department,
   if (dept.length > 100) {
     return failure(400, "Bölüm en fazla 100 karakter olabilir.");
   }
+  const cleanPhone = phone ? String(phone).trim().slice(0, 20) : null;
   if (await emailTaken(normalized)) {
     return failure(409, "Bu e-posta adresi zaten kayıtlı. Yeni hesap açılmadı.");
   }
@@ -89,6 +93,7 @@ export async function createStaffAccount({ adminId, fullName, email, department,
           email: normalized,
           fullName: name,
           department: dept || null,
+          phone: cleanPhone,
           role,
           isActive: true,
           passwordHash,
@@ -96,7 +101,7 @@ export async function createStaffAccount({ adminId, fullName, email, department,
           tempPasswordExpiresAt: expiresAt,
           sessionVersion: 1,
         },
-        select: { id: true, email: true, fullName: true, role: true },
+        select: { id: true, email: true, fullName: true, role: true, phone: true },
       });
       await tx.adminAction.create({
         data: {

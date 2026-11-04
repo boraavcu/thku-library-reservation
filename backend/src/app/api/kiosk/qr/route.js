@@ -48,7 +48,14 @@ export async function GET(request) {
   try {
     await runReservationLifecycleChecks();
 
-    if (isStaff) {
+    const { searchParams } = new URL(request.url);
+    const doorParam = searchParams.get("door");
+
+    // Personel (LIBRARIAN, ADMIN, SUPER_ADMIN) /kiosk adresine kapı parametresi olmadan girdiğinde
+    // 4 çalışma odasının kapısına asılacak resmi A4 Kapı Posteri döner.
+    // Ancak kapıdaki QR okutulduğunda (door=thku-study-room), personel de olsa kendi rezervasyonu için
+    // yoklama / oda giriş onay ekranına geçiş yapar.
+    if (isStaff && doorParam !== "thku-study-room") {
       const frontendUrl = getFrontendBaseUrl();
       const singleDoorQrUrl = `${frontendUrl}/kiosk?door=thku-study-room`;
 
@@ -59,9 +66,6 @@ export async function GET(request) {
         message: "Bu QR kod tüm çalışma odalarının (R101-R104) kapısına ortak olarak asılır.",
       });
     }
-
-    const { searchParams } = new URL(request.url);
-    const doorParam = searchParams.get("door");
 
     if (doorParam !== "thku-study-room") {
       return NextResponse.json({

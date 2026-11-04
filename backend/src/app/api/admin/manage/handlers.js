@@ -63,9 +63,15 @@ export const ADMIN_ACTION_HANDLERS = {
   },
 
   async CREATE_STAFF_ACCOUNT({ payload, adminId, currentRole }) {
-    if (currentRole !== "SUPER_ADMIN") {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(currentRole)) {
       return NextResponse.json(
-        { error: "Bu işlem yalnızca SUPER_ADMIN tarafından yapılabilir." },
+        { error: "Bu işlem yalnızca yetkili yöneticiler (BİM / Müdür) tarafından yapılabilir." },
+        { status: 403 }
+      );
+    }
+    if (currentRole === "ADMIN" && payload?.role && payload.role !== "LIBRARIAN") {
+      return NextResponse.json(
+        { error: "Yetki Kuralı: Kütüphane Müdürü (ADMIN) yalnızca Kütüphane Görevlisi (LIBRARIAN) hesabı açabilir." },
         { status: 403 }
       );
     }
@@ -76,20 +82,38 @@ export const ADMIN_ACTION_HANDLERS = {
     return noStoreJson(
       {
         account: result.account,
+        user: result.account,
         temporaryPassword: result.temporaryPassword,
         expiresAt: result.expiresAt,
         emailDelivery: result.emailDelivery,
+        emailQueued: Boolean(result.emailDelivery?.queued),
       },
       result.status
     );
   },
 
+  async CREATE_USER(args) {
+    return ADMIN_ACTION_HANDLERS.CREATE_STAFF_ACCOUNT(args);
+  },
+
   async RESET_STAFF_TEMP_PASSWORD({ payload, adminId, currentRole }) {
-    if (currentRole !== "SUPER_ADMIN") {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(currentRole)) {
       return NextResponse.json(
-        { error: "Bu işlem yalnızca SUPER_ADMIN tarafından yapılabilir." },
+        { error: "Bu işlem yalnızca yetkili yöneticiler (BİM / Müdür) tarafından yapılabilir." },
         { status: 403 }
       );
+    }
+    if (currentRole === "ADMIN" && payload?.targetUserId) {
+      const target = await prisma.user.findUnique({
+        where: { id: payload.targetUserId },
+        select: { role: true },
+      });
+      if (!target || target.role !== "LIBRARIAN") {
+        return NextResponse.json(
+          { error: "Yetki Kuralı: Kütüphane Müdürü (ADMIN) yalnızca Görevli (LIBRARIAN) şifresini sıfırlayabilir." },
+          { status: 403 }
+        );
+      }
     }
     const result = await resetStaffTempPassword({ adminId, targetUserId: payload?.targetUserId });
     if (!result.ok) {
@@ -98,9 +122,11 @@ export const ADMIN_ACTION_HANDLERS = {
     return noStoreJson(
       {
         account: result.account,
+        user: result.account,
         temporaryPassword: result.temporaryPassword,
         expiresAt: result.expiresAt,
         emailDelivery: result.emailDelivery,
+        emailQueued: Boolean(result.emailDelivery?.queued),
       },
       result.status
     );
@@ -503,7 +529,15 @@ export const ADMIN_ACTION_HANDLERS = {
     const denied = requireAdminOrSuper(currentRole);
     if (denied) return denied;
 
-    const { targetUserId, modType, role, banMode, banUntilDateStr, banReason } = payload;
+    const { targetUserId, modType, role, banMode, banUntilDateStr, banReason } = payload || {};
+
+    if (modType === "RESET_STAFF_TEMP_PASSWORD") {
+      return ADMIN_ACTION_HANDLERS.RESET_STAFF_TEMP_PASSWORD({ payload, adminId, currentRole });
+    }
+
+    if (modType === "SET_STAFF_ACTIVE") {
+      return ADMIN_ACTION_HANDLERS.SET_STAFF_ACTIVE({ payload, adminId, currentRole });
+    }
 
     const targetUser = await prisma.user.findUnique({
       where: { id: targetUserId },

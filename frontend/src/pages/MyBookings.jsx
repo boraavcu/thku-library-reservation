@@ -21,6 +21,7 @@ import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import VerifiedUserIcon from '@mui/icons-material/VerifiedUser';
 
 function getReservationTimingState(res) {
   const { todayIso, hour, minute } = getIstanbulNowParts();
@@ -290,11 +291,25 @@ export default function MyBookings() {
                           )}
                         </Box>
 
-                        {showOrganizerActions && (
+                        {tab === 0 && (
                           <>
                             <Divider />
                             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                              {isHappeningNow && (
+                              {['CONFIRMED', 'CHECKED_IN'].includes(res.status) && (
+                                <Button
+                                  variant="contained"
+                                  color="success"
+                                  size="small"
+                                  startIcon={<VerifiedUserIcon />}
+                                  onClick={() => navigate('/kiosk?door=thku-study-room')}
+                                >
+                                  {res.status === 'CHECKED_IN'
+                                    ? (isEn ? 'Kiosk Details' : 'Kiosk Yoklama Durumu')
+                                    : (isEn ? 'Door QR Check-In' : 'Kapı QR Giriş Onayı')}
+                                </Button>
+                              )}
+
+                              {showOrganizerActions && isHappeningNow && (
                                 <Button
                                   variant="contained"
                                   color="info"
@@ -306,7 +321,7 @@ export default function MyBookings() {
                                 </Button>
                               )}
 
-                              {!hasStarted && ['PENDING', 'CONFIRMED'].includes(res.status) && (
+                              {showOrganizerActions && !hasStarted && ['PENDING', 'CONFIRMED'].includes(res.status) && (
                                 <Tooltip
                                   title={
                                     cancelLocked

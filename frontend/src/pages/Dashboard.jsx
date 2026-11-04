@@ -521,8 +521,19 @@ function Dashboard() {
                                 </Box>
                               </Box>
                             </Box>
-                            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                              <Button size="small" variant="outlined" fullWidth onClick={() => navigate('/bookings')}>
+                            <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                              {isConfirmedOrCheckedIn && (
+                                <Button
+                                  size="small"
+                                  variant="contained"
+                                  color="success"
+                                  startIcon={<VerifiedUserIcon fontSize="small" />}
+                                  onClick={() => navigate('/kiosk?door=thku-study-room')}
+                                >
+                                  {res.status === 'CHECKED_IN' ? (isEn ? 'Kiosk Details' : 'Yoklama') : (isEn ? 'Check-In' : 'Giriş Onayı')}
+                                </Button>
+                              )}
+                              <Button size="small" variant="outlined" onClick={() => navigate('/bookings')}>
                                 {isEn ? 'Manage' : 'Yönet'}
                               </Button>
                             </Box>

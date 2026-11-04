@@ -134,13 +134,14 @@ export default function AdminPanel() {
         action: 'USER_MODERATION',
         payload: { targetUserId: staffUser.id, modType: 'RESET_STAFF_TEMP_PASSWORD' },
       });
+      const staffAccount = res.data?.account || res.data?.user;
       setCredentialDialog({
         open: true,
         title: isEn ? 'New one-time temporary password' : 'Yeni tek seferlik geçici şifre',
-        email: staffUser.email,
-        temporaryPassword: res.data.temporaryPassword || '',
-        expiresAt: res.data.expiresAt,
-        emailQueued: Boolean(res.data.emailQueued),
+        email: staffAccount?.email || staffUser.email,
+        temporaryPassword: res.data?.temporaryPassword || '',
+        expiresAt: res.data?.expiresAt,
+        emailQueued: Boolean(res.data?.emailQueued || res.data?.emailDelivery?.queued),
       });
       fetchData();
     } catch (err) {
@@ -554,13 +555,14 @@ export default function AdminPanel() {
                   },
                 });
                 setCreateUserDialog((d) => ({ ...d, open: false }));
+                const staffAccount = res.data?.account || res.data?.user;
                 setCredentialDialog({
                   open: true,
                   title: isEn ? 'One-time temporary password' : 'Tek seferlik geçici şifre',
-                  email: res.data.user?.email || createUserDialog.email.trim().toLowerCase(),
-                  temporaryPassword: res.data.temporaryPassword || '',
-                  expiresAt: res.data.expiresAt,
-                  emailQueued: Boolean(res.data.emailQueued),
+                  email: staffAccount?.email || createUserDialog.email.trim().toLowerCase(),
+                  temporaryPassword: res.data?.temporaryPassword || '',
+                  expiresAt: res.data?.expiresAt,
+                  emailQueued: Boolean(res.data?.emailQueued || res.data?.emailDelivery?.queued),
                 });
                 fetchData();
               } catch (err) {

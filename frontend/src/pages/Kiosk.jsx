@@ -85,7 +85,7 @@ export default function KioskPage() {
       // ignore storage errors
     }
 
-    if (isStaff) {
+    if (isStaff && doorParam !== 'thku-study-room') {
       fetchKioskState(null, null);
       return;
     }
@@ -108,7 +108,7 @@ export default function KioskPage() {
       setGpsCoords({ lat: null, lng: null, status: 'UNSUPPORTED' });
       fetchKioskState(null, null);
     }
-  }, [status, isStaff, rawDoorParam, navigate, fetchKioskState]);
+  }, [status, isStaff, doorParam, rawDoorParam, navigate, fetchKioskState]);
 
   const handleOneClickConfirm = async () => {
     if (!kioskData?.personalSessionToken) return;
@@ -224,16 +224,28 @@ export default function KioskPage() {
             >
               Yönetim Paneline Dön
             </Button>
-            <Button
-              size="small"
-              variant="contained"
-              color="primary"
-              startIcon={<PrintIcon />}
-              onClick={() => window.print()}
-              sx={{ fontWeight: 700 }}
-            >
-              Kapı Posterini Yazdır (A4)
-            </Button>
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button
+                size="small"
+                variant="outlined"
+                color="info"
+                startIcon={<VerifiedUserIcon />}
+                onClick={() => navigate('/kiosk?door=thku-study-room')}
+                sx={{ fontWeight: 700 }}
+              >
+                Giriş Onay Ekranını Aç (Check-In)
+              </Button>
+              <Button
+                size="small"
+                variant="contained"
+                color="primary"
+                startIcon={<PrintIcon />}
+                onClick={() => window.print()}
+                sx={{ fontWeight: 700 }}
+              >
+                Kapı Posterini Yazdır (A4)
+              </Button>
+            </Box>
           </Box>
 
           <Box
@@ -457,6 +469,27 @@ export default function KioskPage() {
             />
           </Box>
         </Box>
+
+        {isStaff && (
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, pb: 1.5, borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <Chip
+              label="Yetkili Personel Modu"
+              size="small"
+              color="info"
+              variant="outlined"
+              sx={{ fontWeight: 700, fontSize: '0.72rem' }}
+            />
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<PrintIcon />}
+              onClick={() => navigate('/kiosk')}
+              sx={{ color: '#94A3B8', borderColor: 'rgba(255,255,255,0.2)', fontSize: '0.75rem' }}
+            >
+              Kapı Posteri Ekranına Geç
+            </Button>
+          </Box>
+        )}
 
         <Box sx={{ textAlign: 'center', mb: 3 }}>
           <Box
