@@ -1,43 +1,41 @@
 # Context: Navbar.jsx
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-`Navbar.jsx`, uygulamanın tüm iç sayfalarında (`Dashboard`, `StudyRooms`, `ReserveForm`, `MyBookings`, `Profile`, `AdminPanel`) üst kısımda sabit (`sticky`) olarak yer alan ana navigasyon, bildirim merkezi, dil değiştirici ve kullanıcı profili çubuğudur. Kullanıcının rolüne (`STUDENT`, `LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`) ve o an bulunduğu sayfaya göre menü bağlantılarını dinamik olarak adapte eder.
+`frontend/src/components/Navbar.jsx`, uygulamanın tüm iç sayfalarında (`Dashboard`, `StudyRooms`, `ReserveForm`, `MyBookings`, `Profile`, `AdminPanel`) üst kısımda sabit (`sticky`) olarak konumlanan ana navigasyon, bildirim merkezi, `TR` / `EN` dil değiştirici ve kullanıcı profili çubuğudur. Kullanıcının rolüne (`STUDENT`, `LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`) ve aktif görünüm moduna göre menü bağlantılarını dinamik olarak uyarlar.
 
-##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
+## 2. Teknoloji Yığını ve Bağımlılıklar
 
 - **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`)
 - **Kimlik Doğrulama:** `next-auth/react` (`useSession`, `signOut`)
 - **Yönlendirme:** `react-router-dom` (`useNavigate`, `useLocation`)
-- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN` anlık dil değişimi)
+- **Çoklu Dil (i18n):** `react-i18next` (`useTranslation`)
 - **API İstemcisi:** `../api` (`GET /api/invitations`, `GET /api/announcements`, `POST /api/invitations/respond`)
 
-##  3. İş Mantığı, Rol Bazlı Menü ve Bildirim Yönetimi
+## 3. İş Mantığı ve Bileşen Mimarisi
 
 ### A. Akıllı Rol ve Görünüm Modu Ayrımı (`showStaffNavbar` & `isLibrarianInStudentMode`)
-Sistemde 4 farklı rol bulunduğu için Navbar menüsü şu kurallarla şekillenir:
 1. **`ADMIN` (Kütüphane Müdürü) ve `SUPER_ADMIN` (BİM):**
-   - Hiçbir sayfada (`/profile` ve `/rules` dahil) öğrenci menülerini (*Ana Sayfa*, *Çalışma Odaları*, *Rezervasyonlarım*) görmezler.
-   - Üst menüde yalnızca **"Yönetim & Analiz Merkezi (` /admin `)"** ve **"Kapı QR Posteri (` /kiosk `)"** bağlantılarını görürler.
-   - Ayrıca `isAdminOrSuper` kontrolü sayesinde müdür ve BİM hesapları için gereksiz yere `GET /api/invitations` (öğrenci grup daveti) sorgusu atılmaz.
+   - Üst menüde öğrenci bağlantılarını görmezler; yalnızca **"Yönetim & Analiz Merkezi (`/admin`)"** ve **"Kapı QR Posteri (`/kiosk`)"** bağlantılarına erişirler.
+   - `isAdminOrSuper` kontrolü sayesinde bu roller için gereksiz yere `GET /api/invitations` isteği atılmaz.
 2. **`LIBRARIAN` (Kütüphane Görevlisi):**
-   - `/admin`, `/profile`, `/kiosk` ve `/rules` sayfalarındayken **Yetkili Navbar'ını** görür.
-   - Yalnızca yönetim panelindeki *"Öğrenci Ekranı (Rezervasyon Yap)"* butonuna basıp `/dashboard`, `/reserve` veya `/bookings` sayfalarına geçtiğinde (`isLibrarianInStudentMode === true`) öğrenci menülerini ve yanında **"Yönetim Merkezine Dön"** butonunu görür.
+   - Yönetim ekranlarındayken yetkili menüsünü görür; `/dashboard?studentView=true`, `/reserve` veya `/bookings` rotalarına geçtiğinde (`isLibrarianInStudentMode`) öğrenci menülerini ve **"Yönetim Merkezine Dön"** butonunu görür.
 3. **`STUDENT` (Öğrenci):**
-   - Standart öğrenci navigasyonunu (`NAV_LINKS`: `/dashboard`, `/reserve`, `/bookings`) görür.
+   - Standart öğrenci navigasyonunu (`NAV_LINKS`: `/dashboard`, `/reserve`, `/bookings`) kullanır.
+   - *(Not: Kurumsal `@thk.edu.tr` personelinin geçici şifre sonrası zorunlu şifre belirleme işlemi `App.jsx` içindeki `RequirePasswordChanged` koruyucusu tarafından `/change-password` rotasına yönlendirilerek otomatik yürütülür).*
 
-### B. Okunmuş/Okunmamış Bildirim Merkezi ve Pop-up Modalı (`localStorage` + `Dialog`)
-- Kullanıcının e-postasına özel bir `localStorage` anahtarı (`thku_read_notifs_${email}`) tutularak hangi duyuruların (`ann_${id}`) ve hangi grup davetlerinin (`inv_${id}`) okunduğu takip edilir.
-- Bildirim zili üzerindeki kırmızı `<Badge>` yalnızca okunmamış (`unreadCount`) bildirim sayısını gösterir; **"Tümünü okundu işaretle (`markAllAsRead`)"** butonuyla tek tıkla sıfırlanabilir.
-- Bildirim menüsündeki bir öğeye tıklandığında (`handleOpenNotifDetail`), öğe okundu işaretlenir ve ekranda detay modalı (`<Dialog>`) açılır:
-  - Bildirim bir **Duyuru (`ANNOUNCEMENT`)** ise tam metni okunur.
-  - Bildirim bir **Grup Daveti (`INVITATION`)** ise öğrenci başka sayfaya gitmeye gerek kalmadan doğrudan açılan pop-up içinden **"Kabul Et"** veya **"Reddet"** butonuna basarak daveti yanıtlayabilir (`handleRespondFromModal`).
+### B. Bildirim Merkezi ve Satır İçi Davet Yanıtlama (`localStorage` + `Dialog`)
+- Kullanıcı e-postasına özel `thku_read_notifs_${email}` anahtarıyla okunmuş duyuru (`ann_${id}`) ve grup davetleri (`inv_${id}`) takip edilir; okunmamış bildirim sayısı `<Badge>` üzerinde gösterilir ve `markAllAsRead` ile sıfırlanabilir.
+- Bildirime tıklandığında açılan `<Dialog>` penceresinden duyuru tam metni okunabilir veya grup daveti başka sayfaya gitmeden doğrudan **Kabul Et** / **Reddet** (`POST /api/invitations/respond`) ile yanıtlanabilir (banlı öğrenciler için Kabul Et butonu `disabled={isBanned}` ile kilitlidir).
 
-### C. Mobil Uyumluluk (Responsive Profile Dropdown)
-- Masaüstünde (`md`) orta kısımda görünen navigasyon butonları, mobil ekranlarda (`xs`, `sm`) ekranı sıkıştırmamak için gizlenir ve sağ üstteki kullanıcı avatarına tıklandığında açılan profil menüsünün içine (`display: { xs: 'flex', md: 'none' }`) otomatik olarak yerleşir.
+### C. Mobil Uyumlu Profil Menüsü ve `/randevu/` Çıkış Yönlendirmesi
+- Masaüstünde (`md`) yatay dizilen menü bağlantıları, mobil ekranlarda (`xs`, `sm`) sağ üstteki kullanıcı avatarı açılır menüsüne (`Menu`) taşınır.
+- Profil menüsündeki **Çıkış Yap** öğesi `signOut({ callbackUrl: `${window.location.origin}/randevu/` })` çağrısıyla oturumu sonlandırır ve kullanıcıyı `/randevu/` alt dizinindeki giriş sayfasına güvenli şekilde döndürür.
 
-##  4. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
+## 4. Bağlantılı Olduğu Dosyalar
 
+- `frontend/src/App.jsx`
+- `frontend/src/api.js`
 - `backend/src/app/api/invitations/route.js` (`GET`)
 - `backend/src/app/api/invitations/respond/route.js` (`POST`)
 - `backend/src/app/api/announcements/route.js` (`GET`)

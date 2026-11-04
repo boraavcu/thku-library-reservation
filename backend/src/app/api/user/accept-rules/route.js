@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import prisma from "@/lib/db";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
 
 export async function POST() {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
 
   if (!session || !session.user?.email) {
     return NextResponse.json({ error: "Yetkisiz Erişim" }, { status: 401 });

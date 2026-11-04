@@ -12,7 +12,7 @@ export async function GET(request) {
   if (rulesCheck) return rulesCheck;
 
   try {
-    runReservationLifecycleChecks().catch(() => {});
+    await runReservationLifecycleChecks();
 
     const { searchParams } = new URL(request.url);
     const dateParam = searchParams.get("date");

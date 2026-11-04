@@ -2,18 +2,20 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
 
 export async function GET() {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    // 30 dakikası dolan davetleri arka planda temizle
-    runReservationLifecycleChecks().catch(() => {});
+    await runReservationLifecycleChecks();
 
     const user = await prisma.user.findUnique({
       where: { email: session.user.email.trim().toLowerCase() },
@@ -62,7 +64,6 @@ export async function GET() {
       },
     });
 
-    // UTC saatine göre (21:00-24:00 kayması olmadan) bitiş saati geçmemiş olanları filtrele
     const validInvitations = invitations.filter((inv) => {
       const resDateStr = new Date(inv.reservation.reservationDate).toISOString().split("T")[0];
       if (resDateStr > todayTrStr) return true;

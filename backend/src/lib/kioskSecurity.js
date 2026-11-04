@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import redis from "@/lib/redis";
+import { readKioskPresence } from "./kioskStore.js";
 
 export const LIBRARY_LAT = Number(process.env.LIBRARY_LAT || 39.9458257845895);
 export const LIBRARY_LNG = Number(process.env.LIBRARY_LNG || 32.69035341292343);
@@ -8,6 +8,9 @@ export const DEVICE_LOCK_TTL = 14400; // 4 Saat
 
 const THKU_PUBLIC_PREFIXES = ["212.154.67.", "95.183.206.", "193.255."];
 const THKU_LOCAL_WIFI_PREFIX = "10.2.";
+
+const DUMMY_DEVICE_IDS = new Set(["", "no-dev-id", "dev_fallback_browser", "undefined", "null"]);
+const DUMMY_HW_FPS = new Set(["", "no-hw", "hw_fallback", "undefined", "null"]);
 
 export function getClientIp(request) {
   const forwarded = request.headers.get("x-forwarded-for");
@@ -24,38 +27,69 @@ export function getClientIp(request) {
   return rawIp;
 }
 
+export function sanitizeDeviceId(rawDeviceId) {
+  const cleaned = String(rawDeviceId || "").trim();
+  return DUMMY_DEVICE_IDS.has(cleaned) ? "" : cleaned;
+}
+
 export function getCrossIncognitoSignature(request) {
   const ip = getClientIp(request);
   const ua = request.headers.get("user-agent") || "no-ua";
-  const hwFp = request.headers.get("x-hardware-fp") || "no-hw";
+  const rawHwFp = String(request.headers.get("x-hardware-fp") || "").trim();
   const netType = request.headers.get("x-net-type") || "unknown";
-  const headerDeviceId = request.headers.get("x-device-id") || "no-dev-id";
+  const headerDeviceId = sanitizeDeviceId(request.headers.get("x-device-id"));
 
-  // Gizli sekmede (Incognito) cookie ve localStorage (x-device-id) sıfırlanır.
-  // Bu nedenle gizli sekme kilitleri kesinlikle localStorage'a (x-device-id) bağlı OLMAMALIDIR:
-  // 1) hwLockHash: IP + Donanım Parmak İzi (GPU/Ekran/CPU) -> Gizli sekmeyi ve aynı cihazdaki farklı tarayıcıları yakalar.
-  const hwLockHash =
-    hwFp !== "no-hw"
-      ? crypto
-          .createHash("sha256")
-          .update(`${ip}|${hwFp}`)
-          .digest("hex")
-          .substring(0, 24)
-      : null;
+  const hasValidHw = !DUMMY_HW_FPS.has(rawHwFp);
 
-  // 2) ipUaLockHash: IP + User-Agent -> Gizli sekmede WebGL kısıtlansa bile aynı cihazdaki tarayıcıyı %100 yakalar.
-  const ipUaLockHash = crypto
-    .createHash("sha256")
-    .update(`${ip}|${ua}`)
-    .digest("hex")
-    .substring(0, 24);
+  // 1) hwLockHash: IP + Donanım Parmak İzi (GPU/Ekran/CPU) + User-Agent
+  // Gizli sekmeyi (Incognito) %100 yakalar, aynı kampüs Wi-Fi (NAT) üzerindeki farklı telefonların çakışmasını önler.
+  const hwLockHash = hasValidHw
+    ? crypto
+        .createHash("sha256")
+        .update(`${ip}|${rawHwFp}|${ua}`)
+        .digest("hex")
+        .substring(0, 24)
+    : "";
+
+  // 2) ipUaLockHash: Kampüs Wi-Fi NAT (eduroam) arkasında salt IP + User-Agent çakışmasını
+  // önlemek için yalnızca geçerli donanım parmak izi varsa üretilir.
+  const ipUaLockHash = hasValidHw
+    ? crypto
+        .createHash("sha256")
+        .update(`${ip}|${ua}|${rawHwFp}`)
+        .digest("hex")
+        .substring(0, 24)
+    : "";
 
   return {
     ip,
+    ua,
+    hwFp: hasValidHw ? rawHwFp : "",
     hwLockHash,
     ipUaLockHash,
-    headerDeviceId: headerDeviceId !== "no-dev-id" ? headerDeviceId : null,
+    headerDeviceId: headerDeviceId || null,
     netType,
+  };
+}
+
+export function buildKioskLocksForRequest(request, reservationId, signature) {
+  const cookieDeviceId = sanitizeDeviceId(
+    request.cookies?.get?.(`thku_kiosk_dev_${reservationId}`)?.value
+  );
+  const deviceKey = cookieDeviceId || signature.headerDeviceId || "";
+  const hardwareKey = signature.hwLockHash || "";
+  const ipUaKey = signature.ipUaLockHash || "";
+
+  const locks = [];
+  if (deviceKey) locks.push({ type: "DEVICE", key: deviceKey });
+  if (hardwareKey) locks.push({ type: "HARDWARE", key: hardwareKey });
+  if (ipUaKey) locks.push({ type: "IP_UA", key: ipUaKey });
+
+  return {
+    deviceKey,
+    hardwareKey,
+    ipUaKey,
+    locks,
   };
 }
 
@@ -111,7 +145,6 @@ export async function verifyCampusNetworkAndVpn(ip, netType) {
         { signal: AbortSignal.timeout(3000) }
       );
 
-      // Rate-limit (429) durumunda yerel geliştirme/kampüs iç ağında bloklama yapma
       if (res.status === 429 && isPrivateOrLocal) {
         return { allowed: true };
       }
@@ -162,50 +195,34 @@ export async function verifyCampusNetworkAndVpn(ip, netType) {
 
 export async function checkDeviceLockForReservation(request, reservationId, currentUserId, signature) {
   const cookieName = `thku_checkin_lock_${reservationId}`;
-  const cookieOwner = request.cookies.get(cookieName)?.value || null;
+  const cookieOwner = request.cookies?.get?.(cookieName)?.value || null;
 
-  const deviceKey = signature.headerDeviceId
-    ? `kiosk:device_lock:${reservationId}:${signature.headerDeviceId}`
-    : null;
-  const hwKey = signature.hwLockHash
-    ? `kiosk:hw_lock:${reservationId}:${signature.hwLockHash}`
-    : null;
-  const ipUaKey = signature.ipUaLockHash
-    ? `kiosk:ipua_lock:${reservationId}:${signature.ipUaLockHash}`
-    : null;
+  const { deviceKey, hardwareKey, ipUaKey, locks } = buildKioskLocksForRequest(
+    request,
+    reservationId,
+    signature
+  );
 
-  const [deviceOwner, hwOwner, ipUaOwner] = await Promise.all([
-    deviceKey ? redis.get(deviceKey) : Promise.resolve(null),
-    hwKey ? redis.get(hwKey) : Promise.resolve(null),
-    ipUaKey ? redis.get(ipUaKey) : Promise.resolve(null),
-  ]);
+  const { owners, checkedUserIds } = await readKioskPresence(reservationId, {
+    deviceKey,
+    hardwareKey,
+    ipUaKey,
+  });
 
-  const conflictingOwner = [cookieOwner, deviceOwner, hwOwner, ipUaOwner].find(
+  const conflictingOwner = [cookieOwner, owners.DEVICE, owners.HARDWARE, owners.IP_UA].find(
     (owner) => owner && owner !== currentUserId
   );
-  const lockedOwner = conflictingOwner || cookieOwner || deviceOwner || hwOwner || ipUaOwner || null;
+  const lockedOwner =
+    conflictingOwner || cookieOwner || owners.DEVICE || owners.HARDWARE || owners.IP_UA || null;
   const isLockedByAnotherUser = Boolean(conflictingOwner);
 
   return {
     isLockedByAnotherUser,
     lockedOwner,
     cookieName,
-    keys: { deviceKey, hwKey, ipUaKey },
+    checkedUserIds,
+    presence: { owners, checkedUserIds },
+    locks,
+    keys: { deviceKey, hwKey: hardwareKey, ipUaKey },
   };
-}
-
-export async function sealDeviceLockForReservation(keys, userId) {
-  const ops = [];
-  if (keys.deviceKey) {
-    ops.push(redis.set(keys.deviceKey, userId, "EX", DEVICE_LOCK_TTL));
-  }
-  if (keys.hwKey) {
-    ops.push(redis.set(keys.hwKey, userId, "EX", DEVICE_LOCK_TTL));
-  }
-  if (keys.ipUaKey) {
-    ops.push(redis.set(keys.ipUaKey, userId, "EX", DEVICE_LOCK_TTL));
-  }
-  if (ops.length > 0) {
-    await Promise.all(ops);
-  }
 }

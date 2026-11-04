@@ -1,261 +1,160 @@
 <div align="center">
 
-#  THK Üniversitesi 7/24 Kütüphane Grup Çalışma Odaları<br/>Rezervasyon ve Kiosk Yoklama Sistemi
+# THK Üniversitesi 7/24 Kütüphane Grup Çalışma Odaları<br/>Rezervasyon ve Kiosk Yoklama Sistemi
 
-### Kurumsal Sistem Mimarisi, Güvenlik Standartları ve Mühendislik Dokümantasyonu (v4.0 SOLID Production)
+### Kurumsal Sistem Mimarisi, Güvenlik Standartları ve Mühendislik Dokümantasyonu (v5.0 SOLID Production)
 
 <p align="center">
   <a href="/README.md"><img src="https://img.shields.io/badge/%F0%9F%8F%9B%EF%B8%8F_Ana_Sayfa-Root_README-0F172A?style=for-the-badge" alt="Root README" /></a>
   <a href="/docs/THKU_LIBRARY_RESERVATION_SYSTEM_EN.md"><img src="https://img.shields.io/badge/%F0%9F%8C%90_Switch_Language-English_(EN)-C8102E?style=for-the-badge" alt="English Version" /></a>
-  <a href="/backend/docs/README.md"><img src="https://img.shields.io/badge/%E2%9A%99%EF%B8%8F_Backend_Dok%C3%BCmanlar%C4%B1-30_Mod%C3%BCl-1E3A8A?style=for-the-badge" alt="Backend Docs" /></a>
-  <a href="/frontend/docs/README.md"><img src="https://img.shields.io/badge/%F0%9F%92%BB_Frontend_Dok%C3%BCmanlar%C4%B1-21_Mod%C3%BCl-047857?style=for-the-badge" alt="Frontend Docs" /></a>
+  <a href="/backend/docs/README.md"><img src="https://img.shields.io/badge/%E2%9A%99%EF%B8%8F_Backend_Dok%C3%BCmanlar%C4%B1-38_Mod%C3%BCl-1E3A8A?style=for-the-badge" alt="Backend Docs" /></a>
+  <a href="/frontend/docs/README.md"><img src="https://img.shields.io/badge/%F0%9F%92%BB_Frontend_Dok%C3%BCmanlar%C4%B1-24_Mod%C3%BCl-047857?style=for-the-badge" alt="Frontend Docs" /></a>
+  <a href="/deploy/README.md"><img src="https://img.shields.io/badge/%F0%9F%9A%80_Canl%C4%B1_Da%C4%9F%C4%B1t%C4%B1m-Apache_%2B_PM2-7C3AED?style=for-the-badge" alt="Deploy Docs" /></a>
 </p>
 
 </div>
 
 ---
 
-##  1. Proje Özeti ve Mimari Vizyon (Executive Overview)
+## 1. Proje Özeti ve Mimari Vizyon (Executive Overview)
 
-Bu proje, **Türk Hava Kurumu Üniversitesi (THKÜ)** öğrencileri, akademisyenleri ve kütüphane yönetimi için kurumsal standartlarda ve **SOLID** yazılım mimarisi prensipleriyle geliştirilmiş, **7/24 kesintisiz hizmet veren tam otonom bir Grup Çalışma Odaları Rezervasyon, Fiziksel Kiosk QR Yoklama ve Analitik Yönetim Sistemidir**.
+Bu proje, **Türk Hava Kurumu Üniversitesi (THKÜ)** öğrencileri, akademisyenleri ve kütüphane yönetimi için kurumsal standartlarda ve **SOLID** yazılım mimarisi prensipleriyle geliştirilmiş, harici bellek servisine (Redis vb.) bağımlılık duymadan doğrudan **PostgreSQL atomik kilitleri** üzerinde çalışan **7/24 kesintisiz Grup Çalışma Odaları Rezervasyon, Fiziksel Kiosk QR Yoklama ve Analitik Yönetim Sistemidir**.
 
 | Çekirdek Yetenek | Mühendislik Çözümü ve Operasyonel Katkısı |
 | :--- | :--- |
-| ** Microsoft Entra ID (Azure AD) SSO & Rol İzolasyonu** | Kurumsal tekil oturum açma, otomatik ban süresi denetimi (`Auto-Unban`) ve alt alan adı (`Subdomain`) düzeyinde Edge JWT rol izolasyonu. |
-| ** 4 Katmanlı Fiziksel Kiosk & WebGL Donanım Kilidi** | Kapı QR parametresi, Kampüs Wi-Fi (`eduroam`) & Anti-VPN denetimi, Haversine GPS yarıçapı ve gizli sekme (Incognito) korumalı WebGL GPU donanım parmak izi (`kioskSecurity.js`). |
-| ** Otonom Yaşam Döngüsü & Adil No-Show Motoru** | Her 30 saniyede bir çalışan zamanlayıcı (`lifecycle.js`), kapıda QR okutan öğrenciyi koruyan adil ceza algoritması ve 3/3 ihlalde 30 gün otomatik ban (`penaltyService.js`). |
-| ** Merkezi Rezervasyon Politikası & Kota Motoru** | 7 dinamik sistem kuralı, günlük 1 randevu kotası, gece (`21:00–24:00`) / sabah (`00:00–08:00`) ardışık kuralı ve banlanan öğrencilerin randevularını adil düşürme servisi (`reservationPolicy.js`). |
-| ** Dinamik "Walk-In" Zaman Penceresi (`timeUtils.js`)** | Gelmeyen veya erken boşaltılan odaları ara dakikalarda saniyesinde kullanıma açan ve yeni gruba özel 15 dakikalık Kiosk onay penceresi tanımlayan algoritma. |
-| ** Olay Güdümlü Kurumsal HTML E-Posta Servisi** | Arayüzü bloklamayan (Zero-Lag), `EmailQueue` veritabanı kuyruklu ve XSS korumalı duyarlı (responsive) kurumsal HTML şablonlu bildirim motoru (`emailService.js`). |
-| ** 6 Sekmeli Yönetim, Isı Haritası & A4 PDF Raporlama** | 7/24 yoğunluk ısı haritası, bölüm/oda analizleri, tek tıkla A4 PDF faaliyet raporu, 7 dinamik kural motoru ve 180 günlük denetim logları (`AdminPanel.jsx` & `handlers.js`). |
+| **Microsoft Entra ID SSO & Kurumsal Personel Şifre Girişi** | Öğrenciler için Microsoft Entra ID (Azure AD) SSO; `@thk.edu.tr` personeli için `scrypt` (`N=16384`) şifre girişi, 72 saatlik geçici şifre, zorunlu şifre yenileme (`mustChangePassword`), `sessionVersion` ile anında oturum düşürme ve PostgreSQL tabanlı brute-force koruması (`loginRateLimit.js`). |
+| **PostgreSQL Atomik 4 Katmanlı Kiosk & WebGL Donanım Kilidi** | Kapı QR parametresi, Kampüs Wi-Fi (`eduroam`) & Anti-VPN denetimi, opsiyonel Haversine GPS yarıçapı ve gizli sekme (Incognito) korumalı WebGL GPU + IP/UA cihaz kilidi (`kioskSecurity.js`, `kioskStore.js`, `SELECT ... FOR UPDATE`). |
+| **Otonom Yaşam Döngüsü & Adil No-Show Motoru** | Her 30 saniyede bir çalışan zamanlayıcı (`lifecycle.js`), süresi dolan `CONFIRMED` ve `CHECKED_IN` randevuları eksiksiz tamamlayan durum makinesi, kapıda QR okutan öğrenciyi koruyan adil ceza algoritması ve 3/3 ihlalde 30 gün otomatik ban (`penaltyService.js`). |
+| **Merkezi Rezervasyon Politikası & Kota Motoru** | 7 dinamik sistem kuralı, günlük 1 randevu kotası, gece (`21:00–24:00`) / sabah (`00:00–08:00`) ardışık kuralı ve banlanan öğrencilerin randevularını adil düşürme servisi (`reservationPolicy.js`). |
+| **Dinamik "Walk-In" Zaman Penceresi (`timeUtils.js`)** | Gelmeyen veya erken boşaltılan odaları ara dakikalarda saniyesinde kullanıma açan ve yeni gruba özel 15 dakikalık Kiosk onay penceresi tanımlayan algoritma. |
+| **Olay Güdümlü Kurumsal HTML E-Posta Servisi** | Arayüzü bloklamayan (Zero-Lag), `EmailQueue` veritabanı kuyruklu ve XSS korumalı duyarlı (responsive) kurumsal HTML şablonlu bildirim motoru (`emailService.js`). |
+| **`/randevu` Alt Dizin & Apache + PM2 Üretim Mimarisi** | Mevcut kurumsal web sunucusundaki diğer uygulamaları etkilemeden `/randevu` alt dizininde (`runtimePaths.js`, `publicPaths.js`, `apache-randevu.conf`) izole çalışan üretime hazır mimari. |
 
 ---
 
-##  2. Teknoloji Yığını ve Altyapı Mimarisi (Tech Stack)
+## 2. Teknoloji Yığını ve Altyapı Mimarisi (Tech Stack)
 
-Proje; yüksek erişilebilirlik, sıfır yarış durumu (race-condition) ve hızlı yanıt süreleri için ayrıştırılmış (decoupled) modern bir Full-Stack JavaScript mimarisi üzerine inşa edilmiştir:
+Proje; sıfır yarış durumu (race-condition), tek veritabanı üzerinde atomik tutarlılık ve hızlı yanıt süreleri için ayrıştırılmış (decoupled) modern bir Full-Stack JavaScript mimarisi üzerine inşa edilmiştir:
 
 | Katman | Teknoloji / Kütüphane | Mimari Rolü ve Kullanım Amacı |
 | :--- | :--- | :--- |
-| **Frontend (İstemci)** | React 19 (Vite 7), React Router v7 | Bileşen tabanlı tek sayfa uygulaması (SPA) ve istemci yönlendirme ağacı |
+| **Frontend (İstemci)** | React 19 (Vite 7), React Router v7 | `/randevu` alt dizin destekli (`runtimePaths.js`) tek sayfa uygulaması (SPA) |
 | **UI & Tasarım Sistemi** | Material-UI (`@mui/material` v7), `theme.js` | Kurumsal renk paleti (`#C8102E` & `#0F172A`), tipografi ve `@media print` A4 rapor uyumluluğu |
 | **Çoklu Dil (i18n)** | `i18next` & `react-i18next` | Tüm arayüz, sözleşme, hata mesajları ve bildirimlerde **%100 Türkçe (`TR`) ve İngilizce (`EN`)** desteği |
-| **Backend (API & Edge)** | Next.js 16 (App Router), Edge Middleware | RESTful API uç noktaları (`/api/*`), arka plan zamanlayıcısı ve JWT rol güvenlik duvarı |
-| **Kimlik Doğrulama** | `next-auth` (v4) — Azure AD Provider | Microsoft Entra ID OAuth 2.0 / OpenID Connect SSO + `.env` kontrollü güvenli Demo Modu |
-| **İlişkisel Veritabanı** | PostgreSQL 16 & Prisma ORM (`db.js`) | 20 modelli ilişkisel veri şeması, `Serializable` transaction koruması ve HMR bağlantı havuzu taşmasını önleyen *Singleton* deseni |
-| **Önbellek & Durum** | Redis (`ioredis` — `redis.js`) | Tek kullanımlık Kiosk OTP jetonları, canlı grup yoklama kümeleri, dağıtık yaşam döngüsü kilidi ve 4 saatlik cihaz kilitleri |
-| **E-Posta Motoru** | `nodemailer` (`emailService.js`) | Kurumsal SMTP/TLS entegrasyonu, `EmailQueue` hata toleranslı kuyruk ve XSS korumalı HTML şablon motoru |
+| **Backend (API & Edge)** | Next.js 16 (App Router), Edge Middleware | Headless RESTful API uç noktaları (`/api/*`), arka plan zamanlayıcısı ve JWT rol güvenlik duvarı |
+| **Kimlik Doğrulama** | `next-auth` (v4) — Azure AD + Credentials | Microsoft Entra ID SSO + `@thk.edu.tr` Personel Şifre Girişi (`scrypt`) + `.env` kontrollü Demo Modu |
+| **Veritabanı & Kiosk Durumu** | PostgreSQL 16 & Prisma ORM (`db.js`) | **24 modelli** ilişkisel şema; `Serializable` randevu transaction'ları ve `FOR UPDATE` satır kilitli Kiosk OTP, yoklama ve 4 saatlik cihaz kilidi tabloları (`kioskStore.js`) |
+| **E-Posta Motoru** | `nodemailer` (`emailService.js`, `staffMail.js`) | Kurumsal SMTP/TLS entegrasyonu, `EmailQueue` hata toleranslı kuyruk ve XSS korumalı HTML şablon motoru |
+| **Üretim Dağıtımı** | Apache (`*:443` Reverse Proxy) + PM2 | `frontend/dist` statik sunumu, `/randevu/api/` ters vekil yönlendirmesi ve `thku-randevu-api` süreç yönetimi |
 
 ---
 
-##  3. NextAuth + Microsoft Azure AD (Entra ID) Tam Akış ve Rol Mimarisi
+## 3. Kimlik Doğrulama Mimarisi: Azure AD SSO ve Kurumsal Personel Şifre Girişi
 
-### 3.1. Amaç ve Alan Adı (Domain) Ayrımı
-Sistem, tek bir Microsoft Azure AD kurumsal giriş kapısı üzerinden hem öğrencileri hem de kütüphane ve bilgi işlem yetkililerini doğrulamak ve yetkilerine göre izole edilmiş panellere yönlendirmek amacıyla tasarlanmıştır:
+### 3.1. Çift Kanallı Kurumsal Giriş Yapısı (`Login.jsx` & `[...nextauth]/route.js`)
+Sistem iki kurumsal kimlik doğrulama kanalını aynı anda destekler:
+1. **Microsoft Entra ID (Azure AD) Kurumsal SSO (`azure-ad`):**
+   - `@stu.thk.edu.tr` öğrencileri ve Microsoft SSO kullanan personel tek tıkla giriş yapar.
+   - İlk kez giren kullanıcılar `STUDENT` rolüyle kaydedilir; mevcut yetkili roller (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`) korunur ve yalnızca profil bilgileri senkronize edilir.
+   - **Otomatik Ban Açma (`Auto-Unban`):** `isBanned: true` olan kullanıcının `banUntil` süresi dolmuşsa giriş anında banı ve aktif `PenaltyHistory` kayıtları otomatik temizlenir.
+2. **Kurumsal `@thk.edu.tr` Personel Şifre Girişi (`staff-login`):**
+   - Azure AD lisansı veya yönlendirmesi olmadan doğrudan görevli/yönetici erişimi için yalnızca `@thk.edu.tr` uzantılı (`@stu.thk.edu.tr` hariç) hesaplara açıktır.
+   - Şifreler Node.js yerleşik `crypto.scrypt` (`N=16384, r=8, p=1, 64 byte`) ve 16 byte rastgele tuz ile özetlenir; doğrulama `timingSafeEqual` ile sabit zamanda yapılır (`staffAuth.mjs`).
+   - `SUPER_ADMIN` yönetim panelinden kurumsal hesap oluşturduğunda veya şifre sıfırladığında **72 saat geçerli tek gösterimlik geçici şifre** üretilir ve `mustChangePassword = true` işaretlenir.
+   - Geçici şifreyle giriş yapan personel `RequirePasswordChanged` (`App.jsx`) ve backend `checkMustChangePassword` (`passwordGate.js`) kapılarıyla şifresini değiştirene kadar `/change-password` ekranında tutulur.
+   - Şifre değişimi, rol değişikliği veya hesabın pasife alınması (`isActive = false`) durumunda `sessionVersion` artırılarak açık olan tüm eski JWT oturumları anında geçersiz kılınır.
+   - `login_rate_limits` tablosu üzerinden hem e-posta hem istemci IP bazında 10 dakikalık pencerede kaba kuvvet (brute-force) koruması uygulanır (`loginRateLimit.js`).
 
-- **`<OGRENCI_PORTALI_DOMAIN>`** *(Canlı ortamda yapılandırılır)* → **Öğrenci Çalışma Odası Portalı** (`STUDENT`)
-- **`<YONETIM_PANELI_SUBDOMAIN>`** *(Canlı ortamda yapılandırılır)* → **Kütüphane Yönetim & Analiz Merkezi** (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`)
-
-### 3.2. Detaylı OAuth 2.0 / OpenID Connect Akış Adımları
-1. **Adım 1 — Kullanıcı Giriş Talebi:** Kullanıcı `Login.jsx` ekranında *"Microsoft ile Giriş Yap"* butonuna tıklar (`Frontend → /api/auth/signin/azure-ad`).
-2. **Adım 2 — NextAuth Provider Başlatma:** Backend tarafında NextAuth; `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID`, `NEXTAUTH_URL` ve `NEXTAUTH_SECRET` parametreleriyle OAuth akışını başlatır.
-3. **Adım 3 — Azure AD’ye Yönlendirme:** Kullanıcı Microsoft Entra ID oturum açma sayfasına yönlendirilir.
-4. **Adım 4 — Kurumsal Kimlik Doğrulama:** Azure AD kullanıcı adını, parolayı ve kurumsal MFA süreçlerini doğrular; yalnızca kuruma ait öğrenci ve personel hesaplarına izin verilir.
-5. **Adım 5 — Callback İşlemi:** Doğrulama sonrası kullanıcı `/api/auth/callback/azure-ad` uç noktasına döndürülür; authorization code ile access/id token değişimi yapılır.
-6. **Adım 6 — Session / JWT Oluşturma:** NextAuth kullanıcı için `NEXTAUTH_SECRET` ile kriptografik olarak imzalanmış JWT oturumu üretir.
-7. **Adım 7 — Kullanıcı Bilgisinin İşlenmesi ve Otonom Denetim (`auth/[...nextauth]/route.js`):**
-   - Kullanıcı veritabanında yoksa `STUDENT` rolüyle otomatik oluşturulur; varsa Microsoft profil fotoğrafı (`avatarUrl`) senkronize edilir (mevcut yetkili rolleri korunur, ezilmez).
-   - **Otomatik Ban Açma (`Auto-Unban`):** Kullanıcının `isBanned` durumu `true` ise ancak `banUntil` tarihi dolmuşsa, sistem giriş anında kullanıcının banını ve ceza puanlarını otomatik sıfırlar ve aktif `PenaltyHistory` kayıtlarını pasife çeker.
-   - Kullanıcının güncel `noShowCount` (aktif uyarı sayısı), `isBanned`, `banUntil`, `banReason` ve `acceptedAgreementVersion` bilgileri doğrudan `session.user` nesnesine gömülür.
-8. **Adım 8 — Yetkilendirme, Sözleşme ve Yönlendirme:**
-   - Kullanıcı aktif sözleşmeyi (`SystemAgreement`) henüz onaylamamışsa zorunlu olarak `/rules` (`RulesAcceptance.jsx`) sayfasına yönlendirilir.
-   - `LIBRARIAN`, `ADMIN` ve `SUPER_ADMIN` doğrudan `/admin` paneline; `STUDENT` ise `/dashboard` ekranına yönlendirilir.
-
-### 3.3. Mantıksal Akış Diyagramı
+### 3.2. Mantıksal Akış Diyagramı
 
 ```text
 +-------------------------------------------------------------------------+
 |                  [ Kullanıcı Tarayıcısı (Login.jsx) ]                   |
 +-------------------------------------------------------------------------+
-                                     |
-                        "Microsoft ile Giriş Yap"
-                                     |
-                                     v
-+-------------------------------------------------------------------------+
-|              [ Backend: /api/auth/signin/azure-ad ]                     |
-|         (NextAuth Azure AD Provider & OAuth 2.0 Başlatma)               |
-+-------------------------------------------------------------------------+
-                                     |
-                                     v
-+-------------------------------------------------------------------------+
-|            [ Microsoft Entra ID (Azure AD) Kurumsal SSO ]               |
-|            (Kurumsal Hesap Doğrulama + MFA + Token Üretimi)             |
-+-------------------------------------------------------------------------+
-                                     |
-                                     v
-+-------------------------------------------------------------------------+
-|             [ Backend: /api/auth/callback/azure-ad ]                    |
-|        (JWT İmzalama & Oturum Zenginleştirme - NEXTAUTH_SECRET)         |
-+-------------------------------------------------------------------------+
+                   |                                   |
+     "Microsoft ile Giriş Yap"             "Kurumsal @thk.edu.tr Şifre Girişi"
                    |                                   |
                    v                                   v
 +------------------------------------+   +--------------------------------+
-|       [ Prisma / PostgreSQL ]      |   |   [ Next.js Edge Middleware ]  |
-| - Kullanıcı Upsert & Avatar Sync   |   | - Yönetim Alt Alan Adı Duvarı  |
-| - Auto-Unban (Süresi Dolan Banlar) |   | - Rol & Yetki İzolasyonu       |
+|  [ /api/auth/signin/azure-ad ]     |   | [ /api/auth/callback/staff ]   |
+|  Microsoft Entra ID OAuth 2.0      |   | PostgreSQL Rate-Limit + scrypt |
 +------------------------------------+   +--------------------------------+
                    |                                   |
                    +-----------------+-----------------+
                                      |
                                      v
 +-------------------------------------------------------------------------+
-|         [ Aktif Sözleşme (SystemAgreement) & Rol Yönlendirici ]         |
+|       [ JWT & Session Zenginleştirme (auth/[...nextauth]/route.js) ]    |
+|  - Auto-Unban, isActive & sessionVersion Kontrolü, mustChangePassword   |
 +-------------------------------------------------------------------------+
                    |                                   |
-        (STUDENT Rolü)                 (LIBRARIAN / ADMIN / SUPER_ADMIN)
+     (mustChangePassword = true)         (Aktif Sözleşme & Rol Yönlendirme)
                    v                                   v
-      [ Öğrenci: /dashboard ]               [ Yetkili: /admin & /kiosk ]
+      [ /change-password ]               [ /rules -> /dashboard | /admin ]
 ```
 
-### 3.4. Olası Kimlik Doğrulama Hata Senaryoları ve Çözümleri
+---
 
-| Hata Kodu | Karşılaşılan Durum | Teknik Nedeni ve Çözümü |
-| :--- | :--- | :--- |
-| **`AADSTS90112`** | *Application identifier is expected to be a GUID* | `.env` içindeki `AZURE_AD_CLIENT_ID` yanlış girilmiş veya şablon (placeholder) olarak bırakılmıştır. |
-| **`NO_SECRET`** | NextAuth başlatma hatası | `NEXTAUTH_SECRET` ortam değişkeni tanımlanmamıştır (`openssl rand -base64 32` ile üretilmelidir). |
-| **`OAuthSignin`** | Giriş sayfasına geri yönlendirme | Azure Portal'daki Redirect URI ile backend `/api/auth/callback/azure-ad` adresi uyuşmuyordur veya Client Secret süresi (`expire`) dolmuştur. |
+## 4. Kurumsal Güvenlik ve Secret Yönetim Mimarisi
+
+Hassas yapılandırma değişkenleri (`DATABASE_URL`, `NEXTAUTH_SECRET`, `AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID`, `SMTP_PASS`, `LIBRARY_LAT`, `LIBRARY_LNG`, `CAMPUS_IP_PREFIX`) `.gitignore` ile kaynak koddan izole edilmiştir ve üretim ortamında yalnızca sunucu `.env` dosyasında veya kurumsal **Secret Manager / Key Vault** üzerinde tutulur. Canlı ortamda `ENABLE_DEMO_LOGIN="false"` ve `VITE_ENABLE_DEMO_LOGIN="false"` yapılarak demo giriş kanalı hem arayüzde hem API seviyesinde kapatılır.
 
 ---
 
-##  4. Kurumsal Güvenlik ve Secret Yönetim Mimarisi (Production & Key Vault Standartları)
+## 5. Çekirdek Mühendislik Modülleri ve Sistem İnovasyonları (SOLID)
 
-### 4.1. Amaç ve Ortam Ayrımı
-Geliştirme ortamında `.env` dosyasında tutulan hassas yapılandırma bilgilerinin (`AZURE_AD_CLIENT_ID`, `AZURE_AD_CLIENT_SECRET`, `AZURE_AD_TENANT_ID`, `NEXTAUTH_SECRET`, `DATABASE_URL`, `SMTP_PASS`, `LIBRARY_LAT`, `LIBRARY_LNG`, `CAMPUS_IP_PREFIX`), Production (Canlı) ortamda kaynak koddan tamamen ayrıştırılarak güvenli ortam değişkenleri veya **Azure Key Vault** üzerinde merkezi olarak yönetilmesi hedeflenmiştir.
+### 5.1. PostgreSQL Tabanlı 4 Katmanlı Fiziksel Kiosk QR ve "Anti-Incognito" Cihaz Kilidi (`kioskSecurity.js`, `kioskStore.js`, `kiosk/qr`, `checkin/validate`, `api.js`)
+Sistem harici Redis sunucusuna ihtiyaç duymadan tüm Kiosk durumunu PostgreSQL üzerinde atomik olarak yönetir:
+1. **Fiziksel Kapı QR ve Oturum Dönüş Hafızası:** Öğrenciler yalnızca kapıdaki A4 posterde yer alan `?door=thku-study-room` parametresiyle Kiosk ekranını açabilir. Oturumu kapalı olan öğrenci QR okuttuğunda `sessionStorage` (`thku_kiosk_return_door`) kapı kodunu saklar ve giriş yapar yapmaz otomatik olarak Kiosk onay ekranına geri döndürür (`Kiosk.jsx` & `Login.jsx`).
+2. **Kampüs Wi-Fi (`eduroam`), Mobil Veri ve Anti-VPN Denetimi (`verifyCampusNetworkAndVpn`):** Hücresel veri (`x-net-type: cellular`) ve kurumsal VPN alt ağları (`CAMPUS_VPN_PREFIX`) engellenir; `ENFORCE_CAMPUS_WIFI="true"` olduğunda THKÜ yerel Wi-Fi ve ULAKNET IP blokları doğrulanır.
+3. **Opsiyonel Haversine GPS Yarıçapı (`ENFORCE_CAMPUS_GPS`):** Aktif edildiğinde kütüphane merkez koordinatlarına (`LIBRARY_LAT`, `LIBRARY_LNG`) olan mesafeyi Haversine formülüyle denetler.
+4. **Gizli Sekme Korumalı Donanım Parmak İzi ve NAT Güvenli Cihaz Kilidi:**
+   - `api.js` cihazın WebGL GPU modelini, ekran boyutunu, CPU çekirdek sayısını ve saat dilimini **FNV-1a Hash** ile özetleyerek `x-hardware-fp` başlığında gönderir; sahte/boş cihaz kimlikleri (`no-dev-id`, `dev_fallback_browser`, `no-hw`) `sanitizeDeviceId` ile ayıklanır.
+   - Kampüs Wi-Fi (`eduroam`) NAT arkasındaki farklı öğrencilerin aynı genel IP nedeniyle birbirini yanlışlıkla kilitlememesi için `hwLockHash` ve `ipUaLockHash` yalnızca geçerli donanım parmak izi ile birlikte üretilir.
+   - `finalizeKioskCheckIn` (`kioskStore.js`), PostgreSQL transaction'ı içinde ilgili `reservations` satırını `SELECT ... FOR UPDATE` ile kilitler; kişisel OTP jetonunu (`kiosk_qr_tokens`) tek kullanımlık tüketir, `kiosk_device_locks` tablosuna 4 saatlik (`14400 sn`) cihaz/donanım kilitlerini yazar, `kiosk_attendances` kaydını ekler ve 2. grup üyesi tamamladığında randevuyu atomik olarak `CHECKED_IN` statüsüne yükseltir.
 
-### 4.2. Önerilen Key Vault Anahtar Standartları
+### 5.2. Otonom Yaşam Döngüsü Motoru (`lifecycle.js`), Adil Ceza Servisi (`penaltyService.js`) ve "Walk-In" Zaman Motoru (`timeUtils.js`)
+Her 30 saniyede bir çalışan arka plan yaşam döngüsü (`runReservationLifecycle`):
+- **Gece Yarısı (`00:00`) ve Çok Günlü Tarama:** Dün ve bugünün aktif kayıtlarını birlikte tarayarak gece yarısını aşan randevuları kesintisiz izler ve geçmiş günlerde kalmış kayıtları da yakalar.
+- **30 Dakika Grup Davet Süre Aşımı:** 30 dakika içinde en az 1 davetli tarafından onaylanmayan `PENDING` randevuları `CANCELLED` statüsüne çeker.
+- **Adil No-Show Cezası (`verifiedUsers` vs `absentUsers`):** Başlangıçtan `+15 dakika` (`CHECKIN_TOLERANCE_MINUTES`) geçtiği halde en az 2 üye kapı QR okutmamışsa randevu `NO_SHOW` olur; kapıda QR okutmuş öğrenciye (`kiosk_attendances`) **kesinlikle ceza yazılmaz**, yalnızca gelmeyenlere `1/3` uyarı (`15 puan`) işlenir; `3/3` olan öğrenci **30 gün otomatik banlanır**.
+- **Bitiş Saatinde Otomatik Tamamlama (`CONFIRMED` & `CHECKED_IN -> COMPLETED`):** Randevu bitiş saati geldiğinde (`nowEpochMins >= endEpochMins`) hem `CONFIRMED` hem de `CHECKED_IN` statüsündeki randevuları otomatik olarak `COMPLETED` durumuna geçirir (görevli tarafından `FORCE_CHECKIN` yapılmış randevularda öğrencilere haksız ceza uygulanmaz).
+- **Walk-In Penceresi (`getKioskWindowEpochBounds`):** Boşa düşen odayı ara dakikada (`createdAt > startTime`) tutan yeni gruba `[createdAt, createdAt + 15 dk]` özel Kiosk onay penceresi tanımlar.
 
-| Key Vault Anahtar Adı | Eşleştiği Ortam Değişkeni | Açıklama |
-| :--- | :--- | :--- |
-| `library-reservation-azure-client-id` | `AZURE_AD_CLIENT_ID` | Azure AD Uygulama (Client) Kimliği |
-| `library-reservation-azure-client-secret` | `AZURE_AD_CLIENT_SECRET` | Azure AD Uygulama Gizli Anahtarı |
-| `library-reservation-azure-tenant-id` | `AZURE_AD_TENANT_ID` | Kurumsal Dizin (Tenant) Kimliği |
-| `library-reservation-nextauth-secret` | `NEXTAUTH_SECRET` | 256-bit JWT İmzalama Gizli Anahtarı |
-| `library-reservation-database-url` | `DATABASE_URL` | PostgreSQL Bağlantı Dizgesi |
-| `library-reservation-smtp-pass` | `SMTP_PASS` | Kurumsal E-Posta Sunucu Parolası |
+### 5.3. 6 Sekmeli Yönetim Paneli, Kurumsal Personel Yönetimi ve Test Verisi Temizliği (`AdminPanel.jsx`, `components/admin/*`, `handlers.js`)
 
-### 4.3. Periyodik Secret Rotation (Şifre Yenileme) Prosedürü
-Azure AD Client Secret değerleri belirli bir süre sonunda sona erecek (`expire`) şekilde üretilir. Süre dolmadan önce:
-1. `Azure Portal → App Registrations → Certificates & Secrets` üzerinden yeni Client Secret üretilir.
-2. Yeni değer üretim ortamı değişkenlerine veya Key Vault'a tanımlanır.
-3. Backend servisi yeniden başlatılır ve eski secret devre dışı bırakılır.
-4. `.env` dosyaları hiçbir koşulda Git versiyon kontrolüne (`GitHub`) dahil edilmez.
-
----
-
-##  5. Çekirdek Mühendislik Modülleri ve Sistem İnovasyonları (SOLID)
-
-Sistemin fiziksel dünyada suistimal edilemeyen, kendi kendini yöneten (self-healing) kurumsal bir otomasyona dönüşmesi için iş mantığı **SOLID** prensipleriyle izole edilmiş çekirdek modüllere ayrılmıştır:
-
-### 5.1. 4 Katmanlı Fiziksel Kiosk Kapı QR ve "Anti-Incognito" Donanım Kilidi (`kioskSecurity.js`, `kiosk/qr`, `checkin/validate`, `api.js`)
-Öğrencilerin kütüphaneye gelmeden uzaktan sahte yoklama vermesini veya kütüphaneye gelen tek bir öğrencinin kendi telefonundan (gizli sekme veya farklı tarayıcı açarak) gelmeyen arkadaşlarının yerine QR onaylamasını engellemek için **4 aşamalı savunma hattı** uygulanır:
-1. **Fiziksel Kapı QR Zorunluluğu:** Doğrudan menüden `/kiosk` adresine girilmesi engellenmiştir; yalnızca oda kapılarındaki A4 posterde yer alan `?door=thku-study-room` imzalı parametresiyle erişilebilir.
-2. **Kampüs Wi-Fi (`eduroam`), Mobil Veri ve Anti-VPN Denetimi (`verifyCampusNetworkAndVpn`):** İstemcinin `navigator.connection` ağ tipi (`x-net-type: cellular` engeli), `.env` üzerinde tanımlanan kurumsal VPN IP bloğu (`CAMPUS_VPN_PREFIX` engeli) ve kampüs Wi-Fi IP blokları (`CAMPUS_IP_PREFIX`) gerçek zamanlı denetlenir.
-3. **Haversine GPS Yarıçapı (`calculateDistanceMeters`):** Tarayıcıdan alınan yüksek doğruluklu GPS koordinatları ile `.env` üzerinde tanımlanan kütüphane merkez koordinatları (`LIBRARY_LAT`, `LIBRARY_LNG`) arasındaki kuş uçuşu mesafe Haversine formülüyle hesaplanır; izin verilen yarıçap (`LIBRARY_RADIUS_METERS`, varsayılan 1000 metre) dışındaki cihazlar reddedilir.
-4. **Gizli Sekme (Incognito) Korumalı WebGL Donanım Parmak İzi ve Cihaz Kilidi (`checkDeviceLockForReservation` & `sealDeviceLockForReservation`):**
-   - Öğrenci gizli sekme açıp çerezleri ve `localStorage`'ı sıfırlasa veya sayfa yakınlaştırma (zoom) oranını değiştirse dahi, `api.js` cihazın **WebGL Ekran Kartı (GPU) Renderer modelini**, yön bağımsız ekran çözünürlüğünü, renk derinliğini, CPU çekirdek sayısını, dokunmatik nokta sayısını ve saat dilimini **32-bit FNV-1a Hash** algoritmasıyla birleştirerek benzersiz bir donanım imzası (`x-hardware-fp`) üretir.
-   - Bir telefondan A öğrencisi Check-In yaptığı saniye; o cihazın `httpOnly` çerezi (`thku_checkin_lock_${reservationId}`), `localStorage` kimliği (`kiosk:device_lock`), `IP + WebGL GPU` donanım imzası (`kiosk:hw_lock`) ve `IP + User-Agent` özeti (`kiosk:ipua_lock`) Redis'te 4 saat boyunca (`TTL: 14400 sn`) sadece A öğrencisine kilitlenir. Aynı telefondan gizli sekme veya farklı tarayıcı ile B öğrencisi adına giriş yapılıp onay verilmeye çalışıldığında sistem bunu anında yakalar ve reddeder.
-
-### 5.2. Otonom Yaşam Döngüsü Motoru (`lifecycle.js`), Rezervasyon Politikası (`reservationPolicy.js`), Adil Ceza Servisi (`penaltyService.js`) ve "Walk-In" Zaman Motoru (`timeUtils.js`)
-Sistemde hiçbir görevlinin manuel takibine gerek bırakmayan, her 30 saniyede bir çalışan otonom bir arka plan motoru (`runReservationLifecycleChecks`) yer alır:
-- **Dağıtık Eşzamanlılık Kilidi (`lock:thku_lifecycle`) ve Gece Yarısı (`00:00`) Sınır Koruması:** Çoklu süreçte mükerrer ceza/e-posta oluşmasını önlemek için Redis `SET NX EX 25` atomik kilidi kullanılır. Türkiye saatiyle gece yarısını geçen (`23:00 – 01:00` gibi) 7/24 randevuların kesintisiz denetlenebilmesi için hem dünün (`yesterdayDateObj`) hem de bugünün (`todayDateObj`) aktif kayıtları birlikte taranır.
-- **30 Dakika Grup Davet Süre Aşımı:** Oluşturulmasının üzerinden 30 dakika geçtiği halde en az 1 davetli tarafından kabul edilmeyen `PENDING` randevular otomatik iptal edilir (`AUTO_TIMEOUT_CANCELLED`) ve oda takvimde boşa çıkarılır.
-- **En Az 2 Kişi Kapı QR Kuralı:** Kapıdaki QR kodu sadece 1. kişi okuttuğunda oda henüz `CHECKED_IN` olmaz; en az `MIN_PARTICIPANTS` (2 kişi) kendi mobil cihazından okuttuğunda oda açılır.
-- **Adil No-Show Cezası (`verifiedUsers` vs `absentUsers` — `penaltyService.js`):** Randevu başlangıcından `+15 dakika` (`CHECKIN_TOLERANCE_MINUTES`) geçtiği halde yeterli kişi QR okutmadıysa randevu `NO_SHOW` olarak iptal edilir ve oda anında diğer öğrencilere açılır. **Kritik Adalet Kuralı:** Grupta kütüphaneye gelip kendi QR kodunu okutmuş olan öğrenci varsa (`verifiedUsers`), arkadaşları gelmediği için mağdur edilmez ve **ona kesinlikle ceza puanı yazılmaz**; yalnızca QR okutmayan üyelere (`absentUsers`) `1/3 No-Show` uyarısı (`15 puan`) işlenir.
-- **3/3 Otomatik Ban Mekanizması ve Adil Grup Düşürme (`cancelOrRemoveBannedUserReservations` — `reservationPolicy.js`):** Dönem içinde 3. kez No-Show yapan (`45 puan`) öğrenci sistem tarafından otomatik olarak **30 gün süreyle yasaklanır**; organizatörü olduğu gelecek randevular iptal edilirken, davetli olduğu gruplardan ise diğer masum öğrencileri mağdur etmeden çıkarılır (grup minimum kişi sayısının altına düşerse randevu iptal edilir).
-- **Normal Randevu vs. Ara Dakikada Boşa Düşen Oda (`getReservationKioskWindow` — `timeUtils.js`):**
-  - Saat `16:00`'dan önce alınan normal randevuların (`createdAt <= startTotalMins`) Kiosk onay penceresi kesin olarak **`15:45 – 16:15`** aralığına sabitlenmiştir; davetin geç kabul edilmesi (`updatedAt`) bu süreyi asla uzatmaz.
-  - Ancak `16:15`'te ilk grup gelmediği için `16:16`'da oda `NO_SHOW` olup boşa düştüğünde (veya erken boşaltıldığında), saat `16:20`'de kütüphaneye gelen yeni bir grup `17:00`'ı beklemek zorunda kalmadan doğrudan `16:00 – 18:00` dilimini rezerve edebilir (`ReserveForm.jsx`). Sistem bu yeni randevunun `16:00`'dan sonra (`createdAt > startTotalMins`) sıfırdan açıldığını algılar ve yeni gruba odaya girerken hemen okutabilmeleri için **`[createdAt, createdAt + 15 dk]` (`16:20 – 16:35`)** Kiosk penceresi tanımlar.
-
-### 5.3. Olay Güdümlü (Event-Driven) Asenkron Kurumsal HTML E-Posta Motoru (`emailService.js`)
-- **Sıfır Arayüz Beklemesi (Zero-Lag):** Davet kabulü ve rezervasyon işlemlerinde kullanıcı arayüzünün SMTP yanıtını bekleyip donmaması için tüm e-posta tetiklemeleri arka planda asenkron çalıştırılır ve `EmailQueue` tablosunda takip edilir.
-- **XSS Korumalı Kurumsal HTML Şablonu (`buildCorporateEmailHtml`):** Gönderilen tüm mailler kurumsal logolu, `#C8102E` (kırmızı) ve `#0F172A` (lacivert) antetli, durum rozetli, `escapeHtml` ile XSS enjeksiyonuna karşı korumalı ve katılımcı tablolu profesyonel HTML formatındadır.
-- **Kütüphane Müdürlüğüne (`DIRECTOR_EMAIL`) Giden 4 Kritik Operasyonel Rapor Maili:**
-  1. *Oda Ayrıldı (`CONFIRMED` — `handleParticipantAcceptedEmails`):* Yalnızca yeterli davetli kabul edip oda ilk kez kesinleştiğinde (`isInitialConfirmation`) müdüre 1 kez gider.
-  2. *Randevu Başladı (`CHECKED_IN` — `sendKioskCheckInEmailToStaff`):* Kapıda en az 2 grup üyesi QR okutup odayı açtığında yoklama listesiyle birlikte gider.
-  3. *Onaylı Randevu İptali (`sendReservationCancelledEmails`):* Kesinleşmiş bir randevu iptal edildiğinde tüm grupla birlikte müdüre de bilgi verir.
-  4. *Otomatik Kiosk No-Show & Uyarı Raporu (`sendNoShowWarningEmail`):* Süresi içinde QR okutulmadığı için iptal edilen odanın yoklama ve ceza özetini raporlar.
-
-### 5.4. 6 Sekmeli Modüler Yönetim, Analitik, A4 PDF Faaliyet Raporu ve Denetim Merkezi (`AdminPanel.jsx`, `components/admin/*` & `admin/manage/handlers.js`)
-Yönetim paneli, yüksek bakım kolaylığı için Frontend'de 6 bağımsız alt bileşene (`components/admin/*`), Backend'de ise yönlendirici (`route.js`) ve aksiyon işleyicisi (`handlers.js`) katmanlarına ayrılmıştır:
-
-| Sekme / Modül | Frontend Bileşeni | Backend Aksiyonu (`handlers.js`) | Yetkili Roller ve Fonksiyonel Özeti |
+| Sekme / Özellik | Frontend Bileşeni | Backend Aksiyonu (`handlers.js`) | Yetkili Roller ve Fonksiyonel Özeti |
 | :--- | :--- | :--- | :--- |
-| **Sekme 1: Analitik & A4 PDF Rapor** | `AnalyticsTab.jsx` | `GET /api/admin/manage` | Gelecek 1 saat operasyon radarı, 24 saatlik oda yoğunluk grafiği (`RoomDensityChart`), bölüm dağılımı, iptal pasta grafiği, 7x24 Yoğunluk Isı Haritası (`hourlyHeatmap`) ve tek tıkla A4 PDF faaliyet raporu çıktısı (`window.print()`). |
-| **Sekme 2: Canlı Rezervasyonlar** | `ReservationsTab.jsx` | `RESERVATION_OP` (`FORCE_CHECKIN`, `EARLY_FINISH`, `MARK_NO_SHOW`, `CANCEL`) | Telefon numarası (`📞`) destekli arama; görevliler için tek tıkla manuel Check-In, erken boşaltma, adil No-Show işaretleme ve iptal. |
-| **Sekme 3: Oda Yönetimi** | `RoomsTab.jsx` | `CREATE_ROOM`, `UPDATE_ROOM`, `DELETE_ROOM`, `TOGGLE_ROOM` | Yeni çalışma odası ekleme, kapasite/özellik düzenleme ve mevcut onaylı randevuları iptal etmeden odayı yeni randevulara kapatma. |
-| **Sekme 4: Duyuru Merkezi** | `AnnouncementsTab.jsx` | `CREATE_ANNOUNCEMENT`, `DELETE_ANNOUNCEMENT` | `URGENT`, `HIGH`, `MEDIUM`, `LOW` önceliklerinde çift dilli (`TR`/`EN`) duyuru yayınlama ve silme. |
-| **Sekme 5: Kullanıcı Moderasyonu** | `UsersTab.jsx` | `USER_MODERATION` (`BAN_USER`, `UNBAN`, `RESET_PENALTY`, `CHANGE_ROLE`) | Takvimli (`+7`, `+14`, `+30`, `+90` gün) veya Kalıcı (Perma) ban atma, ban kaldırma, ceza sıfırlama ve sıkı rol hiyerarşisi (`ADMIN` yalnızca `STUDENT <-> LIBRARIAN` atayabilir; `ADMIN` ve `SUPER_ADMIN` yetkisini yalnızca `SUPER_ADMIN` atayabilir). |
-| **Sekme 6: 7 Dinamik Kural & Loglar** | `RulesAndLogsTab.jsx` | `UPDATE_RULE` | 7 rezervasyon kuralını canlı güncelleme ve 180 günlük denetim loglarını (`AuditLog` & `AdminAction`) inceleme. |
-
-### 5.5. İleri Seviye Kullanıcı Deneyimi (UX) ve Gerçek Zamanlı Oda Filtreleme (`StudyRooms.jsx`, `ReserveForm.jsx`, `MyBookings.jsx`, `Navbar.jsx`)
-- **Gerçek Zamanlı Saat ve Süre Filtrelemesi (`hasContinuousAvailableSlot`):** `StudyRooms.jsx` ekranında öğrenci tarih, saat aralığı ve süre (örn. 2 saat) seçtiğinde, o aralıkta kesintisiz boşluğu olmayan odalar anında filtrelenir ve seçilen tarih doğrudan `ReserveForm.jsx` sayfasına aktarılır.
-- **Tam Ban Kilidi Tutarlılığı:** Banlı (`isBanned`) öğrenciler için `Dashboard.jsx`, `MyBookings.jsx` ve `StudyRooms.jsx` sayfalarındaki *"Oda Rezerve Et"*, *"Odayı Seç"* ve *"Grup Davetini Kabul Et"* butonlarının tamamı kilitlenerek (`disabled`) *"Hesap Askıda / Suspended"* moduna alınmıştır.
-- **Akıllı Katılımcı Ekleme:** Rezervasyon formunda öğrenci arkadaşının e-postasını kutuya yazıp *"Ekle"* butonuna basmayı unutsa dahi sistem geçerli e-postayı otomatik olarak gruba dahil eder.
-- **Zaman ve Check-In Kilitli Erken Boşaltma ve İptal:** *"Odayı Erken Boşalt"* (`EARLY_CHECKOUT`) butonu yalnızca kapı QR ile giriş yapılmış (`CHECKED_IN`) aktif randevularda açılır ve odayı kalan süre için diğer öğrencilere açar; *"İptal Et"* butonu ise başlangıca `CANCEL_LOCK_MINUTES` (60 dk) kala otomatik kilitlenir.
+| **Sekme 1: Analitik & A4 PDF Rapor** | `AnalyticsTab.jsx` | `GET /api/admin/manage` | Gelecek 1 saat radarı, 24 saatlik yoğunluk grafiği, bölüm/iptal analizleri, 7x24 Isı Haritası ve A4 PDF faaliyet raporu (`window.print()`). |
+| **Sekme 2: Canlı Rezervasyonlar** | `ReservationsTab.jsx` | `RESERVATION_OP` (`FORCE_CHECKIN`, `EARLY_FINISH`, `MARK_NO_SHOW`, `CANCEL`) | Aktif randevu operasyonları; `isReservationEnded` kontrolü ile süresi biten randevular anında geçmiş görünümüne ayrılır. |
+| **Sekme 3: Oda Yönetimi** | `RoomsTab.jsx` | `CREATE_ROOM`, `UPDATE_ROOM`, `DELETE_ROOM`, `TOGGLE_ROOM` | Oda ekleme, kapasite düzenleme ve mevcut randevuları bozmadan bakım moduna alma. |
+| **Sekme 4: Duyuru Merkezi** | `AnnouncementsTab.jsx` | `CREATE_ANNOUNCEMENT`, `DELETE_ANNOUNCEMENT` | Çift dilli (`TR`/`EN`) öncelikli kütüphane duyuruları. |
+| **Sekme 5: Kullanıcı & Personel Yönetimi** | `UsersTab.jsx` | `USER_MODERATION`, `CREATE_STAFF_ACCOUNT`, `RESET_STAFF_TEMP_PASSWORD`, `SET_USER_ACTIVE` | Ban/ceza yönetimi, `@thk.edu.tr` kurumsal görevli/yönetici hesabı açma, 72 saatlik geçici şifre üretme/kopyalama ve hesap Aktif/Pasif kilidi. |
+| **Sekme 6: Kurallar, Loglar & Temizlik** | `RulesAndLogsTab.jsx` & `AdminPanel.jsx` | `UPDATE_RULE`, `PURGE_TEST_DATA` | 7 dinamik kural yönetimi, 180 günlük denetim logları ve `SUPER_ADMIN` için `@demo.local` test verilerini tek tıkla güvenli temizleme. |
 
 ---
 
-##  6. Veritabanı Mimarisi (Prisma Schema) ve Redis Anahtar Haritası
+## 6. Veritabanı Mimarisi (24 Modelli Prisma Şeması)
 
-### 6.1. PostgreSQL / Prisma Tabloları (`backend/prisma/schema.prisma`)
-Sistem 20 ilişkisel tablo ve 9 enum tipinden oluşur; başlıca çekirdek modeller şunlardır:
+`backend/prisma/schema.prisma` toplam **24 ilişkisel tablo** içerir; Kiosk ve kurumsal kimlik doğrulama dahil tüm durum PostgreSQL üzerinde kalıcı ve atomik olarak tutulur:
 
-| Model Adı | Temel Alanlar ve İlişkiler | Mimari Görevi |
+| Model Adı | Temel Alanlar | Mimari Görevi |
 | :--- | :--- | :--- |
-| **`User`** | `role`, `phone`, `avatarUrl`, `penaltyPoints`, `isBanned`, `banUntil`, `banReason`, `acceptedAgreementVersion` | Öğrenci ve personel kimlik, yetki, sözleşme ve disiplin durumu |
-| **`Room`** | `name`, `roomNumber`, `capacity`, `isActive`, `description` | Grup çalışma odaları (`R101`–`R104`) ve donanım özellikleri |
-| **`Reservation`** | `reservationDate`, `startTime`, `endTime`, `status`, `checkedInAt`, `noShow`, `penaltyApplied` | Randevu zaman dilimleri ve yaşam döngüsü durum makinesi |
+| **`User`** | `role`, `isActive`, `passwordHash`, `mustChangePassword`, `tempPasswordExpiresAt`, `sessionVersion`, `penaltyPoints`, `isBanned`, `banUntil` | Öğrenci ve kurumsal personel kimlik, şifre, oturum versiyonu ve disiplin durumu |
+| **`Room` & `Reservation`** | `reservationDate`, `startTime`, `endTime`, `status`, `checkedInAt`, `checkedInById`, `noShow`, `penaltyApplied` | Grup çalışma odaları ve randevu yaşam döngüsü durum makinesi |
 | **`ReservationParticipant`** | `reservationId`, `userId`, `status` (`PENDING`, `ACCEPTED`, `REJECTED`) | Grup üyelerinin davet ve katılım onay kayıtları |
-| **`PenaltyHistory`** | `userId`, `reservationId`, `penaltyType` (`NO_SHOW`), `penaltyPoints`, `isActive` | Öğrencilerin aldığı `1/3`, `2/3`, `3/3` uyarıların tarihçesi |
-| **`ReservationRule`** | `ruleName`, `ruleValue`, `description`, `isActive` | Yönetim panelinden canlı değiştirilebilen 7 dinamik sistem kuralı |
-| **`SystemAgreement`** | `version`, `title`, `content`, `isActive` | Versiyonlu ve çift dilli zorunlu kullanıcı sözleşmesi |
-| **`Announcement` & `Notification`** | `title`, `content`, `priority`, `isRead` | Çok dilli kütüphane duyuruları ve kullanıcı içi bildirimler |
-| **`EmailQueue`** | `toEmail`, `subject`, `body`, `status` (`PENDING`, `SENT`, `FAILED`) | Hata toleranslı kurumsal SMTP e-posta gönderim kuyruğu |
-| **`AuditLog` & `AdminAction`** | `userId`, `action`, `newData`, `ipAddress`, `createdAt` | Öğrenci, otomasyon ve yönetici denetim izi (log) tabloları |
-
-### 6.2. Redis Bellek İçi Anahtar Mimarisi (`backend/src/lib/redis.js` & `kioskSecurity.js`)
-
-| Redis Anahtar Deseni | Veri Tipi | Yaşam Süresi (TTL) | Kullanım Amacı |
-| :--- | :---: | :---: | :--- |
-| `kiosk:personal_otp:${reservationId}:${userId}` | `String` | `600 sn` (10 dk) | Kapı QR okutulduğunda üretilen tek kullanımlık kişisel doğrulama jetonu |
-| `kiosk:checked_users:${reservationId}` | `Set` | `14400 sn` (4 saat) | Odaya kapıda QR okutarak giriş onayı vermiş grup üyelerinin kümesi |
-| `kiosk:device_lock:${reservationId}:${headerDeviceId}` | `String` | `14400 sn` (4 saat) | Tarayıcı `localStorage` cihaz kimliği kilidi |
-| `kiosk:hw_lock:${reservationId}:${hwLockHash}` | `String` | `14400 sn` (4 saat) | Gizli sekme (Incognito) ve farklı tarayıcı korumalı `IP + WebGL GPU` donanım parmak izi kilidi |
-| `kiosk:ipua_lock:${reservationId}:${ipUaLockHash}` | `String` | `14400 sn` (4 saat) | Gizli sekme korumalı `IP + User-Agent` kilidi |
-| `lock:thku_lifecycle` | `String` | `25 sn` | Yaşam döngüsü zamanlayıcısının çoklu süreçte tekil çalışmasını sağlayan dağıtık kilit |
+| **`KioskQrToken`** | `reservationId`, `userId`, `tokenHash` (`SHA-256`), `expiresAt` (`10 dk`) | Kapı QR okutulduğunda üretilen tek kullanımlık kişisel doğrulama jetonu |
+| **`KioskAttendance`** | `reservationId`, `userId`, `verifiedAt` (`@@unique([reservationId, userId])`) | Kapıda fiziksel QR yoklamasını tamamlamış grup üyelerinin kalıcı kaydı |
+| **`KioskDeviceLock`** | `reservationId`, `lockType` (`DEVICE`, `HARDWARE`, `IP_UA`), `lockKey`, `ownerUserId`, `expiresAt` (`4 saat`) | Gizli sekme ve çoklu hesap suistimalini önleyen 4 saatlik cihaz/donanım kilit tablosu |
+| **`LoginRateLimit`** | `bucketKey` (`email:...` / `ip:...`), `failures`, `windowStart` (`10 dk`) | Kurumsal şifre girişinde kaba kuvvet (brute-force) saldırılarını engelleyen sayaç tablosu |
+| **`PenaltyHistory` & `ReservationRule`** | `penaltyType`, `penaltyPoints`, `ruleName`, `ruleValue` | Adil `1/3 -> 3/3` No-Show ceza geçmişi ve 7 dinamik rezervasyon kuralı |
+| **`SystemAgreement`, `Announcement`, `EmailQueue`, `AuditLog`, `AdminAction`** | Versiyonlu sözleşme, TR/EN duyuru, SMTP kuyruğu ve denetim izleri | Kurumsal uyumluluk, bildirim sürekliliği ve 180 günlük tam izlenebilirlik |
 
 ---
 
-##  7. Bileşen Düzeyinde Teknik Dokümantasyon ve Geliştirme Kuralları (51/51 AI-Ready Docs)
+## 7. Bileşen Düzeyinde Teknik Dokümantasyon (61 Modül + Dağıtım Rehberi)
 
-Projenin sürdürülebilirliğini sağlamak, gelecekte projeye dahil olacak mühendislerin ve yapay zeka asistanlarının sistemi saniyeler içinde kavramasını garantilemek amacıyla projedeki **51 kaynak kod modülünün tamamı için** [`frontend/docs/`](/frontend/docs/README.md) (21 dosya) ve [`backend/docs/`](/backend/docs/README.md) (30 dosya) dizinlerinde özel teknik Markdown (`.md`) kılavuzları oluşturulmuştur.
-
-### Geliştirme ve Koruma İlkeleri (Engineering Guidelines)
-1. **Strict MUI & Theme-First:** Tüm arayüz bileşenleri Material-UI (`Box`, `Stack`, `Card`, `Typography`, `Chip`) ve `theme.js` üzerinden şekillendirilir.
-2. **Merkezi Türkiye Saat Dilimi (`Europe/Istanbul`):** Sunucu veya istemci hangi coğrafi bölgede çalışırsa çalışsın tüm tarih ve dakika hesaplamaları Backend'de `@/lib/timeUtils`, Frontend'de `src/utils/dateUtils` üzerinden `Europe/Istanbul` saat dilimine ve `1970-01-01T...Z` sahte-UTC standardına göre normalize edilir.
-3. **SOLID Servis Ayrımı:** Prisma bağlantıları yalnızca `@/lib/db` singleton modülü üzerinden, rezervasyon kuralları ve kota denetimleri `@/lib/reservationPolicy` üzerinden, Kiosk güvenlik kontrolleri `@/lib/kioskSecurity` üzerinden, cezalar `@/lib/penaltyService` üzerinden, e-posta gönderimleri ise arayüzü bloklamadan `@/lib/emailService` içindeki güvenli kuyruk (`queueSafeEmail`) üzerinden yürütülür.
-
----
-
-##  8. Sonuç
-
-**THKÜ 7/24 Kütüphane Grup Çalışma Odaları Rezervasyon ve Kiosk Yoklama Sistemi**; kurumsal kimlik doğrulama, fiziksel Kiosk/donanım güvenliği, otonom yaşam döngüsü motoru ve modüler analitik yönetim bileşenleriyle:
-- **Suistimale kapalı** *(4 katmanlı Kiosk + WebGL GPU Donanım Kilidi + Gizli Sekme Koruması)*,
-- **Kendi kendini yöneten** *(Otonom No-Show, Adil Ceza, 3/3 Otomatik Ban ve Walk-In Oda Yönetimi)*,
-- **Tam denetlenebilir** *(180 Günlük Denetim Logları, 7x24 Isı Haritası ve A4 PDF Faaliyet Raporu)*,
-- **Uluslararası standartlarda** *(TR/EN Çift Dil, SOLID Mimari ve 51 Modüllük Teknik Dokümantasyon)*
-
-üretim (**Production**) seviyesine ulaştırılmıştır.
+Projedeki tüm kaynak kod modülleri `# Context:` standardında [`frontend/docs/`](/frontend/docs/README.md) (**23 modül + 1 indeks = 24 dosya**), [`backend/docs/`](/backend/docs/README.md) (**37 modül + 1 indeks = 38 dosya**) ve [`deploy/README.md`](/deploy/README.md) altında eksiksiz belgelendirilmiştir. Otomatik test paketi (`npm test --prefix backend`) Kiosk atomikliğini ve kurumsal şifre güvenliğini 20 senaryoyla doğrular.
 
 ---
 

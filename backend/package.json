@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "seed": "node prisma/seed.cjs"
+    "seed": "node prisma/seed.cjs",
+    "test": "node --test test/kiosk-atomicity.mjs test/staff-account.test.mjs",
+    "test:kiosk": "node test/kiosk-atomicity.mjs",
+    "test:staff": "node --test test/staff-account.test.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.cjs"
@@ -15,7 +18,6 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.3.0",
     "dotenv": "^17.2.3",
-    "ioredis": "^5.9.3",
     "next": "16.1.4",
     "next-auth": "^4.24.13",
     "nodemailer": "^7.0.13",

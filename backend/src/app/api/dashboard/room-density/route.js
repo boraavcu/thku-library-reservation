@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
+import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 
 const LIBRARY_OPEN = 0;
 const LIBRARY_CLOSE = 24;
@@ -9,12 +11,15 @@ const TOTAL_HOURS = LIBRARY_CLOSE - LIBRARY_OPEN;
 
 export async function GET() {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    // Türkiye saat dilimine göre YYYY-MM-DD formatında bugünün tarihini alır.
+    await runReservationLifecycleChecks();
+
     const todayStr = new Date().toLocaleDateString("en-CA", {
       timeZone: "Europe/Istanbul",
     });

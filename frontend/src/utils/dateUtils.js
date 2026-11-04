@@ -37,6 +37,27 @@ export function getIstanbulNowInfo() {
   return getIstanbulNowParts();
 }
 
+/**
+ * Bir randevunun bitiş saatinin (Europe/Istanbul) geçip geçmediğini kontrol eder.
+ * Backend lifecycle senkronizasyonuna ek olarak istemci tarafında da süresi bitmiş
+ * randevuların anında geçmiş olarak sınıflandırılmasını garanti eder.
+ */
+export function isReservationEnded(res) {
+  if (!res?.reservationDate || !res?.endTime) return false;
+  const { todayIso, nowMinutes } = getIstanbulNowParts();
+  const resDateIso = new Date(res.reservationDate).toISOString().split("T")[0];
+
+  if (resDateIso < todayIso) return true;
+  if (resDateIso > todayIso) return false;
+
+  const endDt = new Date(res.endTime);
+  const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
+  const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
+  const endMinutes = endH * 60 + endM;
+
+  return nowMinutes >= endMinutes;
+}
+
 export function getFutureDateStr(daysToAdd) {
   const { todayIso } = getIstanbulNowParts();
   const base = new Date(`${todayIso}T12:00:00Z`);

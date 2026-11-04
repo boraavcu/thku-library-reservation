@@ -1,37 +1,37 @@
 # Context: MyBookings.jsx
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-`frontend/src/pages/MyBookings.jsx`, öğrencilerin tüm rezervasyon yaşam döngüsünü yönettiği sayfadır. Öğrenciler bu ekrandan aktif/gelecek randevularını takip edebilir, kapı QR ile giriş (`CHECKED_IN`) yaptıkları aktif odalarını **Odayı Erken Boşalt (`EARLY_CHECKOUT`)** ile erken teslim edebilir, randevuya 1 saatten fazla süre varsa **İptal Et** işlemini gerçekleştirebilir, kendilerine gelen grup davetlerini yanıtlayabilir ve geçmiş/iptal edilen randevularını inceleyebilir.
+`frontend/src/pages/MyBookings.jsx`, öğrencilerin tüm rezervasyon yaşam döngüsünü yönettiği ekrandır. Kullanıcılar aktif ve yaklaşan randevularını görüntüleyebilir, kapı QR doğrulaması (`CHECKED_IN`) yapılmış aktif odalarını **Odayı Erken Boşalt (`EARLY_CHECKOUT`)** ile erken teslim edebilir, başlangıca 1 saatten fazla süre varken randevularını iptal edebilir, gelen grup davetlerini yanıtlayabilir ve geçmiş/iptal edilen kayıtlarını inceleyebilir.
 
-##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
+## 2. Teknoloji Yığını ve Bağımlılıklar
 
 - **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`)
-- **Kimlik Doğrulama:** `next-auth/react` (`useSession`)
-- **Yönlendirme:** `react-router-dom` (`useNavigate`)
-- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN`)
-- **Zaman Yardımcıları:** `../utils/dateUtils` (`getIstanbulNowParts`)
+- **Kimlik Doğrulama & Yönlendirme:** `next-auth/react` (`useSession`), `react-router-dom` (`useNavigate`)
+- **Çoklu Dil (i18n):** `react-i18next` (`useTranslation`)
+- **Zaman Yardımcıları:** `../utils/dateUtils` (`getIstanbulNowParts`, `isReservationEnded`)
 - **API İstemcisi:** `../api` (`GET/PATCH/DELETE /api/reservations`, `GET /api/invitations`, `POST /api/invitations/respond`)
 
-##  3. İş Mantığı, Zamanlama Hesaplaması ve Ban Kısıtlamaları
+## 3. İş Mantığı ve Bileşen Mimarisi
 
-### A. Zamanlama Durumu Hesaplayıcısı (`getReservationTimingState`)
-Her rezervasyon kartı için Türkiye saat dilimine (`Europe/Istanbul`) ve UTC saatlerine göre 3 kritik boolean bayrak hesaplanır:
-1. **`isHappeningNow` (No-Show Bypass Korumalı):** Yalnızca randevu durumu **`CHECKED_IN`** (kapı QR okutulmuş) ise ve şu anki dakika `resEndEpochMins` öncesindeyse `true` döner. **"Odayı Erken Boşalt"** butonu yalnızca `isHappeningNow === true` olduğunda görünür; böylece kütüphaneye gelmeyen öğrencilerin uzaktan erken boşaltma yaparak No-Show cezasından kaçması engellenir.
-2. **`hasStarted`:** Randevu başlangıç saati geldiyse veya odaya giriş yapıldıysa `true` olur; bu durumda **"İptal Et"** butonu gizlenir.
-3. **`cancelLocked`:** Randevu başlangıcına 60 dakikadan (`resStartEpochMins - nowEpochMins < 60`) az kaldıysa `true` döner. İptal butonu `disabled` olur ve üzerinde *"Son 1 Saat (İptal Kilitli)"* yazar.
+### A. Zamanlama Hesaplaması (`getReservationTimingState` & `isReservationEnded`)
+- **`isReservationEnded(r)` Ayrımı:** Bitiş saati (`Europe/Istanbul`) geçmiş olan `PENDING`, `CONFIRMED` veya `CHECKED_IN` kayıtları `activeList` yerine otomatik olarak `pastList` (*Geçmiş & İptal Edilenler*) sekmesine aktarılır.
+- **`isHappeningNow` (No-Show Atlama Koruması):** Yalnızca durumu `CHECKED_IN` olan ve bitiş zamanı henüz dolmamış randevular için `true` döner; **"Odayı Erken Boşalt"** butonu sadece bu koşulda gösterilerek kütüphaneye gelmeden uzaktan erken çıkış yapılıp No-Show cezasından kaçılması önlenir.
+- **`hasStarted` ve `cancelLocked`:** Randevu başladıysa iptal butonu gizlenir; başlangıca 60 dakikadan az kaldıysa iptal butonu kilitlenir (*"Son 1 Saat (İptal Kilitli)"*).
 
-### B. Banlı Öğrenci Kısıtlamaları (`isBanned`)
-- `const isBanned = Boolean(session?.user?.isBanned);` kontrolü ile banlı öğrencilerin sağ üstteki **"Oda Rezerve Et"** butonu `disabled` yapılır ve metni *"Hesap Askıda / Suspended"* olarak değiştirilir.
-- **Gelen Grup Davetleri (`tab === 1`)** sekmesindeki **"Kabul Et"** butonu da `disabled={isBanned}` ile kilitlenir; böylece banlı bir öğrenci başka bir öğrencinin daveti üzerinden kısıtlamayı aşamaz.
+### B. Rol ve Ban Kısıtlamaları (`isBanned`)
+- `ADMIN` ve `SUPER_ADMIN` rolleri bu sayfaya girdiğinde otomatik olarak `/admin` paneline yönlendirilir.
+- Cezalı (`isBanned === true`) öğrencilerin sağ üstteki **"Oda Rezerve Et"** butonu (*"Hesap Askıda / Suspended"*) ve grup davetlerindeki **"Kabul Et"** butonu devre dışı bırakılır.
 
 ### C. 3 Sekmeli Görünüm Yapısı
-- **Sekme 0 (`Aktif Rezervasyonlarım`):** `PENDING`, `CONFIRMED` ve `CHECKED_IN` durumundaki randevuları ve katılımcıların onay durumlarını (`ACCEPTED`, `PENDING`, `REJECTED`) listeler.
-- **Sekme 1 (`Gelen Grup Davetleri`):** 30 dakikalık onay süresi devam eden grup davetlerini listeler.
-- **Sekme 2 (`Geçmiş & İptal Edilenler`):** `COMPLETED`, `CANCELLED` ve `NO_SHOW` durumundaki geçmiş kayıtları listeler.
+1. **Aktif Rezervasyonlarım (`tab === 0`):** Süresi dolmamış `PENDING`, `CONFIRMED` ve `CHECKED_IN` randevuları ve katılımcı onay durumlarını listeler.
+2. **Gelen Grup Davetleri (`tab === 1`):** 30 dakikalık onay penceresi içindeki davetleri Kabul/Red aksiyonlarıyla sunar ve yanıt sonrası `notificationsUpdated` olayını tetikler.
+3. **Geçmiş & İptal Edilenler (`tab === 2`):** `COMPLETED`, `CANCELLED`, `NO_SHOW` ve bitiş saati geçmiş randevuları listeler.
 
-##  4. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
+## 4. Bağlantılı Olduğu Dosyalar
 
+- `frontend/src/utils/dateUtils.js` (`getIstanbulNowParts`, `isReservationEnded`)
+- `frontend/src/components/Navbar.jsx` & `Footer.jsx`
 - `backend/src/app/api/reservations/route.js` (`GET`, `PATCH`, `DELETE`)
 - `backend/src/app/api/invitations/route.js` (`GET`)
 - `backend/src/app/api/invitations/respond/route.js` (`POST`)

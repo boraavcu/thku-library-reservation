@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
-import redis from "@/lib/redis";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
+import { toAdminUser } from "@/lib/staffAuth.mjs";
 import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 import { ADMIN_ACTION_HANDLERS } from "./handlers";
@@ -11,6 +12,8 @@ const ALLOWED_ROLES = ["LIBRARIAN", "ADMIN", "SUPER_ADMIN"];
 
 export async function GET() {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   const userRole = session?.user?.role;
 
   if (!session?.user?.id || !ALLOWED_ROLES.includes(userRole)) {
@@ -20,7 +23,7 @@ export async function GET() {
   const canViewLogs = ["ADMIN", "SUPER_ADMIN"].includes(userRole);
 
   try {
-    runReservationLifecycleChecks().catch(() => {});
+    await runReservationLifecycleChecks();
 
     const now = new Date();
     const days180Ago = new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000);
@@ -49,9 +52,31 @@ export async function GET() {
         orderBy: [{ reservationDate: "desc" }, { startTime: "desc" }],
         include: {
           room: { select: { id: true, roomNumber: true, name: true, capacity: true } },
-          user: { select: { id: true, fullName: true, email: true, phone: true, studentNumber: true, department: true } },
+          user: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              phone: true,
+              studentNumber: true,
+              department: true,
+            },
+          },
           participants: {
-            include: { user: { select: { id: true, fullName: true, email: true, phone: true, department: true } } },
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  fullName: true,
+                  email: true,
+                  phone: true,
+                  department: true,
+                },
+              },
+            },
+          },
+          kioskAttendances: {
+            select: { userId: true },
           },
         },
       }),
@@ -69,6 +94,8 @@ export async function GET() {
           isBanned: true,
           banUntil: true,
           banReason: true,
+          isActive: true,
+          passwordHash: true,
         },
       }),
       prisma.penaltyHistory.findMany({
@@ -101,23 +128,8 @@ export async function GET() {
         : Promise.resolve(0),
     ]);
 
-    // N+1 Redis sorgusu yerine tek bir Redis Pipeline ile 250 rezervasyonun Check-In verisini çek
-    let pipelineResults = [];
-    if (rawReservations.length > 0) {
-      try {
-        const pipeline = redis.pipeline();
-        for (const r of rawReservations) {
-          pipeline.smembers(`kiosk:checked_users:${r.id}`);
-        }
-        pipelineResults = await pipeline.exec();
-      } catch {
-        pipelineResults = [];
-      }
-    }
-
-    const reservations = rawReservations.map((r, idx) => {
-      const tuple = pipelineResults[idx];
-      const checkedInUsers = Array.isArray(tuple?.[1]) ? tuple[1] : [];
+    const reservations = rawReservations.map((r) => {
+      const checkedInUsers = (r.kioskAttendances || []).map((a) => a.userId);
       return {
         ...r,
         checkedInUsers,
@@ -130,10 +142,12 @@ export async function GET() {
       penaltyCountMap[p.userId] = (penaltyCountMap[p.userId] || 0) + 1;
     }
 
-    const users = rawUsers.map((u) => ({
-      ...u,
-      _count: { penalties: penaltyCountMap[u.id] || 0 },
-    }));
+    const users = rawUsers.map((u) =>
+      toAdminUser({
+        ...u,
+        _count: { penalties: penaltyCountMap[u.id] || 0 },
+      })
+    );
 
     const { dateStr: todayIsoStr, totalMins: nowTotalMins } = getIstanbulTimeDetails();
 
@@ -161,11 +175,15 @@ export async function GET() {
     let totalGroupMembersSum = 0;
 
     const totalResCount = Math.max(1, reservations.length);
-    const completedCount = reservations.filter((r) => ["COMPLETED", "CHECKED_IN", "CONFIRMED"].includes(r.status)).length;
+    const completedCount = reservations.filter((r) =>
+      ["COMPLETED", "CHECKED_IN", "CONFIRMED"].includes(r.status)
+    ).length;
     const cancelledCount = reservations.filter((r) => r.status === "CANCELLED").length;
     const noShowCount = reservations.filter((r) => r.status === "NO_SHOW" || r.noShow).length;
 
-    const validReservations = reservations.filter((r) => !["CANCELLED", "NO_SHOW"].includes(r.status));
+    const validReservations = reservations.filter(
+      (r) => !["CANCELLED", "NO_SHOW"].includes(r.status)
+    );
 
     for (const r of validReservations) {
       const { startH: sH, endH: eH, startTotalMins: startMins, endTotalMins: endMins } =
@@ -173,7 +191,8 @@ export async function GET() {
       const durationH = Math.max(1, (endMins - startMins) / 60);
 
       totalDurationHoursSum += durationH;
-      const acceptedMembersCount = 1 + (r.participants || []).filter((p) => p.status === "ACCEPTED").length;
+      const acceptedMembersCount =
+        1 + (r.participants || []).filter((p) => p.status === "ACCEPTED").length;
       totalGroupMembersSum += acceptedMembersCount;
 
       if (r.room?.id && roomUsageMap[r.room.id]) {
@@ -200,8 +219,9 @@ export async function GET() {
       const rDateStr = new Date(r.reservationDate).toISOString().split("T")[0];
       if (rDateStr === todayIsoStr) {
         if (
-          r.status === "CHECKED_IN" ||
-          (r.status === "CONFIRMED" && nowTotalMins >= startMins && nowTotalMins < endMins)
+          ["CHECKED_IN", "CONFIRMED"].includes(r.status) &&
+          nowTotalMins >= startMins &&
+          nowTotalMins < endMins
         ) {
           activeNowRooms += 1;
         }
@@ -274,6 +294,8 @@ export async function GET() {
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   const currentRole = session?.user?.role;
   const adminId = session?.user?.id;
 

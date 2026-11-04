@@ -26,7 +26,14 @@ export default function KioskPage() {
   const [searchParams] = useSearchParams();
   const { data: session, status } = useSession();
 
-  const doorParam = searchParams.get('door') || '';
+  const rawDoorParam = searchParams.get('door') || '';
+  const doorParam = rawDoorParam || (() => {
+    try {
+      return sessionStorage.getItem('thku_kiosk_return_door') || '';
+    } catch {
+      return '';
+    }
+  })();
 
   const [kioskData, setKioskData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -48,8 +55,11 @@ export default function KioskPage() {
 
       const res = await api.get(`/kiosk/qr?${query.toString()}`);
       setKioskData(res.data);
-    } catch {
-      setKioskData({ mode: 'ERROR', error: 'Yoklama verisi alınamadı.' });
+    } catch (err) {
+      setKioskData({
+        mode: 'ERROR',
+        error: err.response?.data?.error || 'Yoklama verisi alınamadı.',
+      });
     } finally {
       setLoading(false);
     }
@@ -58,8 +68,21 @@ export default function KioskPage() {
   useEffect(() => {
     if (status === 'loading') return;
     if (status === 'unauthenticated') {
+      if (rawDoorParam) {
+        try {
+          sessionStorage.setItem('thku_kiosk_return_door', rawDoorParam);
+        } catch {
+          // ignore storage errors
+        }
+      }
       navigate('/');
       return;
+    }
+
+    try {
+      sessionStorage.removeItem('thku_kiosk_return_door');
+    } catch {
+      // ignore storage errors
     }
 
     if (isStaff) {
@@ -85,7 +108,7 @@ export default function KioskPage() {
       setGpsCoords({ lat: null, lng: null, status: 'UNSUPPORTED' });
       fetchKioskState(null, null);
     }
-  }, [status, isStaff, navigate, fetchKioskState]);
+  }, [status, isStaff, rawDoorParam, navigate, fetchKioskState]);
 
   const handleOneClickConfirm = async () => {
     if (!kioskData?.personalSessionToken) return;
@@ -422,7 +445,13 @@ export default function KioskPage() {
             />
             <Chip
               icon={<MyLocationIcon sx={{ color: '#38BDF8 !important', fontSize: 15 }} />}
-              label={gpsCoords.status === 'GRANTED' ? 'GPS Doğrulandı' : 'GPS Kontrolü'}
+              label={
+                gpsCoords.status === 'GRANTED'
+                  ? 'GPS Doğrulandı'
+                  : kioskData?.gpsOptional
+                  ? 'GPS Opsiyonel'
+                  : 'GPS Kontrolü'
+              }
               size="small"
               sx={{ bgcolor: 'rgba(56,189,248,0.15)', color: '#38BDF8', fontWeight: 700, fontSize: '0.68rem' }}
             />
@@ -546,7 +575,7 @@ export default function KioskPage() {
                   }}
                 >
                   <Typography variant="body2" sx={{ color: '#E2E8F0', fontWeight: 600, mb: 2 }}>
-                    Kapı QR kodunuz, Kampüs Wi-Fi bağlantınız ve GPS konumunuz doğrulandı. Oda kullanımınızı başlatmak için aşağıdaki butona basınız:
+                    Kapı QR kodunuz, Kampüs Wi-Fi bağlantınız ve konumunuz doğrulandı. Oda kullanımınızı başlatmak için aşağıdaki butona basınız:
                   </Typography>
 
                   <Button

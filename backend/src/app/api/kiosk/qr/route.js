@@ -2,12 +2,18 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
-import redis from "@/lib/redis";
-import crypto from "crypto";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
+import { getFrontendBaseUrl } from "@/lib/publicPaths";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
+import {
+  createPrismaDb,
+  issuePersonalCodeForReservation,
+  listAttendanceUserIds,
+} from "@/lib/kioskStore";
 import {
   getIstanbulTimeDetails,
   getReservationKioskWindow,
+  parseReservationMinutesUTC,
 } from "@/lib/timeUtils";
 import {
   MAX_DISTANCE_METERS,
@@ -15,7 +21,6 @@ import {
   calculateDistanceMeters,
   verifyCampusNetworkAndVpn,
   checkDeviceLockForReservation,
-  sealDeviceLockForReservation,
 } from "@/lib/kioskSecurity";
 
 const PERSONAL_OTP_TTL = 600;
@@ -30,6 +35,8 @@ function fmtClockModulo(totalMins) {
 
 export async function GET(request) {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -42,7 +49,7 @@ export async function GET(request) {
     await runReservationLifecycleChecks();
 
     if (isStaff) {
-      const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+      const frontendUrl = getFrontendBaseUrl();
       const singleDoorQrUrl = `${frontendUrl}/kiosk?door=thku-study-room`;
 
       return NextResponse.json({
@@ -75,7 +82,7 @@ export async function GET(request) {
 
     const latParam = searchParams.get("lat");
     const lngParam = searchParams.get("lng");
-    const enforceGps = process.env.ENFORCE_CAMPUS_GPS !== "false";
+    const enforceGps = process.env.ENFORCE_CAMPUS_GPS === "true";
 
     let distanceMeters = null;
     if (latParam !== null && lngParam !== null) {
@@ -136,6 +143,7 @@ export async function GET(request) {
       });
     }
 
+    const db = createPrismaDb(prisma);
     let matchedReservation = null;
     let windowInfoError = null;
     let activeWindowLabel = "";
@@ -148,27 +156,26 @@ export async function GET(request) {
         resDateStr,
         toleranceMinutes
       );
-
-      const endDt = new Date(r.endTime);
-      const endH = endDt.getUTCHours() === 23 && endDt.getUTCMinutes() >= 59 ? 24 : endDt.getUTCHours();
-      const endM = endH === 24 ? 0 : endDt.getUTCMinutes();
-      const endTotalMins = endH * 60 + endM;
+      const { endTotalMins } = parseReservationMinutesUTC(r);
 
       const minEpochMins = resDayEpochMins + minAllowed;
       const maxEpochMins = resDayEpochMins + maxAllowed;
       const endEpochMins = resDayEpochMins + endTotalMins;
 
-      const checkedUserIdsForCandidate = await redis.smembers(`kiosk:checked_users:${r.id}`);
-      const isAlreadyInRoom =
+      const checkedUserIdsForCandidate = await listAttendanceUserIds(db, r.id);
+      const isAlreadyActiveRoom =
         (r.status === "CHECKED_IN" || checkedUserIdsForCandidate.includes(userId)) &&
         nowEpochMins >= minEpochMins &&
         nowEpochMins < endEpochMins;
 
-      if ((nowEpochMins >= minEpochMins && nowEpochMins <= maxEpochMins) || isAlreadyInRoom) {
+      if ((nowEpochMins >= minEpochMins && nowEpochMins <= maxEpochMins) || isAlreadyActiveRoom) {
         matchedReservation = r;
         activeWindowLabel = `${fmtClockModulo(minAllowed)} – ${fmtClockModulo(maxAllowed)}`;
         break;
-      } else if (resDateStr === new Date(todayDate).toISOString().split("T")[0] || Math.abs(nowEpochMins - minEpochMins) <= 180) {
+      } else if (
+        resDateStr === new Date(todayDate).toISOString().split("T")[0] ||
+        Math.abs(nowEpochMins - minEpochMins) <= 180
+      ) {
         windowInfoError = `${r.room.roomNumber} - ${r.room.name} odasındaki ${fmtClockModulo(
           startTotalMins
         )} randevunuz için kapı QR onayı yalnızca ${fmtClockModulo(
@@ -188,7 +195,7 @@ export async function GET(request) {
       });
     }
 
-    const { isLockedByAnotherUser, keys } = await checkDeviceLockForReservation(
+    const { isLockedByAnotherUser, presence } = await checkDeviceLockForReservation(
       request,
       matchedReservation.id,
       userId,
@@ -203,20 +210,13 @@ export async function GET(request) {
       });
     }
 
-    const checkedSetKey = `kiosk:checked_users:${matchedReservation.id}`;
-    const checkedUserIds = await redis.smembers(checkedSetKey);
+    const checkedUserIds = presence.checkedUserIds;
     const alreadyCheckedIn = checkedUserIds.includes(userId);
 
-    if (alreadyCheckedIn) {
-      await sealDeviceLockForReservation(keys, userId);
-    }
-
-    const otpKey = `kiosk:personal_otp:${matchedReservation.id}:${userId}`;
-    let personalSessionToken = await redis.get(otpKey);
-
-    if (!alreadyCheckedIn && !personalSessionToken) {
-      personalSessionToken = crypto.randomBytes(16).toString("hex");
-      await redis.set(otpKey, personalSessionToken, "EX", PERSONAL_OTP_TTL);
+    let personalSessionToken = null;
+    if (!alreadyCheckedIn) {
+      const issued = await issuePersonalCodeForReservation(matchedReservation.id, userId);
+      personalSessionToken = issued.code;
     }
 
     const allMembers = [

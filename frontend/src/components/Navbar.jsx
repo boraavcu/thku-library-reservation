@@ -488,7 +488,7 @@ export default function Navbar() {
                 </MenuItem>
                 <Divider sx={{ my: 0.5 }} />
                 <MenuItem
-                  onClick={() => signOut({ callbackUrl: `${window.location.origin}/` })}
+                  onClick={() => signOut({ callbackUrl: `${window.location.origin}/randevu/` })}
                   sx={{ py: 1, px: 2, gap: 1.25, '&:hover': { bgcolor: alpha(theme.palette.error.main, 0.05) } }}
                 >
                   <LogoutIcon sx={{ fontSize: 18, color: 'error.main' }} />

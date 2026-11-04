@@ -35,6 +35,10 @@ export function fmtTimeUTC(dt) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+export function fmtTimeRangeUTC(startTime, endTime) {
+  return `${fmtTimeUTC(startTime)} - ${fmtTimeUTC(endTime)}`;
+}
+
 export function fmtDateUTC(dt, locale = "tr-TR") {
   return new Date(dt).toLocaleDateString(locale, {
     day: "2-digit",

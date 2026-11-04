@@ -1,33 +1,33 @@
 # Context: kiosk/qr/route.js
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-`backend/src/app/api/kiosk/qr/route.js`, Kiosk kapı yoklama ekranının (`Kiosk.jsx`) ön doğrulama ve durum sorgulama uç noktasıdır (`GET`). Yetkililer için A4 Kapı QR Posteri bilgisini döndürürken, öğrenciler için `@/lib/kioskSecurity` üzerinden **4 katmanlı fiziksel/ağ güvenlik denetimini** ve **±15 dakikalık Kiosk onay penceresi kontrolünü** gerçekleştirerek tek kullanımlık kişisel oturum anahtarı (`personalSessionToken`) üretir.
+`backend/src/app/api/kiosk/qr/route.js`, Kiosk kapı yoklama ekranının (`Kiosk.jsx`) ön doğrulama ve durum sorgulama uç noktasıdır (`GET`). Yetkililer için `/randevu/kiosk` tabanlı A4 Kapı QR Posteri bilgisini döndürürken, öğrenciler için `@/lib/kioskSecurity` ve PostgreSQL tabanlı `@/lib/kioskStore` üzerinden **fiziksel/ağ güvenlik denetimini** ve **±15 dakikalık Kiosk onay penceresi kontrolünü** gerçekleştirerek tek kullanımlık kişisel doğrulama kodu (`personalSessionToken`) üretir.
 
-##  2. 4 Katmanlı Güvenlik ve Ağ Doğrulama Mimarisi
+## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-Öğrencinin kütüphaneye gelmeden uzaktan veya arkadaşının telefonundan sahte onay vermesini engellemek için sırasıyla şu 4 katman denetlenir:
+- **Oturum & Şifre Kapısı:** `next-auth` (`getServerSession`, `authOptions`) & `@/lib/passwordGate` (`rejectIfPasswordChangeRequired`)
+- **Alt Dizin URL Yardımcısı:** `@/lib/publicPaths` (`getFrontendBaseUrl`)
+- **PostgreSQL Kiosk Katmanı:** `@/lib/kioskStore` (`createPrismaDb`, `issuePersonalCodeForReservation`, `listAttendanceUserIds`)
+- **Fiziksel & Ağ Güvenliği:** `@/lib/kioskSecurity` (`getCrossIncognitoSignature`, `verifyCampusNetworkAndVpn`, `calculateDistanceMeters`, `checkDeviceLockForReservation`, `MAX_DISTANCE_METERS`)
+- **Zaman & Yaşam Döngüsü:** `@/lib/timeUtils` & `@/lib/lifecycle` (`runReservationLifecycleChecks`)
 
-1. **Fiziksel Kapı QR Parametresi (`door === "thku-study-room"`):**
-   - Öğrenci doğrudan menüden veya linkten `/kiosk` sayfasına girerse `mode: "DOOR_QR_REQUIRED"` döner ve giriş engellenir.
-2. **Kampüs Wi-Fi (`eduroam` / `THKU-802.1x`), Hücresel Veri ve Anti-VPN Denetimi (`verifyCampusNetworkAndVpn`):**
-   - `x-net-type === "cellular"` ise (mobil veri açıksa) anında reddedilir.
-   - IP adresi kampüs VPN bloğundaysa (`10.254.x.x`) reddedilir.
-   - `ENFORCE_CAMPUS_WIFI === "true"` olduğunda istemci IP'sinin THKÜ yerel Wi-Fi (`10.2.x.x`) veya resmi ULAKNET/THKÜ dış IP bloklarıyla eşleşip eşleşmediği ve `ip-api.com` üzerinden mobil/proxy/VPN olup olmadığı doğrulanır.
-3. **1 KM Sabit GPS Mesafe Denetimi (`calculateDistanceMeters`):**
-   - Haversine formülü ile öğrencinin GPS koordinatları (`lat`, `lng`) ile THKÜ Türkkuşu Kampüsü Kütüphane koordinatları arasındaki mesafe metre cinsinden hesaplanır. Mesafe `MAX_DISTANCE_METERS` (`1000` m) sınırından fazlaysa `mode: "LOCATION_BLOCKED"` döner.
-4. **Gizli Sekme (Incognito) ve Aynı Cihaz Kilidi (`checkDeviceLockForReservation` & `sealDeviceLockForReservation`):**
-   - İstemcinin `httpOnly` çerezi (`thku_checkin_lock_${resId}`), `x-device-id` başlığı (`kiosk:device_lock`), `IP + WebGL GPU` donanım imzası (`kiosk:hw_lock`) ve `IP + User-Agent` özeti (`kiosk:ipua_lock`) Redis'te kontrol edilir. Aynı fiziksel cihazdan bu randevu için başka bir öğrenci onay vermişse gizli sekme açılsa dahi işlem anında engellenir.
-   - Daha önce onay vermiş bir öğrenci (`alreadyCheckedIn === true`) sayfayı açtığında da `sealDeviceLockForReservation(keys, userId)` çağrılarak tüm cihaz kilitlerinin Redis'te güncel kalması sağlanır.
+## 3. Çekirdek İş Mantığı ve Güvenlik Katmanları (`GET`)
 
-##  3. Zaman Penceresi (`getReservationKioskWindow`) ve OTP Üretimi
+1. **Oturum ve Şifre Kapısı:** `rejectIfPasswordChangeRequired(session)` ile geçici şifre oturumları (`403`) ve oturumsuz istekler (`401`) reddedilir; ardından `runReservationLifecycleChecks()` çalıştırılır.
+2. **Görevli Poster Modu (`STAFF_POSTER`):** Kullanıcı `LIBRARIAN`, `ADMIN` veya `SUPER_ADMIN` ise `getFrontendBaseUrl()` üzerinden `${frontendUrl}/kiosk?door=thku-study-room` (`/randevu/kiosk?door=thku-study-room`) bağlantısını ve `ttlSeconds: 600` bilgisini döndürür.
+3. **4 Katmanlı Öğrenci Fiziksel ve Cihaz Denetimi:**
+   - **Kapı QR Parametresi:** `door !== "thku-study-room"` ise `mode: "DOOR_QR_REQUIRED"` döndürülür.
+   - **Kampüs Wi-Fi (`eduroam`) ve Anti-VPN:** `verifyCampusNetworkAndVpn` hücresel veriyi (`cellular`) ve VPN IP bloklarını engeller (`mode: "LOCATION_BLOCKED"`).
+   - **Opsiyonel/Zorunlu GPS Mesafe Denetimi (`ENFORCE_CAMPUS_GPS === "true"`):** Koordinatlar verilmişse Haversine mesafesi hesaplanır; `ENFORCE_CAMPUS_GPS === "true"` iken konum izni kapalıysa veya mesafe `MAX_DISTANCE_METERS` (`1000` m) sınırını aşıyorsa `mode: "LOCATION_BLOCKED"` döner.
+   - **PostgreSQL Cihaz Kilidi (`checkDeviceLockForReservation`):** Tarayıcı çerezi ve `kiosk_device_locks` tablosu üzerinden bu fiziksel cihazın aynı randevuda başka bir öğrenci tarafından kullanılıp kullanılmadığı kontrol edilir (`isLockedByAnotherUser`).
+4. **3 Günlük Aday Penceresi ve Kişisel Kod Üretimi (`issuePersonalCodeForReservation`):**
+   - Gece yarısı geçişlerini kapsamak için `[yesterdayDate, todayDate, tomorrowDate]` tarihlerindeki `CONFIRMED` ve `CHECKED_IN` randevular taranır; hem başlangıç tolerans penceresindeki hem de zaten `CHECKED_IN` olmuş aktif odalardaki öğrenciler kabul edilir.
+   - `presence.checkedUserIds` içinde bulunmayan öğrenci için PostgreSQL `kiosk_check_in_codes` tablosunda `FOR UPDATE` satır kilidiyle 600 saniye geçerli tek kullanımlık `personalSessionToken` üretilir ve `mode: "STUDENT_ACTIVE"` yanıtıyla grup üyelerinin anlık yoklama listesi (`members`) döndürülür.
 
-- Gece yarısı sınır geçişlerini desteklemek için `[yesterdayDate, todayDate, tomorrowDate]` aralığındaki `CONFIRMED` ve `CHECKED_IN` randevular taranır.
-- Şu anki dakika `minAllowed` ile `maxAllowed` arasındaysa Redis'te `kiosk:personal_otp:${reservationId}:${userId}` anahtarıyla 600 saniye geçerli tek kullanımlık `personalSessionToken` üretilir ve grup üyelerinin anlık yoklama durumuyla (`members`) birlikte `mode: "STUDENT_ACTIVE"` döndürülür.
-
-##  4. Bağlantılı Olduğu Dosyalar
+## 4. Bağlantılı Olduğu Dosyalar
 
 - `frontend/src/pages/Kiosk.jsx`
-- `backend/src/lib/kioskSecurity.js`
+- `backend/src/lib/kioskStore.js` & `backend/src/lib/kioskSecurity.js`
+- `backend/src/lib/publicPaths.js` & `backend/src/lib/passwordGate.js`
 - `backend/src/app/api/checkin/validate/route.js`
-- `backend/src/lib/lifecycle.js`

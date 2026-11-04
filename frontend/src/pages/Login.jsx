@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Box,
   Card,
   CardContent,
@@ -7,6 +8,7 @@ import {
   Button,
   Avatar,
   IconButton,
+  TextField,
   Tooltip,
   Divider,
   Chip,
@@ -20,6 +22,9 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import { useTranslation } from 'react-i18next';
 import { alpha } from '@mui/material/styles';
 import { signIn } from 'next-auth/react';
+import { useSearchParams } from 'react-router-dom';
+import PasswordField from '../components/PasswordField';
+import { appAbsoluteUrl, appPath, stripAppBase } from '../runtimePaths';
 
 const DEMO_ACCOUNTS = [
   {
@@ -94,13 +99,29 @@ const DEMO_ACCOUNTS = [
   },
 ];
 
-const isDemoLoginEnabled =
-  import.meta.env.VITE_ENABLE_DEMO_LOGIN === 'true' ||
-  (import.meta.env.DEV && import.meta.env.VITE_ENABLE_DEMO_LOGIN !== 'false');
+const isDemoLoginEnabled = import.meta.env.VITE_ENABLE_DEMO_LOGIN !== 'false';
+
+function getPostLoginTargetPath() {
+  try {
+    const returnDoor = sessionStorage.getItem('thku_kiosk_return_door');
+    if (returnDoor) {
+      return `/kiosk?door=${encodeURIComponent(returnDoor)}`;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return '/dashboard';
+}
 
 const Login = () => {
   const { t, i18n } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const oauthError = searchParams.get('error');
   const [loadingEmail, setLoadingEmail] = useState(null);
+  const [staffEmail, setStaffEmail] = useState('');
+  const [staffPassword, setStaffPassword] = useState('');
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [staffError, setStaffError] = useState('');
 
   const toggleLanguage = () => {
     const newLang = i18n.language === 'tr' ? 'en' : 'tr';
@@ -108,11 +129,85 @@ const Login = () => {
   };
 
   const handleDemoLogin = async (email) => {
+    setStaffError('');
     setLoadingEmail(email);
-    await signIn('demo-login', {
-      email,
-      callbackUrl: `${window.location.origin}/dashboard`,
-    });
+    try {
+      const targetPath = getPostLoginTargetPath();
+      const res = await signIn('demo-login', {
+        email,
+        redirect: false,
+        callbackUrl: appAbsoluteUrl(targetPath),
+      });
+      if (res?.error) {
+        setStaffError(
+          i18n.language?.startsWith('en')
+            ? 'Sign-in failed or database server is unreachable.'
+            : 'Giriş yapılamadı veya veritabanı sunucusuna bağlanılamadı.'
+        );
+        return;
+      }
+      if (res?.ok) {
+        window.location.assign(appPath(targetPath));
+      }
+    } finally {
+      setLoadingEmail(null);
+    }
+  };
+
+  const handleStaffPasswordLogin = async (e) => {
+    e.preventDefault();
+    setStaffError('');
+    const em = staffEmail.trim().toLowerCase();
+    if (!em.endsWith('@thk.edu.tr') || em.endsWith('@stu.thk.edu.tr')) {
+      setStaffError(
+        i18n.language?.startsWith('en')
+          ? 'Only institutional @thk.edu.tr addresses may use password sign-in.'
+          : 'Şifre ile giriş yalnızca kurumsal @thk.edu.tr adresleri içindir.'
+      );
+      return;
+    }
+    setStaffLoading(true);
+    try {
+      const targetPath = getPostLoginTargetPath();
+      const res = await signIn('staff-login', {
+        email: em,
+        password: staffPassword,
+        redirect: false,
+        callbackUrl: appAbsoluteUrl(targetPath),
+      });
+      if (res?.error) {
+        if (res.error === 'RATE_LIMITED' || res.error === 'CokFazlaDeneme') {
+          setStaffError(
+            i18n.language?.startsWith('en')
+              ? 'Too many attempts. Please wait a few minutes and try again.'
+              : 'Çok fazla deneme yapıldı. Lütfen birkaç dakika bekleyip tekrar deneyin.'
+          );
+          return;
+        }
+        if (res.error === 'SERVICE_UNAVAILABLE' || res.error === 'GirisServis') {
+          setStaffError(
+            i18n.language?.startsWith('en')
+              ? 'Sign-in service is temporarily unavailable. Check server database logs.'
+              : 'Giriş servisi geçici olarak kullanılamıyor. Veritabanı bağlantısını kontrol edin.'
+          );
+          return;
+        }
+        setStaffError(
+          i18n.language?.startsWith('en')
+            ? 'Invalid email or password, or password login is not enabled for this account (temporary password may have expired).'
+            : 'E-posta veya şifre hatalı; ya da bu hesap için şifre girişi tanımlı değil / geçici şifrenin süresi dolmuş.'
+        );
+        return;
+      }
+      if (res?.ok) {
+        const dest = res.url
+          ? stripAppBase(new URL(res.url, window.location.origin).pathname + new URL(res.url, window.location.origin).search) || targetPath
+          : targetPath;
+        window.location.assign(appPath(dest));
+      }
+    } finally {
+      setStaffLoading(false);
+    }
   };
 
   return (
@@ -215,6 +310,13 @@ const Login = () => {
           </Box>
 
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {oauthError && !staffError && (
+              <Alert severity="warning" sx={{ py: 0.5 }}>
+                {i18n.language?.startsWith('en')
+                  ? 'Microsoft SSO (Azure AD) credentials are not configured in local test mode. Please use Demo Quick Login or Staff Password below.'
+                  : 'Yerel test ortamında Microsoft (Azure AD) anahtarları tanımlı olmadığı için SSO başlatılamadı. Lütfen aşağıdaki Demo Hızlı Giriş veya Personel Şifre girişini kullanınız.'}
+              </Alert>
+            )}
             <Button
               fullWidth
               variant="contained"
@@ -222,7 +324,7 @@ const Login = () => {
               startIcon={<WindowIcon sx={{ fontSize: 26 }} />}
               onClick={() =>
                 signIn('azure-ad', {
-                  callbackUrl: `${window.location.origin}/dashboard`,
+                  callbackUrl: appAbsoluteUrl(getPostLoginTargetPath()),
                 })
               }
               sx={{
@@ -238,6 +340,58 @@ const Login = () => {
             <Typography variant="caption" align="center" sx={{ color: 'text.secondary' }}>
               {t('onlyInstitutional')}
             </Typography>
+          </Box>
+
+          <Divider sx={{ my: 0.5 }}>
+            <Chip
+              label={
+                i18n.language?.startsWith('en')
+                  ? 'INSTITUTIONAL STAFF (@thk.edu.tr)'
+                  : 'KURUMSAL PERSONEL (@thk.edu.tr)'
+              }
+              size="small"
+              sx={{ fontSize: '0.65rem', fontWeight: 700, bgcolor: 'action.hover', color: 'text.secondary' }}
+            />
+          </Divider>
+
+          <Box component="form" onSubmit={handleStaffPasswordLogin} sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {staffError && (
+              <Alert severity="error" sx={{ py: 0.5 }}>
+                {staffError}
+              </Alert>
+            )}
+            <TextField
+              size="small"
+              fullWidth
+              label={i18n.language?.startsWith('en') ? 'Email (@thk.edu.tr)' : 'E-posta (@thk.edu.tr)'}
+              type="email"
+              value={staffEmail}
+              onChange={(e) => setStaffEmail(e.target.value)}
+              autoComplete="username"
+            />
+            <PasswordField
+              size="small"
+              fullWidth
+              label={i18n.language?.startsWith('en') ? 'Password' : 'Şifre'}
+              value={staffPassword}
+              onChange={(e) => setStaffPassword(e.target.value)}
+              autoComplete="current-password"
+            />
+            <Button
+              type="submit"
+              variant="outlined"
+              fullWidth
+              disabled={staffLoading || !staffEmail.trim() || !staffPassword}
+              sx={{ py: 1.1, fontWeight: 700, textTransform: 'none' }}
+            >
+              {staffLoading ? (
+                <CircularProgress size={22} />
+              ) : i18n.language?.startsWith('en') ? (
+                'Sign in with password'
+              ) : (
+                'Şifre ile giriş yap'
+              )}
+            </Button>
           </Box>
 
           {isDemoLoginEnabled && (

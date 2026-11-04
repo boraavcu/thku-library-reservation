@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import api from '../api';
-import { getIstanbulNowParts } from '../utils/dateUtils';
+import { getIstanbulNowParts, isReservationEnded } from '../utils/dateUtils';
 
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import GroupIcon from '@mui/icons-material/Group';
@@ -160,8 +160,8 @@ export default function MyBookings() {
     });
   };
 
-  const activeList = reservations.filter(r => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status));
-  const pastList = reservations.filter(r => ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(r.status));
+  const activeList = reservations.filter(r => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status) && !isReservationEnded(r));
+  const pastList = reservations.filter(r => ['COMPLETED', 'CANCELLED', 'NO_SHOW'].includes(r.status) || (['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status) && isReservationEnded(r)));
 
   if (status === 'loading' || loading) {
     return (

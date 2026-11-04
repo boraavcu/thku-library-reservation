@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactCompiler: true,
+  turbopack: {
+    root: import.meta.dirname,
+  },
 
   async headers() {
     const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";

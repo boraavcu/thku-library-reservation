@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { API_BASE } from './runtimePaths';
 
 function getOrCreateDeviceId() {
   try {
@@ -64,7 +65,7 @@ function getNetworkConnectionType() {
 }
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE,
   withCredentials: true,
 });
 

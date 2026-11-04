@@ -1,32 +1,35 @@
 # Context: invitations/respond/route.js
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
 `backend/src/app/api/invitations/respond/route.js`, davet edilen bir öğrencinin grup davetini **Kabul Et (`ACCEPT`)** veya **Reddet (`REJECT`)** olarak yanıtladığı ve yeterli sayıya ulaşıldığında rezervasyonu otomatik olarak `CONFIRMED` durumuna geçiren uç noktadır (`POST`).
 
-##  2. İş Mantığı, Kota Kontrolleri ve Asenkron E-Posta Tetiklemesi
+## 2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
 
-### A. Davet Kabul (`ACCEPT`) Kontrolleri
-Öğrenci daveti kabul ettiğinde şu güvenlik ve kota kontrolleri yapılır:
+- **Web Çatısı:** `next/server` (`NextResponse`)
+- **Oturum & Şifre Kapısı:** `next-auth` (`getServerSession`, `authOptions`) & `@/lib/passwordGate` (`rejectIfPasswordChangeRequired`)
+- **Veritabanı ORM:** `@/lib/db` (`PrismaClient` — `User`, `Reservation`, `ReservationParticipant`, `AuditLog`)
+- **Politika, Zaman & Yaşam Döngüsü:** `@/lib/reservationPolicy`, `@/lib/timeUtils`, `@/lib/lifecycle`
+
+## 3. İş Mantığı, Kota Kontrolleri ve E-Posta Tetiklemesi (`POST`)
+
+### A. Ön Güvenlik ve Davet Kabul (`ACCEPT`) Kontrolleri
+`rejectIfPasswordChangeRequired(session)` ve `runReservationLifecycleChecks()` adımlarından sonra:
 1. **Ban Kontrolü:** Öğrenci banlıysa (`isBanned`) daveti kabul edemez (`403 Forbidden`).
 2. **Geçmiş Saat Dilimi Kontrolü:** Randevunun bitiş saati (`endTotalMins`) geçmişse davete yanıt verilemez.
-3. **30 Dakika Süre Aşımı Kontrolü:** Randevunun oluşturulmasının (`createdAt`) üzerinden 30 dakikadan fazla süre geçmişse ve randevu hâlâ `PENDING` ise, randevu anında `CANCELLED` yapılır ve `400` hatası döndürülür.
-4. **Maksimum Oda Kapasitesi Kontrolü (`maxP`):** Onaylı katılımcı sayısı odanın maksimum kapasitesine (`Math.min(room.capacity, maxParticipants)`) ulaşmışsa yeni kabul engellenir.
-5. **Günlük 1 Randevu ve Gece-Gündüz Kuralı (`@/lib/reservationPolicy`):** `validateDailyQuotaForUsers` ve `validateNightToMorningRuleForUsers` ile daveti kabul eden öğrencinin o gün başka bir randevusu olup olmadığı veya gece/sabah ardışık kuralına takılıp takılmadığı denetlenir.
+3. **30 Dakika Süre Aşımı Kontrolü:** Randevunun oluşturulmasının (`createdAt`) üzerinden 30 dakikadan fazla süre geçmişse ve randevu hâlâ `PENDING` ise anında `CANCELLED` yapılır (`400`).
+4. **Maksimum Oda Kapasitesi (`maxP`):** Onaylı katılımcı sayısı odanın maksimum kapasitesine (`Math.min(room.capacity, maxParticipants)`) ulaşmışsa yeni kabul engellenir.
+5. **Günlük 1 Randevu ve Gece-Sabah Kuralı:** `validateDailyQuotaForUsers` ve `validateNightToMorningRuleForUsers` ile daveti kabul eden öğrencinin uygunluğu denetlenir.
 
-### B. `PENDING -> CONFIRMED` Geçişi ve 2. Kişi Onay Kuralı (`isInitialConfirmation`)
+### B. `PENDING -> CONFIRMED` Geçişi (`isInitialConfirmation`)
 - Katılımcının durumu `ACCEPTED` olarak güncellenir.
-- Toplam onaylı kişi sayısı (`totalConfirmed = 1 + acceptedCount`), dinamik `MIN_PARTICIPANTS` (varsayılan 2) kuralına ulaştığında:
-  - Atomik `updateMany({ where: { id, status: "PENDING" } })` ile randevu durumu **`CONFIRMED`** yapılır.
-  - Arayüzün beklememesi için `handleParticipantAcceptedEmails` fonksiyonu arka planda asenkron (`.catch()`) çalıştırılır. Yalnızca `isInitialConfirmation === true` olduğunda Kütüphane Müdürüne **"[Kütüphane Müdürlüğü] Oda Ayrıldı"** maili gider.
+- Toplam onaylı kişi sayısı (`1 + acceptedCount`) dinamik `minParticipants` (varsayılan 2) kuralına ulaştığında atomik `updateMany({ where: { id, status: "PENDING" } })` ile randevu **`CONFIRMED`** yapılır ve `handleParticipantAcceptedEmails` arka planda tetiklenir.
 
 ### C. Davet Reddi (`REJECT`) ve Otomatik İptal Kontrolü
-- Öğrenci daveti reddederse durumu `REJECTED` yapılır.
-- Geriye kalan maksimum potansiyel kişi sayısı (`1 + acceptedCount + pendingCount`) `minParticipants` (2) değerinin altına düştüyse ve randevu hâlâ `PENDING` ise, randevu otomatik olarak `CANCELLED` yapılır ve organizatöre bilgi maili gönderilir.
+- Katılımcı durumu `REJECTED` yapılır. Kalan maksimum potansiyel üye sayısı (`1 + acceptedCount + pendingCount`) `minParticipants` altına düştüyse ve randevu `PENDING` ise otomatik `CANCELLED` yapılır ve `sendReservationCancelledEmails` tetiklenir.
 
-##  3. Bağlantılı Olduğu Dosyalar
+## 4. Bağlantılı Olduğu Dosyalar
 
 - `frontend/src/pages/Dashboard.jsx`, `MyBookings.jsx` ve `components/Navbar.jsx`
-- `backend/src/lib/reservationPolicy.js`
-- `backend/src/lib/timeUtils.js`
-- `backend/src/lib/lifecycle.js`
+- `backend/src/lib/passwordGate.js` & `backend/src/lib/reservationPolicy.js`
+- `backend/src/lib/timeUtils.js` & `backend/src/lib/lifecycle.js`

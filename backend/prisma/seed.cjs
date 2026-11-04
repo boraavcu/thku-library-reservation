@@ -18,6 +18,9 @@ function getTimeUTC(hour, minute = 0, second = 0) {
 async function main() {
   console.log("THKÜ Kütüphane Sistemi Demo Verileri Yükleniyor");
 
+  await prisma.kioskAttendance.deleteMany();
+  await prisma.kioskDeviceLock.deleteMany();
+  await prisma.kioskCheckInCode.deleteMany();
   await prisma.reservationParticipant.deleteMany();
   await prisma.penaltyHistory.deleteMany();
   await prisma.reservation.deleteMany();
@@ -307,6 +310,15 @@ Rezervasyonlar en fazla 1 gün sonrasına alınabilir. Çalışmasını erken ta
             joinedAt: new Date(),
           })),
         },
+        ...(item.status === "CHECKED_IN" || item.status === "COMPLETED"
+          ? {
+              kioskAttendances: {
+                create: [orgUser.id, ...item.partIdxs.map((pIdx) => students[pIdx].id)].map(
+                  (userId) => ({ userId })
+                ),
+              },
+            }
+          : {}),
       },
     });
   }
@@ -455,6 +467,9 @@ async function main() {
   console.log("🚀 THKÜ Kütüphane Sistemi Canlı (Production) Başlangıç Verileri Yükleniyor...");
 
   // 1. Test / Demo aşamasından kalan tüm eski kayıtları ve demo kullanıcıları temizle
+  await prisma.kioskAttendance.deleteMany();
+  await prisma.kioskDeviceLock.deleteMany();
+  await prisma.kioskCheckInCode.deleteMany();
   await prisma.reservationParticipant.deleteMany();
   await prisma.penaltyHistory.deleteMany();
   await prisma.reservation.deleteMany();

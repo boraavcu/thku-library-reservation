@@ -12,6 +12,7 @@ import { useSession, signOut } from "next-auth/react";
 import api from '../api';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Footer from '../components/Footer';
+import { appAbsoluteUrl, appPath } from '../runtimePaths';
 
 const THKU_LOGO = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 
@@ -113,7 +114,16 @@ const RulesAcceptance = () => {
     try {
       const res = await api.post('/user/accept-rules');
       await update({ acceptedAgreementVersion: res.data.acceptedVersion });
-      window.location.href = homePath;
+      let nextPath = homePath;
+      try {
+        const returnDoor = sessionStorage.getItem('thku_kiosk_return_door');
+        if (returnDoor && !isStaff) {
+          nextPath = `/kiosk?door=${encodeURIComponent(returnDoor)}`;
+        }
+      } catch {
+        // ignore storage errors
+      }
+      window.location.href = appPath(nextPath);
     } catch (error) {
       console.error("Sözleşme kabul hatası:", error);
       alert(t('agreementError'));
@@ -122,7 +132,7 @@ const RulesAcceptance = () => {
   };
 
   const handleLogout = async () => {
-    await signOut({ callbackUrl: `${window.location.origin}/` });
+    await signOut({ callbackUrl: appAbsoluteUrl('/') });
   };
 
   const toggleLanguage = () => {

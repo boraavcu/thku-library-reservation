@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import {
   Box, Typography, TextField, Paper, Chip, Divider, Button,
   Select, MenuItem, Pagination, InputAdornment, Dialog,
-  DialogTitle, DialogContent, DialogActions, Alert
+  DialogTitle, DialogContent, DialogActions, Alert,
+  FormControlLabel, Switch
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import SearchIcon from '@mui/icons-material/Search';
@@ -10,16 +11,21 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import BlockIcon from '@mui/icons-material/Block';
 import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
 import AllInclusiveIcon from '@mui/icons-material/AllInclusive';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
+import VpnKeyIcon from '@mui/icons-material/VpnKey';
 import { ITEMS_PER_PAGE } from './adminConstants';
 import { getFutureDateStr } from '../../utils/dateUtils';
 
 export default function UsersTab({
   users = [],
+  currentUserId,
   userRole,
   isAdminOrSuper,
   isSuperAdmin,
   isEn,
   runAction,
+  onOpenCreateStaff,
+  onResetStaffPassword,
 }) {
   const theme = useTheme();
   const [userSearch, setUserSearch] = useState('');
@@ -232,12 +238,30 @@ export default function UsersTab({
       <Divider />
 
       <Box>
-        <Typography variant="h6" sx={{ fontWeight: 800, mb: 1.5 }}>
-          {isEn ? `Library Staff & System Administrators (${staffList.length})` : `Kütüphane Görevlileri ve Sistem Yöneticileri (${staffList.length} Yetkili)`}
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+          <Typography variant="h6" sx={{ fontWeight: 800 }}>
+            {isEn ? `Library Staff & System Administrators (${staffList.length})` : `Kütüphane Görevlileri ve Sistem Yöneticileri (${staffList.length} Yetkili)`}
+          </Typography>
+          {isAdminOrSuper && onOpenCreateStaff && (
+            <Button
+              size="small"
+              variant="contained"
+              color="success"
+              startIcon={<PersonAddAlt1Icon />}
+              onClick={onOpenCreateStaff}
+              sx={{ fontWeight: 700, borderRadius: 2 }}
+            >
+              {isEn ? 'Add Staff (@thk.edu.tr)' : 'Personel Ekle (@thk.edu.tr)'}
+            </Button>
+          )}
+        </Box>
+
         <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
           {staffList.map((u) => {
             const canModifyThisStaff = isSuperAdmin || (userRole === 'ADMIN' && u.role === 'LIBRARIAN');
+            const isInstitutionalStaff =
+              u.email?.toLowerCase().endsWith('@thk.edu.tr') &&
+              !u.email?.toLowerCase().endsWith('@stu.thk.edu.tr');
 
             return (
               <Paper
@@ -257,6 +281,13 @@ export default function UsersTab({
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                     <Typography sx={{ fontWeight: 800 }}>{u.fullName}</Typography>
                     <Chip label={u.role} size="small" color="primary" sx={{ height: 22, fontSize: '0.7rem', fontWeight: 700 }} />
+                    <Chip
+                      label={u.isActive !== false ? (isEn ? 'ACTIVE' : 'AKTİF') : isEn ? 'INACTIVE' : 'PASİF'}
+                      size="small"
+                      color={u.isActive !== false ? 'success' : 'default'}
+                      variant="outlined"
+                      sx={{ height: 22, fontSize: '0.68rem', fontWeight: 700 }}
+                    />
                     {u.phone && (
                       <Chip label={`📞 ${u.phone}`} size="small" variant="outlined" color="info" sx={{ height: 22, fontSize: '0.72rem', fontWeight: 700 }} />
                     )}
@@ -269,17 +300,57 @@ export default function UsersTab({
                 <Divider />
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, flexWrap: 'wrap' }}>
                   {canModifyThisStaff ? (
-                    <Select
-                      size="small"
-                      value={u.role}
-                      onChange={(e) => runAction('USER_MODERATION', { targetUserId: u.id, modType: 'CHANGE_ROLE', role: e.target.value }, 'Yetkili rolü güncellendi.')}
-                      sx={{ minWidth: { xs: '100%', sm: 220 }, height: 32, fontSize: '0.8rem', bgcolor: 'background.paper' }}
-                    >
-                      <MenuItem value="STUDENT">STUDENT (Öğrenciye Düşür)</MenuItem>
-                      <MenuItem value="LIBRARIAN">LIBRARIAN (Görevli)</MenuItem>
-                      {isSuperAdmin && <MenuItem value="ADMIN">ADMIN (Müdür)</MenuItem>}
-                      {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN (BİM)</MenuItem>}
-                    </Select>
+                    <>
+                      <Select
+                        size="small"
+                        value={u.role}
+                        onChange={(e) => runAction('USER_MODERATION', { targetUserId: u.id, modType: 'CHANGE_ROLE', role: e.target.value }, 'Yetkili rolü güncellendi.')}
+                        sx={{ minWidth: { xs: '100%', sm: 220 }, height: 32, fontSize: '0.8rem', bgcolor: 'background.paper' }}
+                      >
+                        <MenuItem value="STUDENT">STUDENT (Öğrenciye Düşür)</MenuItem>
+                        <MenuItem value="LIBRARIAN">LIBRARIAN (Görevli)</MenuItem>
+                        {isSuperAdmin && <MenuItem value="ADMIN">ADMIN (Müdür)</MenuItem>}
+                        {isSuperAdmin && <MenuItem value="SUPER_ADMIN">SUPER_ADMIN (BİM)</MenuItem>}
+                      </Select>
+                      <FormControlLabel
+                        control={
+                          <Switch
+                            size="small"
+                            checked={u.isActive !== false}
+                            disabled={u.id === currentUserId}
+                            onChange={(_, checked) =>
+                              runAction(
+                                'USER_MODERATION',
+                                { targetUserId: u.id, modType: 'SET_STAFF_ACTIVE', isActive: checked },
+                                checked
+                                  ? isEn
+                                    ? 'Account activated.'
+                                    : 'Hesap aktif edildi.'
+                                  : isEn
+                                  ? 'Account deactivated.'
+                                  : 'Hesap pasifleştirildi.'
+                              )
+                            }
+                          />
+                        }
+                        label={
+                          <Typography variant="caption" fontWeight={700}>
+                            {isEn ? 'Active' : 'Aktif'}
+                          </Typography>
+                        }
+                      />
+                      {isInstitutionalStaff && onResetStaffPassword && (
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          startIcon={<VpnKeyIcon />}
+                          onClick={() => onResetStaffPassword(u)}
+                        >
+                          {isEn ? 'New temporary password' : 'Yeni geçici şifre üret'}
+                        </Button>
+                      )}
+                    </>
                   ) : (
                     <Chip
                       label={isEn ? 'Only IT Admin (SUPER_ADMIN) can modify this role' : 'Bu yetkili seviyesini yalnızca BİM (SUPER_ADMIN) değiştirebilir'}

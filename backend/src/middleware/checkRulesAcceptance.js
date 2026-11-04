@@ -1,10 +1,13 @@
 import { getServerSession } from "next-auth";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
 import { NextResponse } from "next/server";
 
 export async function checkRulesAcceptance() {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
 
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

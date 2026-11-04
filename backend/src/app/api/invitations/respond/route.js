@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
 import { getIstanbulTimeDetails, parseReservationMinutesUTC } from "@/lib/timeUtils";
 import {
   getActiveReservationRules,
@@ -18,12 +19,14 @@ const INVITATION_TIMEOUT_MS = 30 * 60 * 1000;
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    runReservationLifecycleChecks().catch(() => {});
+    await runReservationLifecycleChecks();
 
     const { participantId, action } = await request.json();
 
@@ -83,7 +86,8 @@ export async function POST(request) {
         data: {
           status: "CANCELLED",
           cancelledAt: new Date(),
-          cancellationReason: "Gönderilen davetiyeler 30 dakika içinde onaylanmadığı için otomatik iptal edildi.",
+          cancellationReason:
+            "Gönderilen davetiyeler 30 dakika içinde onaylanmadığı için otomatik iptal edildi.",
         },
       });
       return NextResponse.json(
@@ -186,7 +190,6 @@ export async function POST(request) {
         }).catch((err) => console.error("Background email error:", err));
       }
     } else if (action === "REJECT") {
-      // Davet reddedildiğinde geriye kalan maksimum potansiyel katılımcı sayısını kontrol et
       const [acceptedCount, pendingCount] = await Promise.all([
         prisma.reservationParticipant.count({
           where: { reservationId: participant.reservationId, status: "ACCEPTED" },

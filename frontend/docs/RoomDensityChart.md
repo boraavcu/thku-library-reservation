@@ -1,32 +1,27 @@
 # Context: RoomDensityChart.jsx
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-`RoomDensityChart.jsx`, kütüphanedeki aktif çalışma odalarının (`R101`–`R104`) bugünkü 24 saatlik dilim üzerinden doluluk yüzdelerini (`occupancyPercent`) ve genel ortalama yoğunluğu (`avgPct`) dikey sütun grafiği olarak görselleştiren analitik bileşendir. Yönetim Panelindeki (`AdminPanel.jsx`) **"Yoğunluk & Doluluk Analizi"** sekmesinde ve A4 PDF faaliyet raporunda kullanılır.
+`frontend/src/components/dashboard/RoomDensityChart.jsx`, kütüphanedeki aktif çalışma odalarının bugünkü 24 saatlik dilim üzerinden doluluk yüzdelerini (`occupancyPercent`) ve genel ortalama yoğunluğu (`avgPct`) dikey sütun grafiği olarak görselleştiren analitik bileşendir. Yönetim Panelindeki (`AdminPanel.jsx` -> `AnalyticsTab.jsx`) **"Yoğunluk & Doluluk Analizi"** sekmesinde ve A4 PDF faaliyet raporunda yer alır.
 
-##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
+## 2. Teknoloji Yığını ve Bağımlılıklar
 
 - **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material/BarChart`)
-- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN`)
+- **Çoklu Dil (i18n):** `react-i18next` (`useTranslation`)
 - **API İstemcisi:** `../../api` (`GET /api/dashboard/room-density`)
 
-##  3. İş Mantığı, Renk Kodlaması ve PDF Yazdırma Uyumluluğu
+## 3. İş Mantığı ve Bileşen Mimarisi
 
-### A. Veri Normalizasyonu ve Ortalama Hesabı
-- Bileşen yüklendiğinde `GET /api/dashboard/room-density` uç noktasından her odanın bugün kaç saat dolu olduğu (`bookedHours`), toplam açık saat (`totalHours: 24`) ve doluluk yüzdesi (`occupancyPercent`) çekilir.
-- Ortalama doluluk yüzdesi (`avgPct`) grafik üzerinde yatay kesikli bir referans çizgisi (`borderTop: '1.5px dashed'`) ve sağ üstte renkli bir özet rozet (`Ort: %X`) olarak gösterilir.
+### A. Veri Normalizasyonu ve Ortalama Referans Çizgisi
+- Bileşen yüklendiğinde `GET /api/dashboard/room-density` uç noktasından PostgreSQL veritabanındaki günlük oda doluluk verilerini (`bookedHours`, `totalHours: 24`, `occupancyPercent`) çeker ve normalize eder.
+- Genel ortalama doluluk yüzdesi (`avgPct`), grafik üzerinde yatay kesikli referans çizgisi (`borderTop: '1.5px dashed'`) ve sağ üst köşede dinamik renkli özet rozet olarak gösterilir.
 
-### B. Dinamik Yoğunluk Renk Eşikleri (`getBarColor`)
-Sütunların ve rozetin rengi doluluk oranına göre otomatik değişir:
-- **Düşük Yoğunluk (`<%40`):** Yeşil (`theme.palette.success.main`)
-- **Orta Yoğunluk (`%40 – %75`):** Turuncu (`theme.palette.warning.main`)
-- **Yüksek Yoğunluk (`>=%75`):** Kırmızı (`theme.palette.error.main`)
+### B. Yoğunluk Renk Eşikleri ve A4 PDF Yazdırma Koruması
+- **`getBarColor(pct)`:** `<%40` düşük yoğunluk için yeşil (`success.main`), `%40–%75` orta yoğunluk için turuncu (`warning.main`) ve `>=%75` yüksek yoğunluk için kırmızı (`error.main`) renk atar.
+- **`@media print` Uyumluluğu:** A4 PDF faaliyet raporu çıktısında grafiğin sayfa ortasında bölünmemesi için `breakInside: 'avoid'` / `pageBreakInside: 'avoid'` ve sütun renklerinin korunması için `printColorAdjust: 'exact'` kuralları tanımlanmıştır.
 
-### C. A4 PDF Faaliyet Raporu Koruması (`@media print`)
-- Yönetim panelinden PDF çıktısı alınırken grafiğin sayfa geçişinde ortadan ikiye bölünmemesi için ana `<Card>` bileşeninde `breakInside: 'avoid'` ve `pageBreakInside: 'avoid'` kuralları tanımlanmıştır.
-- Ayrıca tarayıcının yazdırma sırasında sütun renklerini silmemesi için `WebkitPrintColorAdjust: 'exact'` ve `printColorAdjust: 'exact'` özellikleri eklenmiştir.
+## 4. Bağlantılı Olduğu Dosyalar
 
-##  4. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
-
-- `backend/src/app/api/dashboard/room-density/route.js` (`GET`)
+- `frontend/src/components/admin/AnalyticsTab.jsx`
 - `frontend/src/pages/AdminPanel.jsx`
+- `backend/src/app/api/dashboard/room-density/route.js` (`GET`)

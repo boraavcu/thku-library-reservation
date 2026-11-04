@@ -13,14 +13,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
     restart: always
 
-  # Redis Servisi
-  redis:
-    image: redis:latest
-    container_name: redis_reservation_db
-
-    ports:
-      - "6379:6379"
-    restart: always
+  # Redis kaldırıldı. Doğrulama kodu, cihaz kilidi ve yoklama PostgreSQL tablolarında durur.
+  # Bu dosya yalnızca yerel PostgreSQL içindir; üretim veritabanı ayrıdır.
 
 volumes:
   postgres_data:

@@ -2,7 +2,9 @@ import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Container, Typography, Card, Tabs, Tab, Button, Chip,
-  CircularProgress, Alert, Snackbar
+  CircularProgress, Alert, Snackbar, Dialog, DialogTitle,
+  DialogContent, DialogActions, TextField, Select, MenuItem,
+  IconButton, Tooltip
 } from '@mui/material';
 import { useTheme, alpha } from '@mui/material/styles';
 import { useSession } from 'next-auth/react';
@@ -10,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import api from '../api';
+import { isReservationEnded } from '../utils/dateUtils';
 
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import MeetingRoomIcon from '@mui/icons-material/MeetingRoom';
@@ -21,6 +24,9 @@ import QrCodeScannerIcon from '@mui/icons-material/QrCodeScanner';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import SchoolIcon from '@mui/icons-material/School';
 import PictureAsPdfIcon from '@mui/icons-material/PictureAsPdf';
+import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
+import DeleteSweepIcon from '@mui/icons-material/DeleteSweep';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 
 import { THKU_LOGO_URL, STAFF_ROLES } from '../components/admin/adminConstants';
 import AnalyticsTab from '../components/admin/AnalyticsTab';
@@ -52,6 +58,24 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [snack, setSnack] = useState({ open: false, message: '', severity: 'success' });
 
+  const [createUserDialog, setCreateUserDialog] = useState({
+    open: false,
+    email: '',
+    fullName: '',
+    role: 'LIBRARIAN',
+    department: '',
+    phone: '',
+  });
+  const [credentialDialog, setCredentialDialog] = useState({
+    open: false,
+    title: '',
+    email: '',
+    temporaryPassword: '',
+    expiresAt: null,
+    emailQueued: false,
+  });
+  const [purgeDialog, setPurgeDialog] = useState(false);
+
   const userRole = session?.user?.role;
   const isLibrarianOnly = userRole === 'LIBRARIAN';
   const isAdminOrSuper = ['ADMIN', 'SUPER_ADMIN'].includes(userRole);
@@ -82,10 +106,47 @@ export default function AdminPanel() {
       }
       setSnack({ open: true, message: finalMsg, severity: 'success' });
       fetchData();
+      return res.data;
     } catch (err) {
       setSnack({
         open: true,
         message: err.response?.data?.error || 'İşlem başarısız oldu.',
+        severity: 'error',
+      });
+      return null;
+    }
+  };
+
+  const handleOpenCreateStaff = () => {
+    setCreateUserDialog({
+      open: true,
+      email: '',
+      fullName: '',
+      role: 'LIBRARIAN',
+      department: '',
+      phone: '',
+    });
+  };
+
+  const handleResetStaffPassword = async (staffUser) => {
+    try {
+      const res = await api.post('/admin/manage', {
+        action: 'USER_MODERATION',
+        payload: { targetUserId: staffUser.id, modType: 'RESET_STAFF_TEMP_PASSWORD' },
+      });
+      setCredentialDialog({
+        open: true,
+        title: isEn ? 'New one-time temporary password' : 'Yeni tek seferlik geçici şifre',
+        email: staffUser.email,
+        temporaryPassword: res.data.temporaryPassword || '',
+        expiresAt: res.data.expiresAt,
+        emailQueued: Boolean(res.data.emailQueued),
+      });
+      fetchData();
+    } catch (err) {
+      setSnack({
+        open: true,
+        message: err.response?.data?.error || (isEn ? 'Could not reset password.' : 'Şifre sıfırlanamadı.'),
         severity: 'error',
       });
     }
@@ -106,8 +167,8 @@ export default function AdminPanel() {
     );
   }
 
-  const activeBookingsCount = (data.reservations || []).filter((r) =>
-    ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status)
+  const activeBookingsCount = (data.reservations || []).filter(
+    (r) => ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status) && !isReservationEnded(r)
   ).length;
   const totalStudentsCount = (data.users || []).filter((u) => u.role === 'STUDENT').length;
   const bannedUsersCount = (data.users || []).filter((u) => u.isBanned).length;
@@ -212,6 +273,30 @@ export default function AdminPanel() {
             >
               {isEn ? 'Activity Report (PDF)' : 'Faaliyet Raporu (PDF)'}
             </Button>
+
+            {isAdminOrSuper && (
+              <Button
+                variant="outlined"
+                color="success"
+                startIcon={<PersonAddAlt1Icon />}
+                onClick={handleOpenCreateStaff}
+                sx={{ borderRadius: 2, fontWeight: 700, flex: { xs: 1, sm: 'none' } }}
+              >
+                {isEn ? 'Add Staff (@thk.edu.tr)' : 'Personel Ekle (@thk.edu.tr)'}
+              </Button>
+            )}
+
+            {isAdminOrSuper && (
+              <Button
+                variant="outlined"
+                color="warning"
+                startIcon={<DeleteSweepIcon />}
+                onClick={() => setPurgeDialog(true)}
+                sx={{ borderRadius: 2, fontWeight: 700, flex: { xs: 1, sm: 'none' } }}
+              >
+                {isEn ? 'Purge demo data' : 'Demo verilerini temizle'}
+              </Button>
+            )}
 
             {isLibrarianOnly && (
               <Button
@@ -357,11 +442,14 @@ export default function AdminPanel() {
             {tab === 4 && (
               <UsersTab
                 users={data.users}
+                currentUserId={session?.user?.id}
                 userRole={userRole}
                 isAdminOrSuper={isAdminOrSuper}
                 isSuperAdmin={isSuperAdmin}
                 isEn={isEn}
                 runAction={runAction}
+                onOpenCreateStaff={handleOpenCreateStaff}
+                onResetStaffPassword={handleResetStaffPassword}
               />
             )}
 
@@ -378,6 +466,239 @@ export default function AdminPanel() {
           </Box>
         </Card>
       </Container>
+
+      {/* Kurumsal Personel (@thk.edu.tr) Ekleme Penceresi */}
+      <Dialog
+        open={createUserDialog.open}
+        onClose={() => setCreateUserDialog((d) => ({ ...d, open: false }))}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>
+          {isEn ? 'Add Institutional Staff (@thk.edu.tr)' : 'Kurumsal Personel Ekle (@thk.edu.tr)'}
+        </DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+          <Typography variant="body2" color="text.secondary">
+            {isEn
+              ? 'Only @thk.edu.tr addresses (not @stu.thk.edu.tr). A one-time temporary password (48 hours) is generated, shown once on screen, and queued by email when SMTP is configured. The user must set a new password immediately after first login.'
+              : 'Yalnızca @thk.edu.tr (öğrenci @stu.thk.edu.tr hariç) adresleri eklenebilir. 48 saat geçerli tek seferlik şifre üretilir, ekranda bir kez gösterilir ve SMTP ayarlıysa e-posta kuyruğuna alınır. Kullanıcı ilk girişten sonra kalıcı şifresini belirlemek zorundadır.'}
+          </Typography>
+          <TextField
+            size="small"
+            fullWidth
+            label={isEn ? 'Institutional Email' : 'Kurumsal E-posta'}
+            placeholder="ornek@thk.edu.tr"
+            value={createUserDialog.email}
+            onChange={(e) => setCreateUserDialog((d) => ({ ...d, email: e.target.value }))}
+          />
+          <TextField
+            size="small"
+            fullWidth
+            label={isEn ? 'Full Name' : 'Ad Soyad'}
+            value={createUserDialog.fullName}
+            onChange={(e) => setCreateUserDialog((d) => ({ ...d, fullName: e.target.value }))}
+          />
+          <Select
+            size="small"
+            fullWidth
+            value={createUserDialog.role}
+            onChange={(e) => setCreateUserDialog((d) => ({ ...d, role: e.target.value }))}
+          >
+            <MenuItem value="LIBRARIAN">
+              {isEn ? 'LIBRARIAN (Library Staff)' : 'LIBRARIAN (Kütüphane Görevlisi)'}
+            </MenuItem>
+            {isSuperAdmin && (
+              <MenuItem value="ADMIN">
+                {isEn ? 'ADMIN (Library Director)' : 'ADMIN (Kütüphane Müdürü)'}
+              </MenuItem>
+            )}
+            {isSuperAdmin && (
+              <MenuItem value="SUPER_ADMIN">
+                {isEn ? 'SUPER_ADMIN (IT Admin)' : 'SUPER_ADMIN (BİM Yöneticisi)'}
+              </MenuItem>
+            )}
+          </Select>
+          <TextField
+            size="small"
+            fullWidth
+            label={isEn ? 'Department / Unit (optional)' : 'Birim / Bölüm (isteğe bağlı)'}
+            value={createUserDialog.department}
+            onChange={(e) => setCreateUserDialog((d) => ({ ...d, department: e.target.value }))}
+          />
+          <TextField
+            size="small"
+            fullWidth
+            label={isEn ? 'Phone (optional)' : 'Telefon (isteğe bağlı)'}
+            value={createUserDialog.phone}
+            onChange={(e) => setCreateUserDialog((d) => ({ ...d, phone: e.target.value }))}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setCreateUserDialog((d) => ({ ...d, open: false }))} color="inherit">
+            {isEn ? 'Cancel' : 'Vazgeç'}
+          </Button>
+          <Button
+            variant="contained"
+            color="primary"
+            disabled={!createUserDialog.email.trim()}
+            onClick={async () => {
+              try {
+                const res = await api.post('/admin/manage', {
+                  action: 'CREATE_USER',
+                  payload: {
+                    email: createUserDialog.email,
+                    fullName: createUserDialog.fullName,
+                    role: createUserDialog.role,
+                    department: createUserDialog.department,
+                    phone: createUserDialog.phone,
+                  },
+                });
+                setCreateUserDialog((d) => ({ ...d, open: false }));
+                setCredentialDialog({
+                  open: true,
+                  title: isEn ? 'One-time temporary password' : 'Tek seferlik geçici şifre',
+                  email: res.data.user?.email || createUserDialog.email.trim().toLowerCase(),
+                  temporaryPassword: res.data.temporaryPassword || '',
+                  expiresAt: res.data.expiresAt,
+                  emailQueued: Boolean(res.data.emailQueued),
+                });
+                fetchData();
+              } catch (err) {
+                setSnack({
+                  open: true,
+                  message: err.response?.data?.error || (isEn ? 'Operation failed.' : 'İşlem başarısız oldu.'),
+                  severity: 'error',
+                });
+              }
+            }}
+          >
+            {isEn ? 'Save & Generate Password' : 'Kaydet ve Şifre Üret'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Tek Seferlik Geçici Şifre Gösterim Penceresi */}
+      <Dialog
+        open={credentialDialog.open}
+        onClose={() => setCredentialDialog((d) => ({ ...d, open: false, temporaryPassword: '' }))}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>{credentialDialog.title}</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, pt: '12px !important' }}>
+          <Alert severity="warning">
+            {isEn
+              ? 'This password is shown only once. Copy it now and share it with the user over a secure channel if email is not delivered.'
+              : 'Bu şifre yalnızca bu pencerede bir kez gösterilir. E-posta ulaşmazsa güvenli kanaldan iletmek için şimdi kopyalayın.'}
+          </Alert>
+          <Typography variant="body2">
+            <strong>{isEn ? 'Account:' : 'Hesap:'}</strong> {credentialDialog.email}
+          </Typography>
+          <Box
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              bgcolor: 'action.hover',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 1,
+              fontFamily: 'monospace',
+              fontSize: '1.05rem',
+              fontWeight: 800,
+              wordBreak: 'break-all',
+            }}
+          >
+            <span>{credentialDialog.temporaryPassword}</span>
+            <Tooltip title={isEn ? 'Copy' : 'Kopyala'}>
+              <IconButton
+                size="small"
+                onClick={() => {
+                  if (credentialDialog.temporaryPassword) {
+                    navigator.clipboard?.writeText(credentialDialog.temporaryPassword);
+                    setSnack({
+                      open: true,
+                      message: isEn ? 'Copied to clipboard.' : 'Panoya kopyalandı.',
+                      severity: 'info',
+                    });
+                  }
+                }}
+              >
+                <ContentCopyIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+          {credentialDialog.expiresAt && (
+            <Typography variant="caption" color="text.secondary">
+              {isEn ? 'Valid until:' : 'Geçerlilik sonu:'}{' '}
+              {new Date(credentialDialog.expiresAt).toLocaleString(isEn ? 'en-GB' : 'tr-TR')}
+            </Typography>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            {credentialDialog.emailQueued
+              ? isEn
+                ? 'An email with the same temporary password has been queued.'
+                : 'Aynı geçici şifreyi içeren e-posta gönderim kuyruğuna eklendi.'
+              : isEn
+              ? 'Email could not be queued; please deliver the password manually.'
+              : 'E-posta kuyruğa eklenemedi; şifreyi kullanıcıya güvenli biçimde iletin.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button
+            variant="contained"
+            onClick={() => setCredentialDialog((d) => ({ ...d, open: false, temporaryPassword: '' }))}
+          >
+            {isEn ? 'I saved it, close' : 'Kaydettim, kapat'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Demo Verilerini Temizleme Onay Penceresi */}
+      <Dialog open={purgeDialog} onClose={() => setPurgeDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 800, color: 'warning.main' }}>
+          {isEn ? 'Purge demo and seed test data?' : 'Demo ve örnek test verileri silinsin mi?'}
+        </DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, pt: '12px !important' }}>
+          <Typography variant="body2">
+            {isEn
+              ? 'This removes @demo.local accounts, known seed test emails, their reservations, and seeded sample announcements. Rooms, rules, agreements, and real institutional accounts are kept.'
+              : '@demo.local uzantılı hesaplar, bilinen örnek test e-postaları, bunlara bağlı rezervasyonlar ve örnek duyuru kayıtları kalıcı olarak silinir. Odalar, kurallar, sözleşme ve gerçek kurumsal hesaplar korunur.'}
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setPurgeDialog(false)} color="inherit">
+            {isEn ? 'Cancel' : 'Vazgeç'}
+          </Button>
+          <Button
+            variant="contained"
+            color="warning"
+            onClick={async () => {
+              setPurgeDialog(false);
+              try {
+                const res = await api.post('/admin/manage', { action: 'PURGE_TEST_DATA', payload: {} });
+                const s = res.data?.summary;
+                setSnack({
+                  open: true,
+                  message: isEn
+                    ? `Removed ${s?.deletedUsers ?? 0} demo users and ${s?.deletedReservations ?? 0} reservations.`
+                    : `${s?.deletedUsers ?? 0} demo kullanıcı ve ${s?.deletedReservations ?? 0} rezervasyon temizlendi.`,
+                  severity: 'success',
+                });
+                fetchData();
+              } catch (err) {
+                setSnack({
+                  open: true,
+                  message: err.response?.data?.error || (isEn ? 'Purge failed.' : 'Temizleme başarısız.'),
+                  severity: 'error',
+                });
+              }
+            }}
+          >
+            {isEn ? 'Yes, purge' : 'Evet, temizle'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Box sx={{ '@media print': { display: 'none' } }}>
         <Footer />

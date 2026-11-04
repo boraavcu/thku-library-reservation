@@ -6,11 +6,12 @@ import App from './App.jsx'
 import theme from './theme' 
 import './i18n' 
 import { SessionProvider } from "next-auth/react"
+import { AUTH_BASE } from './runtimePaths'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <SessionProvider basePath="/api/auth">
-      <BrowserRouter>
+    <SessionProvider basePath={AUTH_BASE}>
+      <BrowserRouter basename="/randevu">
         <ThemeProvider theme={theme}>
           <CssBaseline />
           <App />

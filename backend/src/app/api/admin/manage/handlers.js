@@ -1,17 +1,27 @@
 import { NextResponse } from "next/server";
 import prisma from "@/lib/db";
-import redis from "@/lib/redis";
-import { getIstanbulTimeDetails, parseReservationMinutesUTC, fmtDateUTC } from "@/lib/timeUtils";
+import { getIstanbulTimeDetails, parseReservationMinutesUTC, fmtDateUTC, fmtTimeRangeUTC } from "@/lib/timeUtils";
 import {
   sendKioskCheckInEmailToStaff,
   sendReservationCancelledEmails,
   sendNoShowWarningEmail,
+  queueSafeEmail,
 } from "@/lib/emailService";
-import { applyNoShowPenaltiesForUsers } from "@/lib/penaltyService";
+import { persistNoShowForUser } from "@/lib/penaltyService";
 import {
   getActiveReservationRules,
   cancelOrRemoveBannedUserReservations,
 } from "@/lib/reservationPolicy";
+import {
+  buildPenaltyTargets,
+  claimNoShowCancellation,
+  claimPenaltyApplied,
+  createPrismaDb,
+  listAttendanceUserIds,
+} from "@/lib/kioskStore";
+import { noStoreJson } from "@/lib/passwordGate";
+import { createStaffAccount, resetStaffTempPassword, setStaffActive } from "@/lib/staffAccount";
+import { purgeDemoTestData } from "@/lib/testData";
 
 function requireAdminOrSuper(currentRole, customMsg) {
   if (!["ADMIN", "SUPER_ADMIN"].includes(currentRole)) {
@@ -24,6 +34,78 @@ function requireAdminOrSuper(currentRole, customMsg) {
 }
 
 export const ADMIN_ACTION_HANDLERS = {
+  async SET_STAFF_ACTIVE({ payload, adminId, currentRole }) {
+    const result = await setStaffActive({
+      adminId,
+      adminRole: currentRole,
+      targetUserId: payload?.targetUserId,
+      isActive: payload?.isActive,
+    });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    return NextResponse.json({ success: true });
+  },
+
+  async PURGE_TEST_DATA({ adminId, currentRole }) {
+    if (currentRole !== "SUPER_ADMIN") {
+      return NextResponse.json(
+        { error: "Test verisini yalnızca SUPER_ADMIN silebilir." },
+        { status: 403 }
+      );
+    }
+    const result = await purgeDemoTestData(adminId);
+    return NextResponse.json({
+      success: true,
+      deletedUsers: result.deletedUsers,
+      deletedReservations: result.deletedReservations,
+    });
+  },
+
+  async CREATE_STAFF_ACCOUNT({ payload, adminId, currentRole }) {
+    if (currentRole !== "SUPER_ADMIN") {
+      return NextResponse.json(
+        { error: "Bu işlem yalnızca SUPER_ADMIN tarafından yapılabilir." },
+        { status: 403 }
+      );
+    }
+    const result = await createStaffAccount({ ...(payload || {}), adminId });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    return noStoreJson(
+      {
+        account: result.account,
+        temporaryPassword: result.temporaryPassword,
+        expiresAt: result.expiresAt,
+        emailDelivery: result.emailDelivery,
+      },
+      result.status
+    );
+  },
+
+  async RESET_STAFF_TEMP_PASSWORD({ payload, adminId, currentRole }) {
+    if (currentRole !== "SUPER_ADMIN") {
+      return NextResponse.json(
+        { error: "Bu işlem yalnızca SUPER_ADMIN tarafından yapılabilir." },
+        { status: 403 }
+      );
+    }
+    const result = await resetStaffTempPassword({ adminId, targetUserId: payload?.targetUserId });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+    return noStoreJson(
+      {
+        account: result.account,
+        temporaryPassword: result.temporaryPassword,
+        expiresAt: result.expiresAt,
+        emailDelivery: result.emailDelivery,
+      },
+      result.status
+    );
+  },
+
   async TOGGLE_ROOM({ payload, adminId }) {
     const { roomId, isActive } = payload;
     const room = await prisma.room.update({
@@ -166,28 +248,48 @@ export const ADMIN_ACTION_HANDLERS = {
     }
 
     if (op === "FORCE_CHECKIN") {
-      await prisma.reservation.update({
-        where: { id: reservationId },
-        data: { status: "CHECKED_IN", checkedInAt: new Date(), checkedInById: adminId },
-      });
       const allMemberIds = [target.user.id, ...target.participants.map((p) => p.user.id)];
-      sendKioskCheckInEmailToStaff(reservationId, allMemberIds).catch(() => {});
-
-      await prisma.adminAction.create({
-        data: {
-          adminId,
-          actionType: "RESERVATION_FORCE_CHECKIN",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          description: `${target.room.roomNumber} odası için görevli tarafından manuel Check-In yapıldı.`,
-        },
+      const outcome = await prisma.$transaction(async (tx) => {
+        await tx.$queryRawUnsafe(
+          `SELECT id FROM reservations WHERE id = $1::uuid FOR UPDATE`,
+          reservationId
+        );
+        for (const userId of allMemberIds) {
+          await tx.kioskAttendance.upsert({
+            where: { reservationId_userId: { reservationId, userId } },
+            update: {},
+            create: { reservationId, userId },
+          });
+        }
+        const transition = await tx.reservation.updateMany({
+          where: { id: reservationId, status: { in: ["PENDING", "CONFIRMED"] } },
+          data: { status: "CHECKED_IN", checkedInAt: new Date(), checkedInById: adminId },
+        });
+        if (transition.count === 1) {
+          await tx.adminAction.create({
+            data: {
+              adminId,
+              actionType: "RESERVATION_FORCE_CHECKIN",
+              targetEntityType: "Reservation",
+              targetEntityId: reservationId,
+              description: `${target.room.roomNumber} odası için görevli tarafından manuel Check-In yapıldı.`,
+            },
+          });
+        }
+        return { transitioned: transition.count === 1 };
       });
+      if (outcome.transitioned) {
+        sendKioskCheckInEmailToStaff(reservationId, allMemberIds).catch(() => {});
+      }
     } else if (op === "EARLY_FINISH") {
-      const { totalMins } = getIstanbulTimeDetails();
+      const { dateStr: todayTrStr, totalMins } = getIstanbulTimeDetails();
+      const resDateStr = new Date(target.reservationDate).toISOString().split("T")[0];
       const { startTotalMins, endTotalMins } = parseReservationMinutesUTC(target);
 
       let newEndTime = target.endTime;
-      if (totalMins < endTotalMins) {
+      if (resDateStr > todayTrStr) {
+        newEndTime = target.startTime;
+      } else if (resDateStr === todayTrStr && totalMins < endTotalMins) {
         const effectiveMins = Math.max(startTotalMins, totalMins);
         const effH = Math.floor(effectiveMins / 60);
         const effM = effectiveMins % 60;
@@ -245,63 +347,119 @@ export const ADMIN_ACTION_HANDLERS = {
         );
       }
 
-      const checkedSetKey = `kiosk:checked_users:${reservationId}`;
-      let checkedUserIds = [];
-      try {
-        checkedUserIds = await redis.smembers(checkedSetKey);
-      } catch {
-        checkedUserIds = [];
-      }
+      const { minParticipants } = await getActiveReservationRules();
+      const roomLabel = `${target.room.roomNumber} (${target.room.name})`;
+      const dateStr = fmtDateUTC(target.reservationDate);
+      const timeRangeStr = fmtTimeRangeUTC(target.startTime, target.endTime);
 
-      const allApprovedUsers = [target.user, ...target.participants.map((p) => p.user)];
-      const absentUsers = allApprovedUsers.filter((u) => !checkedUserIds.includes(u.id));
+      const prepared = await prisma.$transaction(
+        async (tx) => {
+          const db = createPrismaDb(tx);
+          const locked = await db.query(
+            `SELECT status::text AS status, penalty_applied
+             FROM reservations
+             WHERE id = $1::uuid
+             FOR UPDATE`,
+            [reservationId]
+          );
+          if (locked.length === 0) {
+            return { emails: [], autoBannedNames: [], penalizedCount: 0, allPresent: false };
+          }
 
-      if (absentUsers.length === 0) {
+          const memberUsers = [target.user, ...target.participants.map((p) => p.user)];
+          const checkedUserIds = await listAttendanceUserIds(db, reservationId);
+
+          if (checkedUserIds.length >= memberUsers.length) {
+            return { emails: [], autoBannedNames: [], penalizedCount: 0, allPresent: true };
+          }
+
+          const decision = buildPenaltyTargets({
+            checkedUserIds,
+            memberIds: memberUsers.map((user) => user.id),
+            status: locked[0].status,
+            minRequired: minParticipants,
+            penaltyApplied: Boolean(locked[0].penalty_applied),
+          });
+
+          if (decision.action === "skip" || decision.action === "none") {
+            return { emails: [], autoBannedNames: [], penalizedCount: 0, allPresent: false };
+          }
+
+          const claimed =
+            decision.action === "cancel_no_show"
+              ? await claimNoShowCancellation(
+                  db,
+                  reservationId,
+                  `Görevli No-Show: en az ${minParticipants} üye kapı QR onayı vermedi.`
+                )
+              : await claimPenaltyApplied(db, reservationId);
+
+          if (!claimed) {
+            return { emails: [], autoBannedNames: [], penalizedCount: 0, allPresent: false };
+          }
+
+          const emails = [];
+          const autoBannedNames = [];
+          const usersToPenalize = memberUsers.filter((user) =>
+            decision.penalizeUserIds.includes(user.id)
+          );
+          const now = new Date();
+
+          for (const member of usersToPenalize) {
+            const persisted = await persistNoShowForUser(tx, {
+              user: member,
+              reservationId,
+              roomLabel,
+              timeRangeStr,
+              dateStr,
+              description: `${roomLabel} rezervasyonunda kapı QR onayı verilmedi (No-Show Uyarısı).`,
+              todayDateObj: now,
+              now,
+            });
+            if (!persisted) continue;
+            emails.push(persisted.email);
+            if (persisted.shouldBan) autoBannedNames.push(member.email);
+          }
+
+          await tx.adminAction.create({
+            data: {
+              adminId,
+              actionType: "PENALTY_ADDED",
+              targetEntityType: "Reservation",
+              targetEntityId: reservationId,
+              description: `${roomLabel} için kapı QR onayı vermeyen ${usersToPenalize.length} üyeye No-Show uyarısı işlendi.${
+                autoBannedNames.length > 0
+                  ? ` 3/3 uyarı dolduğu için otomatik banlananlar: ${autoBannedNames.join(", ")}`
+                  : ""
+              }`,
+            },
+          });
+
+          return {
+            emails,
+            autoBannedNames,
+            penalizedCount: usersToPenalize.length,
+            allPresent: false,
+          };
+        },
+        { timeout: 20000 }
+      );
+
+      if (prepared.allPresent) {
         return NextResponse.json(
           { error: "Tüm grup üyeleri kapı QR onayını tamamladığı için No-Show uygulanamaz." },
           { status: 400 }
         );
       }
 
-      const { minParticipants } = await getActiveReservationRules();
-
-      await prisma.reservation.update({
-        where: { id: reservationId },
-        data:
-          checkedUserIds.length < minParticipants
-            ? { status: "NO_SHOW", noShow: true, penaltyApplied: true }
-            : { penaltyApplied: true },
-      });
-
-      const roomLabel = `${target.room.roomNumber} (${target.room.name})`;
-      const dateStr = fmtDateUTC(target.reservationDate);
-
-      const { autoBannedEmails, penalizedCount } = await applyNoShowPenaltiesForUsers({
-        usersToPenalize: absentUsers,
-        reservationId,
-        roomLabel,
-        dateStr,
-        writeAuditLog: false,
-      });
-
-      await prisma.adminAction.create({
-        data: {
-          adminId,
-          actionType: "PENALTY_ADDED",
-          targetEntityType: "Reservation",
-          targetEntityId: reservationId,
-          description: `${roomLabel} için kapı QR onayı vermeyen ${penalizedCount} üyeye No-Show uyarısı işlendi.${
-            autoBannedEmails.length > 0
-              ? ` 3/3 uyarı dolduğu için otomatik banlananlar: ${autoBannedEmails.join(", ")}`
-              : ""
-          }`,
-        },
-      });
+      for (const mail of prepared.emails) {
+        await queueSafeEmail(mail);
+      }
 
       return NextResponse.json({
         success: true,
-        autoBannedNames: autoBannedEmails,
-        penalizedCount,
+        autoBannedNames: prepared.autoBannedNames,
+        penalizedCount: prepared.penalizedCount,
       });
     }
 

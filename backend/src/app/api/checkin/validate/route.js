@@ -2,9 +2,15 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
-import redis from "@/lib/redis";
-import { sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
-import { getIstanbulTimeDetails, getReservationKioskWindow } from "@/lib/timeUtils";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
+import { getBrowserCookiePath } from "@/lib/publicPaths";
+import { runReservationLifecycleChecks, sendKioskCheckInEmailToStaff } from "@/lib/lifecycle";
+import { performCheckIn } from "@/lib/kioskStore";
+import {
+  getIstanbulTimeDetails,
+  getReservationKioskWindow,
+  parseReservationMinutesUTC,
+} from "@/lib/timeUtils";
 import {
   MAX_DISTANCE_METERS,
   DEVICE_LOCK_TTL,
@@ -12,7 +18,6 @@ import {
   calculateDistanceMeters,
   verifyCampusNetworkAndVpn,
   checkDeviceLockForReservation,
-  sealDeviceLockForReservation,
 } from "@/lib/kioskSecurity";
 
 const DEFAULT_TOLERANCE_MINUTES = 15;
@@ -20,6 +25,8 @@ const DEFAULT_MIN_CHECKIN_PARTICIPANTS = 2;
 
 export async function POST(request) {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -27,6 +34,8 @@ export async function POST(request) {
   const currentUserId = session.user.id;
 
   try {
+    await runReservationLifecycleChecks();
+
     const signature = getCrossIncognitoSignature(request);
     const body = await request.json();
     const { personalSessionToken, lat, lng } = body;
@@ -36,7 +45,7 @@ export async function POST(request) {
       return NextResponse.json({ error: networkCheck.reason }, { status: 403 });
     }
 
-    if (process.env.ENFORCE_CAMPUS_GPS !== "false") {
+    if (process.env.ENFORCE_CAMPUS_GPS === "true") {
       if (typeof lat !== "number" || typeof lng !== "number") {
         return NextResponse.json(
           { error: "Fiziksel konum doğrulaması için tarayıcı GPS izni gereklidir." },
@@ -104,9 +113,19 @@ export async function POST(request) {
         resDateStr,
         toleranceMinutes
       );
+      const { endTotalMins } = parseReservationMinutesUTC(r);
       const minEpochMins = resDayEpochMins + minAllowed;
       const maxEpochMins = resDayEpochMins + maxAllowed;
-      return nowEpochMins >= minEpochMins && nowEpochMins <= maxEpochMins;
+      const endEpochMins = resDayEpochMins + endTotalMins;
+
+      const isWithinWindow = nowEpochMins >= minEpochMins && nowEpochMins <= maxEpochMins;
+      const isRoomAlreadyCheckedInAndActive =
+        r.status === "CHECKED_IN" &&
+        !r.penaltyApplied &&
+        nowEpochMins >= minEpochMins &&
+        nowEpochMins < endEpochMins;
+
+      return isWithinWindow || isRoomAlreadyCheckedInAndActive;
     });
 
     if (!reservation) {
@@ -118,12 +137,8 @@ export async function POST(request) {
       );
     }
 
-    const { isLockedByAnotherUser, cookieName, keys } = await checkDeviceLockForReservation(
-      request,
-      reservation.id,
-      currentUserId,
-      signature
-    );
+    const { isLockedByAnotherUser, cookieName, locks, presence } =
+      await checkDeviceLockForReservation(request, reservation.id, currentUserId, signature);
 
     if (isLockedByAnotherUser) {
       return NextResponse.json(
@@ -135,75 +150,78 @@ export async function POST(request) {
       );
     }
 
-    const checkedSetKey = `kiosk:checked_users:${reservation.id}`;
-    const existingCheckedUsers = await redis.smembers(checkedSetKey);
+    const totalGroupMembers = 1 + reservation.participants.length;
+    const roomTitle = [reservation.room.roomNumber, reservation.room.name].join(" ");
 
-    // Kullanıcı zaten yoklama vermişse (çift tıklama koruması) hata fırlatmadan mevcut durumu dön
-    if (existingCheckedUsers.includes(currentUserId)) {
-      const totalGroupMembers = 1 + reservation.participants.length;
-      return NextResponse.json({
+    if (presence.checkedUserIds.includes(currentUserId)) {
+      const resJson = NextResponse.json({
         success: true,
         reservationId: reservation.id,
         room: reservation.room,
-        checkedCount: existingCheckedUsers.length,
+        checkedCount: presence.checkedUserIds.length,
         totalCount: totalGroupMembers,
         message: "Yoklama kaydınız zaten alınmış.",
       });
+      resJson.cookies.set(cookieName, currentUserId, {
+        httpOnly: true,
+        sameSite: "lax",
+        maxAge: DEVICE_LOCK_TTL,
+        path: getBrowserCookiePath(),
+      });
+      return resJson;
     }
 
-    const personalOtpKey = `kiosk:personal_otp:${reservation.id}:${currentUserId}`;
-    const expectedToken = await redis.get(personalOtpKey);
+    const outcome = await performCheckIn({
+      reservationId: reservation.id,
+      userId: currentUserId,
+      code: personalSessionToken,
+      locks,
+      minParticipants: minCheckinParticipants,
+      onRecorded: async (tx, result) => {
+        await tx.auditLog.create({
+          data: {
+            userId: currentUserId,
+            action: "RESERVATION_CHECKED_IN",
+            entityType: "Reservation",
+            entityId: reservation.id,
+            newData: {
+              room: roomTitle,
+              checkedInBy: session.user.email,
+              deviceSignature:
+                signature.hwLockHash || signature.headerDeviceId || "cookie-only",
+              progress: `${result.checkedUserIds.length}/${totalGroupMembers}`,
+            },
+          },
+        });
+      },
+    });
 
-    if (!expectedToken || expectedToken !== personalSessionToken) {
+    if (!outcome.ok && outcome.reason === "device_conflict") {
       return NextResponse.json(
-        { error: "Oturum doğrulama anahtarınızın süresi dolmuş. Lütfen kapıdaki QR kodu tekrar okutunuz." },
+        {
+          error:
+            "⛔ Güvenlik İhlali (Gizli Sekme / Aynı Cihaz Algılandı): Bu fiziksel cihazdan bu randevu için zaten başka bir öğrenci onay vermiştir. Her katılımcı kendi cihazından QR okutmak zorundadır!",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (!outcome.ok) {
+      return NextResponse.json(
+        {
+          error:
+            "Oturum doğrulama anahtarınızın süresi dolmuş. Lütfen kapıdaki QR kodu tekrar okutunuz.",
+        },
         { status: 400 }
       );
     }
 
-    await redis.del(personalOtpKey);
-    await sealDeviceLockForReservation(keys, currentUserId);
+    const checkedUserIds = outcome.checkedUserIds;
 
-    await redis.sadd(checkedSetKey, currentUserId);
-    await redis.expire(checkedSetKey, DEVICE_LOCK_TTL);
-
-    const checkedUserIds = await redis.smembers(checkedSetKey);
-    const totalGroupMembers = 1 + reservation.participants.length;
-    const roomTitle = [reservation.room.roomNumber, reservation.room.name].join(" ");
-
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUserId,
-        action: "RESERVATION_CHECKED_IN",
-        entityType: "Reservation",
-        entityId: reservation.id,
-        newData: {
-          room: roomTitle,
-          checkedInBy: session.user.email,
-          deviceSignature: signature.hwLockHash || signature.headerDeviceId || "cookie-only",
-          progress: `${checkedUserIds.length}/${totalGroupMembers}`,
-        },
-      },
-    });
-
-    if (checkedUserIds.length >= minCheckinParticipants) {
-      const transition = await prisma.reservation.updateMany({
-        where: {
-          id: reservation.id,
-          status: "CONFIRMED",
-        },
-        data: {
-          status: "CHECKED_IN",
-          checkedInAt: now,
-          checkedInById: currentUserId,
-        },
-      });
-
-      if (transition.count === 1) {
-        sendKioskCheckInEmailToStaff(reservation.id, checkedUserIds).catch((err) =>
-          console.error("Kiosk staff email error:", err)
-        );
-      }
+    if (outcome.transitioned) {
+      sendKioskCheckInEmailToStaff(reservation.id, checkedUserIds).catch((err) =>
+        console.error("Kiosk staff email error:", err)
+      );
     }
 
     const statusMessage =
@@ -224,7 +242,7 @@ export async function POST(request) {
       httpOnly: true,
       sameSite: "lax",
       maxAge: DEVICE_LOCK_TTL,
-      path: "/",
+      path: getBrowserCookiePath(),
     });
 
     return resJson;

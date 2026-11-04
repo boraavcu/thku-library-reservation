@@ -7,7 +7,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
 import { ITEMS_PER_PAGE } from './adminConstants';
-import { fmtTimeUTC, fmtDateShortUTC } from '../../utils/dateUtils';
+import { fmtTimeUTC, fmtDateShortUTC, isReservationEnded } from '../../utils/dateUtils';
 
 export default function ReservationsTab({ reservations = [], rooms = [], isEn, runAction }) {
   const [resFilter, setResFilter] = useState('ACTIVE');
@@ -19,8 +19,11 @@ export default function ReservationsTab({ reservations = [], rooms = [], isEn, r
     const q = resSearch.trim().toLowerCase();
 
     return reservations.filter((r) => {
-      if (resFilter === 'ACTIVE' && !['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status)) return false;
-      if (resFilter === 'COMPLETED' && r.status !== 'COMPLETED') return false;
+      const ended = isReservationEnded(r);
+      const isOngoingStatus = ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status);
+
+      if (resFilter === 'ACTIVE' && (!isOngoingStatus || ended)) return false;
+      if (resFilter === 'COMPLETED' && !(r.status === 'COMPLETED' || (isOngoingStatus && ended))) return false;
       if (resFilter === 'CANCELLED' && !['CANCELLED', 'NO_SHOW'].includes(r.status)) return false;
 
       if (resRoomFilter !== 'ALL' && r.room?.roomNumber !== resRoomFilter) return false;
@@ -141,7 +144,13 @@ export default function ReservationsTab({ reservations = [], rooms = [], isEn, r
           </Alert>
         ) : (
           paginatedReservations.map((r) => {
-            const hasActions = ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status);
+            const ended = isReservationEnded(r);
+            const displayStatus =
+              ['CONFIRMED', 'CHECKED_IN'].includes(r.status) && ended
+                ? 'COMPLETED'
+                : r.status;
+            const hasActions = ['PENDING', 'CONFIRMED', 'CHECKED_IN'].includes(r.status) && !ended;
+
             return (
               <Paper
                 key={r.id}
@@ -161,14 +170,14 @@ export default function ReservationsTab({ reservations = [], rooms = [], isEn, r
                       {r.room?.roomNumber} - {r.room?.name}
                     </Typography>
                     <Chip
-                      label={r.status}
+                      label={displayStatus}
                       size="small"
                       color={
-                        r.status === 'CHECKED_IN' || r.status === 'CONFIRMED'
+                        displayStatus === 'CHECKED_IN' || displayStatus === 'CONFIRMED'
                           ? 'success'
-                          : r.status === 'COMPLETED'
+                          : displayStatus === 'COMPLETED'
                           ? 'info'
-                          : r.status === 'PENDING'
+                          : displayStatus === 'PENDING'
                           ? 'warning'
                           : 'error'
                       }

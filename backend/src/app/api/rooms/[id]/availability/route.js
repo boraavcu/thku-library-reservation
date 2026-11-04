@@ -2,16 +2,18 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/db";
+import { rejectIfPasswordChangeRequired } from "@/lib/passwordGate";
 import { runReservationLifecycleChecks } from "@/lib/lifecycle";
 
 export async function GET(request, { params }) {
   const session = await getServerSession(authOptions);
+  const passwordChangeBlock = rejectIfPasswordChangeRequired(session);
+  if (passwordChangeBlock) return passwordChangeBlock;
   if (!session?.user?.email) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
-    // Takvim açıldığında süresi dolan davet veya Kiosk randevularını anında temizle
     await runReservationLifecycleChecks();
 
     const resolvedParams = await Promise.resolve(params);
@@ -29,8 +31,6 @@ export async function GET(request, { params }) {
 
     const dateObj = new Date(`${dateStr}T00:00:00Z`);
 
-    // Yalnızca aktif (PENDING, CONFIRMED, CHECKED_IN) randevular odayı dolu gösterir.
-    // CANCELLED, NO_SHOW ve COMPLETED (erken boşaltılan) randevular odayı İŞGAL ETMEZ!
     const reservations = await prisma.reservation.findMany({
       where: {
         roomId,

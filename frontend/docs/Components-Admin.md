@@ -1,39 +1,49 @@
 # Context: frontend/src/components/admin/*
 
-## 1. Bileşenlerin Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-Yönetim Panelinin (`AdminPanel.jsx`) her bir fonksiyonel sekmesini **Tek Sorumluluk Prensibi (SRP)** doğrultusunda bağımsız alt bileşenlere ayırarak kod tekrarını önlemek, okunabilirliği ve bakım kolaylığını maksimize etmek.
+`frontend/src/components/admin/` dizinindeki modüller, Yönetim Panelinin (`AdminPanel.jsx`) her bir fonksiyonel sekmesini **Tek Sorumluluk Prensibi (SRP)** doğrultusunda bağımsız alt bileşenlere ayırarak okunabilirliği, sürdürülebilirliği ve performanslı durum yönetimini sağlar.
 
-## 2. Modüllerin Görev Dağılımı ve İş Mantığı
+## 2. Teknoloji Yığını ve Bağımlılıklar
 
-### A. `adminConstants.js` (Ortak Sabitler ve Formatlayıcılar)
-- `THKU_LOGO_URL`, `STAFF_ROLES` (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`), `ITEMS_PER_PAGE` (`10`) ve 7 dinamik rezervasyon kuralının TR/EN açıklamalarını (`RULE_META`) barındırır.
-- `fmtTimeUTC`, `fmtDateShortUTC`, `fmtDateTimeTR` tarih/saat yardımcıları ile `AuditLog` ve `AdminAction` kayıtlarını insan tarafından okunabilir kartlara dönüştüren `formatAuditLog()` ve `formatAdminAction()` fonksiyonlarını içerir.
+- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`)
+- **Tarih ve Saat Yardımcıları:** `../../utils/dateUtils` (`fmtTimeUTC`, `fmtDateShortUTC`, `getFutureDateStr`, `isReservationEnded`)
+- **Analitik Bileşen:** `../dashboard/RoomDensityChart`
+
+## 3. İş Mantığı ve Bileşen Mimarisi
+
+### A. `adminConstants.js` (Ortak Sabitler ve Denetim Logu Formatlayıcıları)
+- `THKU_LOGO_URL`, `STAFF_ROLES` (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`), `ITEMS_PER_PAGE` (`10`), bölüm çeviri haritası (`DEPT_EN_MAP`) ve 7 dinamik rezervasyon kuralının `TR`/`EN` üst verilerini (`RULE_META`) içerir.
+- `formatAuditLog(log, isEn)` fonksiyonu ile öğrenci ve sistem hareketlerini (`RESERVATION_CREATED`, `RESERVATION_CHECKED_IN`, `AUTO_NO_SHOW_PENALTY`, `AUTO_NO_SHOW_BANNED`, `AUTO_KIOSK_CANCELLED`, `AUTO_TIMEOUT_CANCELLED`, `RESERVATION_EARLY_CHECKOUT` vb.) renkli rozet ve anlaşılır metinlere dönüştürür.
 
 ### B. `AnalyticsTab.jsx` (Sekme 0: Yoğunluk & Doluluk Analizi + A4 PDF Raporu)
-- Gelecek 1 saatlik canlı operasyon radarını (`activeNowRooms`, `upcomingHourReservations`, `upcomingHourStudents`), randevu gerçekleşme/iptal/No-Show oranlarını, `RoomDensityChart` bileşenini, bölüm bazlı dağılımı, oda tercih sıralamasını ve 24 saatlik yoğunluk ısı haritasını (`hourlyHeatmap`) render eder.
-- A4 PDF Faaliyet Raporu yazdırma (`onPrintPdf`) butonunu ve resmi imza alanlarını içerir.
+- Gelecek 1 saatlik canlı operasyon radarını (`activeNowRooms`, `upcomingHourReservations`, `upcomingHourStudents`), gerçekleşme/iptal/No-Show oranlarını, `RoomDensityChart` grafiğini, bölüm bazlı kullanım dağılımını, oda tercih sıralamasını ve 7/24 saatlik yoğunluk ısı haritasını (`hourlyHeatmap`) A4 yazdırma korumalı (`breakInside: 'avoid'`) olarak render eder.
 
 ### C. `ReservationsTab.jsx` (Sekme 1: Canlı Rezervasyon Yönetimi)
-- Rezervasyonları öğrenci adı, e-posta, telefon numarası (`📞`), bölüm, oda ve duruma göre filtreler ve sayfalar (`Pagination`).
-- Görevli ve yöneticilere tek tıkla `FORCE_CHECKIN` (Manuel Check-In), `EARLY_FINISH` (Erken Boşalt), `MARK_NO_SHOW` (No-Show Uyarısı Ver) ve `CANCEL` (İptal Et) aksiyonlarını sunar.
+- Öğrenci adı, e-posta, telefon numarası (`📞`), öğrenci numarası, bölüm, oda kodu ve çalışma amacına göre anlık arama ve sayfalama sunar.
+- **`isReservationEnded(r)` Bitiş Saati Kontrolü:** Veritabanı durumu henüz `CONFIRMED` veya `CHECKED_IN` olsa bile bitiş saati (`Europe/Istanbul`) geçmiş randevuları anında **Tamamlananlar (`COMPLETED`)** filtresine taşır, rozetini `COMPLETED` olarak gösterir ve canlı müdahale butonlarını (`hasActions`) gizler.
+- Aktif randevular için `FORCE_CHECKIN`, `EARLY_FINISH`, `MARK_NO_SHOW` ve `CANCEL` operasyonlarını yürütür.
 
 ### D. `RoomsTab.jsx` (Sekme 2: Oda Yönetimi)
-- Odaların kapasite, açıklama ve aktiflik durumlarını listeler; görevlilere odayı geçici olarak yeni randevuya kapatma (`TOGGLE_ROOM`) imkanı verir.
-- `ADMIN` ve `SUPER_ADMIN` için yeni oda ekleme (`CREATE_ROOM`), düzenleme (`UPDATE_ROOM` modalı) ve silme (`DELETE_ROOM`) işlemlerini yönetir.
+- Mevcut onaylı randevuları iptal etmeden odayı yeni rezervasyonlara açıp kapatma (`TOGGLE_ROOM`) anahtarını sunar.
+- `ADMIN` ve `SUPER_ADMIN` yetkisiyle yeni oda ekleme (`CREATE_ROOM`), düzenleme (`UPDATE_ROOM` penceresi) ve silme (`DELETE_ROOM`) işlemlerini gerçekleştirir.
 
 ### E. `AnnouncementsTab.jsx` (Sekme 3: Duyuru Yayınlama)
-- Türkçe ve İngilizce başlık/içerik ile `LOW`, `MEDIUM`, `HIGH`, `URGENT` önceliklerinde duyuru yayınlama (`CREATE_ANNOUNCEMENT`) ve silme (`DELETE_ANNOUNCEMENT`) işlemlerini kendi yerel form state'i ile yönetir.
+- Türkçe ve isteğe bağlı İngilizce başlık/içerik ile `LOW`, `MEDIUM`, `HIGH`, `URGENT` önceliklerinde duyuru oluşturma (`CREATE_ANNOUNCEMENT`) ve silme (`DELETE_ANNOUNCEMENT`) ekranıdır.
 
-### F. `UsersTab.jsx` (Sekme 4: Öğrenciler, Ban & Yetkiler)
-- Kullanıcıları arama, rol/ban filtreleme ve sayfalama ile listeler; `No-Show: X / 3` rozetlerini gösterir.
-- **Takvimli ve Kalıcı Ban Modalı (`banDialog`):** `+7`, `+14`, `+30`, `+90` gün hızlı seçim çipleri, özel tarih seçici (`DATE`) ve kalıcı (`PERMANENT`) ban seçenekleriyle `BAN_USER`, `UNBAN`, `RESET_PENALTY` ve rol hiyerarşisine uygun `CHANGE_ROLE` aksiyonlarını yürütür.
+### F. `UsersTab.jsx` (Sekme 4: Öğrenciler, Ban & Kurumsal Personel Yönetimi)
+- **Öğrenci Moderasyonu:** Öğrencileri arama ve sayfalama ile listeler; `No-Show: X / 3` sayaçlarını sıfırlama (`RESET_PENALTY`), takvimli (`+7`, `+14`, `+30`, `+90` gün çipleri veya özel tarih) ya da kalıcı (`PERMANENT`) banlama (`BAN_USER`), ban kaldırma (`UNBAN`) ve rol değiştirme (`CHANGE_ROLE`) aksiyonlarını barındırır.
+- **Kurumsal Personel (`@thk.edu.tr`) ve Hesap Durumu Yönetimi:**
+  - Üst bölümdeki **"Personel Ekle (`@thk.edu.tr`)"** butonuyla `AdminPanel.jsx` üzerindeki kurumsal hesap oluşturma modalını tetikler (`onOpenCreateStaff`).
+  - Yetkili kartlarında hesabın **`AKTİF` / `PASİF`** durum rozetini ve **Hesap Durumu (`SET_STAFF_ACTIVE`)** anahtarını (`Switch`) sunar *(yöneticinin kendi hesabını yanlışlıkla pasifleştirmesini önlemek için `u.id === currentUserId` durumunda anahtar kilitlidir)*.
+  - Kurumsal `@thk.edu.tr` (`@stu.thk.edu.tr` hariç) personeli için **"Yeni geçici şifre üret"** butonunu (`onResetStaffPassword`) gösterir ve tek gösterimlik şifre kopyalama akışını başlatır.
 
 ### G. `RulesAndLogsTab.jsx` (Sekme 5: Dinamik Kurallar & 180 Günlük Loglar)
-- 7 dinamik rezervasyon kuralını (`RULE_META`) artırma/azaltma butonlarıyla canlı günceller (`UPDATE_RULE`).
-- 180 günlük Öğrenci & Sistem Logları (`auditLogs`) ile Yönetici Müdahale Loglarını (`adminActions`) iki simetrik sütunda ve sayfalama (`Pagination`) ile sunar.
+- `RULE_META` kapsamındaki 7 sistem kuralını alt/üst sınırlar dahilinde azaltıp artırarak anında günceller (`UPDATE_RULE`).
+- Son 180 günün Öğrenci & Sistem Logları ile Yönetici Müdahale Loglarını (ve 1 yıllık arşiv kayıt sayısını) iki simetrik sütunda arama ve sayfalama desteğiyle listeler.
 
-## 3. Bağlantılı Olduğu Dosyalar
+## 4. Bağlantılı Olduğu Dosyalar
 
 - `frontend/src/pages/AdminPanel.jsx`
+- `frontend/src/utils/dateUtils.js`
 - `backend/src/app/api/admin/manage/route.js` & `handlers.js`

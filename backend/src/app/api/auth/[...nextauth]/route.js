@@ -2,9 +2,25 @@ import NextAuth from "next-auth";
 import AzureADProvider from "next-auth/providers/azure-ad";
 import CredentialsProvider from "next-auth/providers/credentials";
 import prisma from "@/lib/db";
+import { getFrontendBaseUrl } from "@/lib/publicPaths";
+import { beginLoginAttempt, clearLoginAttempts, clientIpFromRequest } from "@/lib/loginRateLimit";
+import {
+  banIsActive,
+  buildMicrosoftProfileUpdate,
+  hashPassword,
+  normalizeEmail,
+  projectSessionUser,
+  temporaryPasswordStillValid,
+  verifyPassword,
+} from "@/lib/staffAuth.mjs";
+
+let dummyHashPromise;
+function dummyPasswordHash() {
+  dummyHashPromise ||= hashPassword("not-a-user-password");
+  return dummyHashPromise;
+}
 
 const STUDENT_EMAIL_REGEX = /^s(\d+)@stu\.thk\.edu\.tr$/i;
-const ALLOWED_DOMAINS = ["@stu.thk.edu.tr", "@thk.edu.tr"];
 
 function extractStudentNumber(email) {
   const match = email?.match(STUDENT_EMAIL_REGEX);
@@ -106,66 +122,119 @@ export const authOptions = {
         email: { label: "Email", type: "text" },
       },
       async authorize(credentials) {
-        const isDemoAllowed =
-          process.env.ENABLE_DEMO_LOGIN === "true" ||
-          (process.env.NODE_ENV !== "production" && process.env.ENABLE_DEMO_LOGIN !== "false");
-
-        if (!isDemoAllowed) {
-          throw new Error("Demo girişi canlı ortamda devre dışı bırakılmıştır.");
+        if (process.env.ENABLE_DEMO_LOGIN === "false") {
+          throw new Error("DemoDevreDisi");
         }
-
         const targetEmail = credentials?.email?.trim().toLowerCase();
-        const selectedDemo = targetEmail ? DEMO_USERS[targetEmail] : null;
+        const selectedDemo = DEMO_USERS[targetEmail] || DEMO_USERS["s250444902@stu.thk.edu.tr"];
 
-        if (!selectedDemo) {
-          throw new Error("Geçersiz demo kullanıcı e-postası.");
+        try {
+          const dbUser = await prisma.user.upsert({
+            where: { email: selectedDemo.email },
+            update: {
+              role: selectedDemo.role,
+              isActive: true,
+              lastLoginAt: new Date(),
+            },
+            create: {
+              email: selectedDemo.email,
+              fullName: selectedDemo.fullName,
+              studentNumber: selectedDemo.studentNumber,
+              department: selectedDemo.department,
+              role: selectedDemo.role,
+              acceptedAgreementVersion: "v1.0",
+              isActive: true,
+              lastLoginAt: new Date(),
+            },
+          });
+
+          if (!dbUser?.isActive) {
+            throw new Error("GirisBasarisiz");
+          }
+
+          return {
+            id: dbUser.id,
+            name: dbUser.fullName,
+            email: dbUser.email,
+            image: dbUser.avatarUrl,
+            role: dbUser.role,
+            studentNumber: dbUser.studentNumber,
+            acceptedAgreementVersion: dbUser.acceptedAgreementVersion,
+          };
+        } catch (error) {
+          if (error?.message === "GirisBasarisiz" || error?.message === "DemoDevreDisi") {
+            throw error;
+          }
+          console.error("Demo girişi veritabanı hatası:", error?.message || error);
+          throw new Error("GirisServis");
         }
+      },
+    }),
 
-        // Eksik demo kullanıcılarını tek sorguda oluştur (grup daveti testleri için)
-        await prisma.user.createMany({
-          data: Object.values(DEMO_USERS).map((demo) => ({
-            email: demo.email,
-            fullName: demo.fullName,
-            studentNumber: demo.studentNumber,
-            department: demo.department,
-            role: demo.role,
-            acceptedAgreementVersion: "v1.0",
-            isActive: true,
-            lastLoginAt: new Date(),
-          })),
-          skipDuplicates: true,
-        });
+    CredentialsProvider({
+      id: "staff-login",
+      name: "Kurumsal giriş",
+      credentials: {
+        email: { label: "E-posta", type: "email" },
+        password: { label: "Şifre", type: "password" },
+      },
+      async authorize(credentials, req) {
+        const email = normalizeEmail(credentials?.email || "");
+        const password = String(credentials?.password || "");
+        const ip = clientIpFromRequest(req);
+        let attempt = { limited: false, buckets: [] };
+        try {
+          attempt = await beginLoginAttempt({ email, ip });
+          if (attempt.limited) throw new Error("CokFazlaDeneme");
+          if (!email || !password) throw new Error("GirisBasarisiz");
 
-        // Yalnızca giriş yapan demo kullanıcısını güncelle ve getir
-        const dbUser = await prisma.user.upsert({
-          where: { email: selectedDemo.email },
-          update: {
-            fullName: selectedDemo.fullName,
-            department: selectedDemo.department,
-            isActive: true,
-            lastLoginAt: new Date(),
-          },
-          create: {
-            email: selectedDemo.email,
-            fullName: selectedDemo.fullName,
-            studentNumber: selectedDemo.studentNumber,
-            department: selectedDemo.department,
-            role: selectedDemo.role,
-            acceptedAgreementVersion: "v1.0",
-            isActive: true,
-            lastLoginAt: new Date(),
-          },
-        });
+          const user = await prisma.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              role: true,
+              isActive: true,
+              isBanned: true,
+              banUntil: true,
+              passwordHash: true,
+              mustChangePassword: true,
+              tempPasswordExpiresAt: true,
+            },
+          });
+          const matches = await verifyPassword(
+            password,
+            user?.passwordHash || (await dummyPasswordHash())
+          );
+          const allowed =
+            Boolean(user?.passwordHash) &&
+            matches &&
+            user.isActive &&
+            !banIsActive(user) &&
+            temporaryPasswordStillValid(user);
 
-        return {
-          id: dbUser.id,
-          name: dbUser.fullName,
-          email: dbUser.email,
-          image: dbUser.avatarUrl,
-          role: dbUser.role,
-          studentNumber: dbUser.studentNumber,
-          acceptedAgreementVersion: dbUser.acceptedAgreementVersion,
-        };
+          if (!allowed) throw new Error("GirisBasarisiz");
+
+          await clearLoginAttempts(attempt.buckets);
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+          });
+
+          return {
+            id: user.id,
+            name: user.fullName,
+            email: user.email,
+            role: user.role,
+          };
+        } catch (error) {
+          if (error?.message === "CokFazlaDeneme" || error?.message === "GirisBasarisiz") {
+            throw error;
+          }
+          console.error("Kurumsal giriş tamamlanamadı.");
+          throw new Error("GirisServis");
+        }
       },
     }),
   ],
@@ -175,33 +244,22 @@ export const authOptions = {
         return false;
       }
 
-      if (account?.provider === "demo-login") {
+      if (account?.provider === "demo-login" || account?.provider === "staff-login") {
         return true;
       }
 
-      const normalizedEmail = user.email.trim().toLowerCase();
-      const isAllowedDomain = ALLOWED_DOMAINS.some((domain) =>
-        normalizedEmail.endsWith(domain)
-      );
-
-      if (!isAllowedDomain) {
-        console.warn(`⛔ Yetkisiz domain giriş denemesi engellendi: ${normalizedEmail}`);
-        return false;
-      }
-
       try {
-        const studentNumber = extractStudentNumber(normalizedEmail);
+        const studentNumber = extractStudentNumber(user.email);
 
-        await prisma.user.upsert({
-          where: { email: normalizedEmail },
-          update: {
-            lastLoginAt: new Date(),
-            avatarUrl: user.image || null,
-            fullName: user.name || "İsimsiz Kullanıcı",
-            ...(studentNumber && { studentNumber }),
-          },
+        const saved = await prisma.user.upsert({
+          where: { email: user.email },
+          update: buildMicrosoftProfileUpdate({
+            name: user.name,
+            image: user.image,
+            studentNumber,
+          }),
           create: {
-            email: normalizedEmail,
+            email: user.email,
             fullName: user.name || "İsimsiz Kullanıcı",
             avatarUrl: user.image || null,
             studentNumber,
@@ -209,9 +267,10 @@ export const authOptions = {
             isActive: true,
             lastLoginAt: new Date(),
           },
+          select: { isActive: true },
         });
 
-        return true;
+        return saved.isActive;
       } catch (error) {
         console.error("❌ KRİTİK HATA (Veritabanı):", error);
         return false;
@@ -219,7 +278,7 @@ export const authOptions = {
     },
 
     async jwt({ token, user, trigger, session }) {
-      const lookupEmail = (user?.email || token?.email)?.trim()?.toLowerCase();
+      const lookupEmail = user?.email || token?.email;
 
       if (lookupEmail) {
         let dbUser = await prisma.user.findUnique({
@@ -229,17 +288,18 @@ export const authOptions = {
             fullName: true,
             role: true,
             studentNumber: true,
-            department: true,
             avatarUrl: true,
             acceptedAgreementVersion: true,
             penaltyPoints: true,
             isBanned: true,
             banUntil: true,
             banReason: true,
+            isActive: true,
+            mustChangePassword: true,
+            sessionVersion: true,
           },
         });
 
-        // Süreli banın tarihi dolduysa otomatik olarak banı aç
         if (dbUser?.isBanned && dbUser.banUntil && new Date(dbUser.banUntil) <= new Date()) {
           dbUser = await prisma.user.update({
             where: { id: dbUser.id },
@@ -249,13 +309,15 @@ export const authOptions = {
               fullName: true,
               role: true,
               studentNumber: true,
-              department: true,
               avatarUrl: true,
               acceptedAgreementVersion: true,
               penaltyPoints: true,
               isBanned: true,
               banUntil: true,
               banReason: true,
+              isActive: true,
+              mustChangePassword: true,
+              sessionVersion: true,
             },
           });
           await prisma.penaltyHistory.updateMany({
@@ -277,7 +339,6 @@ export const authOptions = {
           token.name = dbUser.fullName;
           token.role = dbUser.role;
           token.studentNumber = dbUser.studentNumber;
-          token.department = dbUser.department;
           token.avatarUrl = dbUser.avatarUrl;
           token.acceptedAgreementVersion = dbUser.acceptedAgreementVersion;
           token.penaltyPoints = dbUser.penaltyPoints;
@@ -285,14 +346,39 @@ export const authOptions = {
           token.isBanned = dbUser.isBanned;
           token.banUntil = dbUser.banUntil ? dbUser.banUntil.toISOString() : null;
           token.banReason = dbUser.banReason;
+          token.sessionRevoked = false;
+          token.mustChangePassword = Boolean(dbUser.mustChangePassword);
+          if (dbUser.isActive === false) {
+            token.sessionRevoked = true;
+            token.userId = null;
+            token.role = null;
+            token.mustChangePassword = false;
+          } else if (
+            typeof token.sessionVersion === "number" &&
+            token.sessionVersion !== dbUser.sessionVersion
+          ) {
+            token.sessionRevoked = true;
+            token.userId = null;
+            token.role = null;
+            token.mustChangePassword = false;
+          } else {
+            token.sessionVersion = dbUser.sessionVersion;
+          }
         }
 
         delete token.picture;
         delete token.image;
+        delete token.passwordHash;
+        delete token.tempPasswordExpiresAt;
       }
 
-      if (trigger === "update" && session) {
-        return { ...token, ...session };
+      if (
+        trigger === "update" &&
+        session &&
+        token.userId &&
+        Object.prototype.hasOwnProperty.call(session, "acceptedAgreementVersion")
+      ) {
+        token.acceptedAgreementVersion = session.acceptedAgreementVersion;
       }
 
       return token;
@@ -300,33 +386,75 @@ export const authOptions = {
 
     async session({ session, token }) {
       if (session.user) {
-        session.user.id = token.userId;
-        session.user.name = token.name;
-        session.user.role = token.role;
-        session.user.studentNumber = token.studentNumber;
-        session.user.department = token.department || null;
-        session.user.image = token.avatarUrl;
-        session.user.acceptedAgreementVersion = token.acceptedAgreementVersion;
-        session.user.penaltyPoints = token.penaltyPoints ?? 0;
-        session.user.noShowCount = token.noShowCount ?? 0;
-        session.user.isBanned = Boolean(token.isBanned);
-        session.user.banUntil = token.banUntil || null;
-        session.user.banReason = token.banReason || null;
+        Object.assign(session.user, projectSessionUser(token));
       }
       return session;
     },
 
     async redirect({ url, baseUrl }) {
-      const allowedFrontend = process.env.FRONTEND_URL || "http://localhost:5173";
+      const allowedFrontend = getFrontendBaseUrl();
       if (url.startsWith(allowedFrontend)) return url;
       if (url.startsWith("/")) return `${allowedFrontend}${url}`;
-      return baseUrl;
+      if (url.startsWith(baseUrl)) return allowedFrontend;
+      return allowedFrontend;
     },
   },
   session: {
     strategy: "jwt",
   },
+  pages: {
+    signIn:
+      process.env.NODE_ENV === "production"
+        ? "/randevu/"
+        : `${process.env.FRONTEND_URL || "http://localhost:5173"}/randevu/`,
+    error:
+      process.env.NODE_ENV === "production"
+        ? "/randevu/"
+        : `${process.env.FRONTEND_URL || "http://localhost:5173"}/randevu/`,
+  },
   secret: process.env.NEXTAUTH_SECRET,
+  ...(process.env.NODE_ENV === "production"
+    ? {
+        cookies: {
+          sessionToken: {
+            name: "__Secure-next-auth.session-token",
+            options: { httpOnly: true, sameSite: "lax", path: "/randevu", secure: true },
+          },
+          callbackUrl: {
+            name: "__Secure-next-auth.callback-url",
+            options: { httpOnly: true, sameSite: "lax", path: "/randevu", secure: true },
+          },
+          csrfToken: {
+            name: "__Secure-next-auth.csrf-token",
+            options: { httpOnly: true, sameSite: "lax", path: "/randevu", secure: true },
+          },
+          pkceCodeVerifier: {
+            name: "__Secure-next-auth.pkce.code_verifier",
+            options: {
+              httpOnly: true,
+              sameSite: "lax",
+              path: "/randevu",
+              secure: true,
+              maxAge: 60 * 15,
+            },
+          },
+          state: {
+            name: "__Secure-next-auth.state",
+            options: {
+              httpOnly: true,
+              sameSite: "lax",
+              path: "/randevu",
+              secure: true,
+              maxAge: 60 * 15,
+            },
+          },
+          nonce: {
+            name: "__Secure-next-auth.nonce",
+            options: { httpOnly: true, sameSite: "lax", path: "/randevu", secure: true },
+          },
+        },
+      }
+    : {}),
 };
 
 const handler = NextAuth(authOptions);

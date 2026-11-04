@@ -1,6 +1,7 @@
 import prisma from "@/lib/db";
 import nodemailer from "nodemailer";
 import { fmtTimeUTC, fmtDateUTC, escapeHtml } from "@/lib/timeUtils";
+import { createPrismaDb, listAttendanceUserIds } from "@/lib/kioskStore";
 
 const THKU_LOGO_URL = "https://upload.wikimedia.org/wikipedia/tr/4/4f/T%C3%BCrk_Hava_Kurumu_%C3%9Cniversitesi_logo.png";
 export const ALLOWED_DIRECTOR_EMAIL = process.env.DIRECTOR_EMAIL || "boraa-35@hotmail.com";
@@ -544,7 +545,7 @@ export async function sendReservationCancelledEmails({
   }
 }
 
-export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds = []) {
+export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds = null) {
   try {
     const res = await prisma.reservation.findUnique({
       where: { id: reservationId },
@@ -560,13 +561,17 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds
 
     if (!res) return;
 
+    const effectiveCheckedUserIds = Array.isArray(checkedUserIds)
+      ? checkedUserIds
+      : await listAttendanceUserIds(createPrismaDb(prisma), reservationId);
+
     const dateStr = fmtDateUTC(res.reservationDate);
     const timeStr = `${fmtTimeUTC(res.startTime)} - ${fmtTimeUTC(res.endTime)}`;
     const roomLabel = `${res.room.roomNumber} - ${res.room.name}`;
     const allMembers = [res.user, ...res.participants.map((p) => p.user)];
 
     const formattedCheckInList = allMembers.map((m) => {
-      const hasVerified = checkedUserIds.includes(m.id);
+      const hasVerified = effectiveCheckedUserIds.includes(m.id);
       return `<strong>${escapeHtml(m.fullName)}</strong> (${escapeHtml(m.email)}) — <span style="color:${
         hasVerified ? "#15803D" : "#D97706"
       }; font-weight:700;">${hasVerified ? "Kapı QR Onayladı ✓" : "Bekleniyor..."}</span>`;
@@ -582,7 +587,7 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds
       details: [
         { label: "Çalışma Odası", value: roomLabel },
         { label: "Tarih & Saat", value: `${dateStr} | ${timeStr}` },
-        { label: "Kiosk Yoklama Durumu", value: `${checkedUserIds.length} / ${allMembers.length} Öğrenci Onayladı` },
+        { label: "Kiosk Yoklama Durumu", value: `${effectiveCheckedUserIds.length} / ${allMembers.length} Öğrenci Onayladı` },
         { label: "Çalışma Amacı", value: res.purpose || "Grup Çalışması" },
       ],
       participantsTitle: "Katılımcı Yoklama Listesi",
@@ -601,6 +606,57 @@ export async function sendKioskCheckInEmailToStaff(reservationId, checkedUserIds
   }
 }
 
+export function composeNoShowWarning({
+  user,
+  activeNoShowCount,
+  roomLabel,
+  dateStr,
+  isBanned,
+  banUntilDate,
+}) {
+  const remainingRights = Math.max(0, 3 - activeNoShowCount);
+  const banUntilFormatted = banUntilDate
+    ? new Date(banUntilDate).toLocaleDateString("tr-TR")
+    : "Kalıcı (Süresiz)";
+
+  const subject = isBanned
+    ? `THKÜ Kütüphane - 3/3 Uyarı Sonucu Rezervasyon Yasağı (Ban) Bildirimi`
+    : `THKÜ Kütüphane - Rezervasyon Gelmeme (No-Show) Uyarısı (${activeNoShowCount}/3)`;
+
+  const body = isBanned
+    ? `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz tespit edilmiştir. 3/3 uyarı hakkınızı doldurduğunuz için hesabınız ${banUntilFormatted} tarihine kadar rezervasyonlara kapatılmıştır.`
+    : `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gitmediğiniz tespit edilmiştir. Mevcut Uyarı: ${activeNoShowCount}/3, Kalan Hak: ${remainingRights}.`;
+
+  const htmlBody = buildCorporateEmailHtml({
+    badgeText: isBanned ? "HESAP ASKIYA ALINDI (3/3)" : `NO-SHOW UYARISI (${activeNoShowCount}/3)`,
+    badgeColor: "#B91C1C",
+    badgeBg: "#FEE2E2",
+    title: isBanned
+      ? "Çalışma Odası Rezervasyon Yetkiniz Askıya Alındı"
+      : "Rezervasyona Gelmeme (No-Show) Uyarısı",
+    greeting: `Sayın ${user.fullName},`,
+    leadText: isBanned
+      ? `${escapeHtml(dateStr)} tarihli ${escapeHtml(roomLabel)} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir. Dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız rezervasyonlara kapatılmıştır.`
+      : `${escapeHtml(dateStr)} tarihli ${escapeHtml(roomLabel)} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir.`,
+    details: [
+      { label: "İlgili Oda", value: roomLabel },
+      { label: "Rezervasyon Tarihi", value: dateStr },
+      { label: "Mevcut Uyarı Sayınız", value: `${activeNoShowCount} / 3` },
+      {
+        label: isBanned ? "Yasak Bitiş Tarihi" : "Kalan Uyarı Hakkınız",
+        value: isBanned ? banUntilFormatted : `${remainingRights} Hak`,
+      },
+    ],
+    rulesTitle: "Disiplin ve Ceza Politikası",
+    rulesList: [
+      "Onaylanan randevulara başlangıç saatinde kapı QR kodu okutularak giriş yapılması zorunludur.",
+      "3 kez No-Show uyarısı alan kullanıcıların hesapları 30 gün boyunca rezervasyonlara kapatılır.",
+    ],
+  });
+
+  return { subject, body, htmlBody };
+}
+
 export async function sendNoShowWarningEmail({
   user,
   activeNoShowCount,
@@ -610,44 +666,13 @@ export async function sendNoShowWarningEmail({
   banUntilDate,
 }) {
   try {
-    const remainingRights = Math.max(0, 3 - activeNoShowCount);
-    const banUntilFormatted = banUntilDate
-      ? new Date(banUntilDate).toLocaleDateString("tr-TR")
-      : "Kalıcı (Süresiz)";
-
-    const subject = isBanned
-      ? `THKÜ Kütüphane - 3/3 Uyarı Sonucu Rezervasyon Yasağı (Ban) Bildirimi`
-      : `THKÜ Kütüphane - Rezervasyon Gelmeme (No-Show) Uyarısı (${activeNoShowCount}/3)`;
-
-    const body = isBanned
-      ? `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gelmediğiniz tespit edilmiştir. 3/3 uyarı hakkınızı doldurduğunuz için hesabınız ${banUntilFormatted} tarihine kadar rezervasyonlara kapatılmıştır.`
-      : `Sayın ${user.fullName},\n\n${dateStr} tarihli ${roomLabel} çalışma odası rezervasyonunuza gitmediğiniz tespit edilmiştir. Mevcut Uyarı: ${activeNoShowCount}/3, Kalan Hak: ${remainingRights}.`;
-
-    const htmlBody = buildCorporateEmailHtml({
-      badgeText: isBanned ? "HESAP ASKIYA ALINDI (3/3)" : `NO-SHOW UYARISI (${activeNoShowCount}/3)`,
-      badgeColor: "#B91C1C",
-      badgeBg: "#FEE2E2",
-      title: isBanned
-        ? "Çalışma Odası Rezervasyon Yetkiniz Askıya Alındı"
-        : "Rezervasyona Gelmeme (No-Show) Uyarısı",
-      greeting: `Sayın ${user.fullName},`,
-      leadText: isBanned
-        ? `${escapeHtml(dateStr)} tarihli ${escapeHtml(roomLabel)} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir. Dönem içindeki 3/3 uyarı hakkınızı doldurduğunuz için hesabınız rezervasyonlara kapatılmıştır.`
-        : `${escapeHtml(dateStr)} tarihli ${escapeHtml(roomLabel)} çalışma odası rezervasyonunuza gelmediğiniz (Kapı QR onayı vermediğiniz) tespit edilmiştir.`,
-      details: [
-        { label: "İlgili Oda", value: roomLabel },
-        { label: "Rezervasyon Tarihi", value: dateStr },
-        { label: "Mevcut Uyarı Sayınız", value: `${activeNoShowCount} / 3` },
-        {
-          label: isBanned ? "Yasak Bitiş Tarihi" : "Kalan Uyarı Hakkınız",
-          value: isBanned ? banUntilFormatted : `${remainingRights} Hak`,
-        },
-      ],
-      rulesTitle: "Disiplin ve Ceza Politikası",
-      rulesList: [
-        "Onaylanan randevulara başlangıç saatinde kapı QR kodu okutularak giriş yapılması zorunludur.",
-        "3 kez No-Show uyarısı alan kullanıcıların hesapları 30 gün boyunca rezervasyonlara kapatılır.",
-      ],
+    const { subject, body, htmlBody } = composeNoShowWarning({
+      user,
+      activeNoShowCount,
+      roomLabel,
+      dateStr,
+      isBanned,
+      banUntilDate,
     });
 
     await queueSafeEmail({

@@ -1,31 +1,32 @@
 # Context: RulesAcceptance.jsx
 
-##  1. Dosyanın Amacı ve Mimari Rolü
+## 1. Dosyanın Amacı ve Mimari Rolü
 
-`RulesAcceptance.jsx`, sisteme ilk kez giriş yapan (veya yeni bir sözleşme versiyonu yayınlandığında henüz onaylamamış olan) kullanıcıların kütüphane kullanım kurallarını okuyup onayladığı zorunlu sözleşme ekranıdır . Ayrıca sözleşmeyi daha önce onaylamış kullanıcıların üst menüden veya alt bilgiden (`Footer`) `/rules?view=true` bağlantısıyla kuralları tekrar okuyabilmesini sağlar.
+`frontend/src/pages/RulesAcceptance.jsx`, sisteme ilk kez giriş yapan veya yeni bir kullanıcı sözleşmesi versiyonu yayınlandığında henüz onay vermemiş kullanıcıların kütüphane kurallarını okuyup onayladığı zorunlu sözleşme ekranıdır. Aynı zamanda sözleşmeyi daha önce onaylamış kullanıcıların `/rules?view=true` üzerinden kuralları salt okunur olarak incelemesini sağlar.
 
-##  2. Teknoloji Yığını ve Bağımlılıklar (Tech Stack & Dependencies)
+## 2. Teknoloji Yığını ve Bağımlılıklar
 
-- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`) 
-- **Kimlik Doğrulama:** `next-auth/react` (`useSession`, `signOut`) 
-- **Yönlendirme:** `react-router-dom` (`useNavigate`, `useSearchParams`) 
-- **Çoklu Dil (i18n):** `react-i18next` (`TR` ve `EN`) 
-- **API İstemcisi:** `../api` (`GET /api/agreements/active` ve `POST /api/user/accept-rules`) 
+- **UI Framework:** Material-UI (`@mui/material`, `@mui/icons-material`)
+- **Kimlik Doğrulama:** `next-auth/react` (`useSession`, `signOut`)
+- **Yönlendirme & Alt Dizin Yolları:** `react-router-dom` (`useNavigate`, `useSearchParams`), `../runtimePaths` (`appAbsoluteUrl`, `appPath`)
+- **Çoklu Dil (i18n):** `react-i18next` (`useTranslation`)
+- **API & Bileşenler:** `../api` (`GET /api/agreements/active`, `POST /api/user/accept-rules`), `../components/Footer`
 
-##  3. İş Mantığı, Çoklu Dil Ayrıştırıcısı ve Rol Yönlendirmesi
+## 3. İş Mantığı ve Bileşen Mimarisi
 
 ### A. 6 Maddelik Sözleşme Ayrıştırıcısı (`parseRules` & `ENGLISH_RULES`)
-- Sayfa açıldığında `GET /api/agreements/active` uç noktasından veritabanındaki aktif sözleşme (`v1.0`) çekilir .
-- Dil Türkçe (`tr`) ise veritabanından gelen metin `parseRules(agreement.content)` fonksiyonu ile numaralı maddelere (`1.` – `6.`) ayrıştırılarak şık numaralı kartlar halinde ekrana basılır.
-- Dil İngilizce (`en`) ise `ENGLISH_RULES` sabiti devreye girerek aynı 6 kuralın (*Maksimum 3 Saat ve Gece-Gündüz Kuralı*, *±15 Dk Kapı QR ve 3/3 No-Show Ban Kuralı*, *Sessizlik Kuralları*, *Ekipman Sorumluluğu*, *2-8 Kişi Grup Çalışması ve 30 Dk Davet Süresi*, *1 Gün İleri Tarih ve Erken Boşaltma*) tam İngilizce karşılıklarını sunar.
+- `GET /api/agreements/active` uç noktasından PostgreSQL veritabanındaki aktif sözleşme metni ve versiyonu çekilir.
+- Türkçe dilinde veritabanından gelen metin `parseRules(agreement?.content)` ile numaralı maddelere ayrıştırılır; İngilizce dilinde ise `ENGLISH_RULES` sabiti üzerinden aynı 6 temel kural (*Maksimum Süre & Gece-Gündüz Kuralı*, *±15 Dk Kapı QR & 3/3 No-Show Cezası*, *Sessizlik*, *Ekipman Sorumluluğu*, *2–8 Kişi Grup Çalışması & 30 Dk Davet Süresi*, *İleri Tarih & Erken Boşaltma*) sunulur.
 
-### B. Onay Modu vs. Görüntüleme Modu (`alreadyAccepted || isViewMode`)
-- Kullanıcı sözleşmeyi henüz onaylamamışsa alt sabit barda onay kutucuğu (`Checkbox`), *"Çıkış Yap"* butonu ve *"Anlıyorum ve Devam Et"* butonu gösterilir . Onaylandığında `POST /api/user/accept-rules` çağrılır ve NextAuth oturumu `update({ acceptedAgreementVersion })` ile anında güncellenir.
-- Kullanıcı sözleşmeyi zaten onaylamışsa (`alreadyAccepted`) veya `?view=true` ile girdiyse, alt barda yeşil bir onay rozeti (`✓ Bu sözleşmeyi (v1.0) onayladınız`) ve geri dönüş butonu gösterilir .
-- **Rol Bazlı Geri Dönüş (`homePath`):** `isStaff` (`LIBRARIAN`, `ADMIN`, `SUPER_ADMIN`) için geri dönüş adresi `/admin` (*Yönetim Merkezine Dön*), öğrenciler için `/dashboard` (*Ana Sayfa*) olarak dinamik belirlenir.
+### B. Sözleşme Onayı, `/randevu` Alt Dizin Uyumu ve Kiosk Dönüşü
+- Kullanıcı sözleşmeyi onayladığında (`handleContinue`), `POST /api/user/accept-rules` çağrılır ve `update({ acceptedAgreementVersion: res.data.acceptedVersion })` ile oturum güncellenir.
+- **Kiosk Kapı QR Dönüşü ve `appPath` Yönlendirmesi:** Eğer öğrenci sisteme ilk kez kapıdaki QR kodu okutarak girdiyse, `sessionStorage` içindeki `thku_kiosk_return_door` değeri okunarak hedef adres `/kiosk?door=...` olarak belirlenir (aksi halde yetkililer için `/admin`, öğrenciler için `/dashboard`); ardından `window.location.href = appPath(nextPath)` ile `/randevu` alt dizinine tam uyumlu yönlendirme yapılır.
+- Çıkış butonu (`handleLogout`), `signOut({ callbackUrl: appAbsoluteUrl('/') })` ile kullanıcıyı güvenli biçimde `/randevu/` giriş ekranına döndürür.
 
-##  4. Bağlantılı Olduğu Dosyalar ve API Uç Noktaları
+## 4. Bağlantılı Olduğu Dosyalar
 
-- `backend/src/app/api/agreements/active/route.js` (`GET`) 
-- `backend/src/app/api/user/accept-rules/route.js` (`POST`) 
-- `backend/src/middleware/checkRulesAcceptance.js` 
+- `frontend/src/runtimePaths.js` (`appPath`, `appAbsoluteUrl`)
+- `frontend/src/App.jsx` (`rulesRejected` dinleyicisi ve `/rules` rotası)
+- `frontend/src/components/Footer.jsx`
+- `backend/src/app/api/agreements/active/route.js` (`GET`)
+- `backend/src/app/api/user/accept-rules/route.js` (`POST`)

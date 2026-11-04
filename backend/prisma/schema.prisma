@@ -25,6 +25,10 @@ model User {
   banReason                 String?                  @map("ban_reason")
   lastLoginAt               DateTime?                @map("last_login_at") @db.Timestamp(6)
   lastLoginIp               String?                  @map("last_login_ip") @db.Inet
+  passwordHash              String?                  @map("password_hash")
+  mustChangePassword        Boolean                  @default(false) @map("must_change_password")
+  tempPasswordExpiresAt     DateTime?                @map("temp_password_expires_at") @db.Timestamp(6)
+  sessionVersion            Int                      @default(0) @map("session_version")
   createdAt                 DateTime                 @default(now()) @map("created_at") @db.Timestamp(6)
   updatedAt                 DateTime                 @updatedAt @map("updated_at") @db.Timestamp(6)
   accounts                  Account[]
@@ -37,6 +41,9 @@ model User {
   checkedInReservations     Reservation[]            @relation("CheckedInBy")
   reservations              Reservation[]
   sessions                  Session[]
+  kioskCheckInCodes         KioskCheckInCode[]
+  kioskDeviceLocks          KioskDeviceLock[]
+  kioskAttendances          KioskAttendance[]
 
   @@index([studentNumber])
   @@index([email])
@@ -118,6 +125,9 @@ model Reservation {
   updatedAt          DateTime                 @updatedAt @map("updated_at") @db.Timestamp(6)
   penaltyHistory     PenaltyHistory[]
   participants       ReservationParticipant[]
+  kioskCheckInCodes  KioskCheckInCode[]
+  kioskDeviceLocks   KioskDeviceLock[]
+  kioskAttendances   KioskAttendance[]
   checkedInBy        User?                    @relation("CheckedInBy", fields: [checkedInById], references: [id])
   room               Room                     @relation(fields: [roomId], references: [id], onDelete: Cascade)
   user               User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -141,6 +151,56 @@ model ReservationParticipant {
 
   @@unique([reservationId, userId])
   @@map("reservation_participants")
+}
+
+/// Kişiye ve rezervasyona özel kapı doğrulama kodu. 600 saniye geçerlidir ve tek kullanımlıktır.
+/// Süresi dolmuş veya tüketilmiş satırlar sorguda geçersizdir; yoklama kaydını silmez.
+model KioskCheckInCode {
+  id            String      @id @default(uuid()) @db.Uuid
+  reservationId String      @map("reservation_id") @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  code          String      @db.VarChar(64)
+  expiresAt     DateTime    @map("expires_at") @db.Timestamp(6)
+  consumedAt    DateTime?   @map("consumed_at") @db.Timestamp(6)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamp(6)
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reservationId, userId])
+  @@index([expiresAt])
+  @@map("kiosk_check_in_codes")
+}
+
+/// Aynı fiziksel cihazın bir rezervasyonda ikinci kullanıcıya verilmesini engeller. 14400 saniye.
+model KioskDeviceLock {
+  id            String        @id @default(uuid()) @db.Uuid
+  reservationId String        @map("reservation_id") @db.Uuid
+  lockType      KioskLockType @map("lock_type")
+  lockKey       String        @map("lock_key") @db.VarChar(128)
+  userId        String        @map("user_id") @db.Uuid
+  expiresAt     DateTime      @map("expires_at") @db.Timestamp(6)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(6)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamp(6)
+  reservation   Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reservationId, lockType, lockKey])
+  @@index([reservationId, expiresAt])
+  @@map("kiosk_device_locks")
+}
+
+/// Kalıcı kapı yoklaması. Kodun veya cihaz kilidinin süresi dolunca silinmez.
+model KioskAttendance {
+  id            String      @id @default(uuid()) @db.Uuid
+  reservationId String      @map("reservation_id") @db.Uuid
+  userId        String      @map("user_id") @db.Uuid
+  checkedInAt   DateTime    @default(now()) @map("checked_in_at") @db.Timestamp(6)
+  reservation   Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reservationId, userId])
+  @@index([reservationId])
+  @@map("kiosk_attendances")
 }
 
 model PenaltyHistory {
@@ -391,6 +451,16 @@ model EmailQueue {
   @@map("email_queue")
 }
 
+model AuthRateLimit {
+  id          String   @id @default(uuid()) @db.Uuid
+  bucket      String   @unique @db.VarChar(128)
+  failures    Int      @default(0)
+  windowStart DateTime @default(now()) @map("window_start") @db.Timestamp(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(6)
+
+  @@map("auth_rate_limits")
+}
+
 enum UserRole {
   STUDENT
   ADMIN
@@ -417,6 +487,14 @@ enum ParticipantStatus {
   REJECTED
 
   @@map("participant_status")
+}
+
+enum KioskLockType {
+  DEVICE
+  HARDWARE
+  IP_UA
+
+  @@map("kiosk_lock_type")
 }
 
 enum PenaltyType {
@@ -449,6 +527,8 @@ enum AdminActionType {
   ROOM_DEACTIVATED
   SETTINGS_UPDATED
   USER_ROLE_CHANGED
+  USER_ACCOUNT_CREATED
+  TEMP_PASSWORD_RESET
   BULK_OPERATION
 
   @@map("admin_action_type")

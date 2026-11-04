@@ -69,6 +69,15 @@ function Dashboard() {
     }
     if (userRole === 'LIBRARIAN' && !isStudentView) {
       navigate('/admin', { replace: true });
+      return;
+    }
+    try {
+      const returnDoor = sessionStorage.getItem('thku_kiosk_return_door');
+      if (returnDoor) {
+        navigate(`/kiosk?door=${encodeURIComponent(returnDoor)}`, { replace: true });
+      }
+    } catch {
+      // ignore storage errors
     }
   }, [session, status, navigate]);
 
